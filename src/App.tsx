@@ -19,8 +19,10 @@ const App = () => {
 
 	// const [count, setCount] = useState(0);
 
-	const randomArray = useCallback(async () => {
-		const result: number[] = await invoke('random_array')
+	const style = {backgroundColor: 'pink', width: '10px'};
+
+	const getArray = useCallback(async () => {
+		const result: number[] = await invoke('get_array')
 		const el = document.getElementById('output')
 		if (!el) return
 		if (count >= 44) {
@@ -35,7 +37,7 @@ const App = () => {
 	}, [])
 
 	useEffect(() => {
-		setInterval(randomArray, 1000 / 44)
+		// setInterval(getArray, 1000 / 1)
 	})
   // useEffect(() => {
     // invoke('increment_counter', { delta: 0 }).then((result) => setCounter(result as number))
@@ -45,7 +47,7 @@ const App = () => {
     <div>
    		<button onClick={increment}>increment</button>
 			<button onClick={reset}>reset</button>
-			<button onClick={randomArray}>random array</button>
+			<button onClick={getArray}>random array</button>
 			<div id="output"></div>
 			{counter}
     </div>
