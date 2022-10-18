@@ -4,54 +4,42 @@
 )]
 
 extern crate coreaudio;
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
-
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::macos_helpers::{audio_unit_from_device_id, get_default_device_id};
 use coreaudio::audio_unit::render_callback::{self, data};
 use coreaudio::audio_unit::{Element, SampleFormat, Scope, StreamFormat};
 use coreaudio::sys::*;
+use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 use rand::Rng;
 use std::sync::atomic::AtomicI64;
 use tauri::State;
+
+struct Storage {
+    store: Arc<Mutex<Vec<f32>>>,
+}
 
 const SAMPLE_RATE: f64 = 44100.0;
 
 type S = f32;
 const SAMPLE_FORMAT: SampleFormat = SampleFormat::F32;
 
-// #[tauri::command]
-// fn increment_counter(state: State<AtomicI64>) -> Result<i64, String> {
-//     let mut n = 0;
-//     let mut rng = rand::thread_rng();
-//     for _i in 0..1_000_000 {
-//         let r = rng.gen();
-//         if r {
-//             n += 1;
-//         }
-//     }
-//     Ok(state.fetch_add(n, Ordering::SeqCst) + n)
-// }
-
 #[tauri::command]
-// fn get_array(state: State<Vec<f32>>) -> Result<Vec<f32>, String> {
-fn get_array(state: State<&Arc<Mutex<Vec<f32>>>>) -> Result<Vec<f32>, String> {
-    // xxx clear_samples = true;
-    // let mut newvec = samples.clone().to_vec();
-    // state;
-    if let Ok(mut x) = state.lock() {
-        return Ok(x.to_vec());
+fn get_array(state: State<Storage>) -> Result<Vec<f32>, String> {
+    if let Ok(mut x) = state.store.lock() {
+        let res = x.to_vec();
+        x.clear();
+        return Ok(res);
     } else {
-        return Err("get_array failed".to_string());
+        return Err("get_array failed.".into());
     }
 }
 
 fn main() -> Result<(), coreaudio::Error> {
-    // let mut samples = Arc::new(Vec::new());
-    let mut clear_samples: Arc<bool> = Arc::new(false);
-
     let mut input_audio_unit =
         audio_unit_from_device_id(get_default_device_id(true).unwrap(), true)?;
     let mut output_audio_unit =
@@ -118,6 +106,12 @@ fn main() -> Result<(), coreaudio::Error> {
     let mut counter: i32 = 0;
     let mut rng = rand::thread_rng();
 
+    let state = Storage {
+        store: Default::default(),
+    };
+
+    let state_arc_clone = state.store.clone();
+
     input_audio_unit.set_input_callback(move |args| {
         let Args {
             num_frames,
@@ -147,23 +141,23 @@ fn main() -> Result<(), coreaudio::Error> {
         let buffer_right = consumer_right.lock().unwrap();
         let mut buffers = vec![buffer_left, buffer_right];
 
-        // let mut samples: Arc<Vec<f32>> = Arc::clone(&samples);
+        if let Ok(mut state_vec) = state_arc_clone.lock() {
+            for i in 0..num_frames {
+                // Default other channels to copy value from first channel as a fallback
+                let zero: S = 0 as S;
+                let f: S = *buffers[0].front().unwrap_or(&zero);
+                for (ch, channel) in data.channels_mut().enumerate() {
+                    let sample: S = buffers[ch].pop_front().unwrap_or(f);
+                    channel[i] = sample * 12.0;
+                    state_vec.push(sample.abs() + 1.0);
 
-        for i in 0..num_frames {
-            // Default other channels to copy value from first channel as a fallback
-            let zero: S = 0 as S;
-            let f: S = *buffers[0].front().unwrap_or(&zero);
-            for (ch, channel) in data.channels_mut().enumerate() {
-                let sample: S = buffers[ch].pop_front().unwrap_or(f);
-                channel[i] = sample * 2.0;
-                // samples.push(sample);
-
-                if counter < 100 {
-                    channel[i] += rng.gen::<f32>() * 0.3;
-                }
-                counter += 1;
-                if counter >= 22050 {
-                    counter = 0;
+                    if counter < 100 {
+                        channel[i] += rng.gen::<f32>() * 0.3;
+                    }
+                    counter += 1;
+                    if counter >= 22050 {
+                        counter = 0;
+                    }
                 }
             }
         }
@@ -171,18 +165,8 @@ fn main() -> Result<(), coreaudio::Error> {
     })?;
     output_audio_unit.start()?;
 
-    println!("after audio code, going to launch tauri");
-
-    // let state_thing = AtomicI64::from(5);
-
-    let real_vec = vec![[1, 2, 3]];
-    // let state = Arc::new(Mutex::new(real_vec));
-
     tauri::Builder::default()
-        // .manage(AtomicI64::from(5))
-        // .manage(&state)
-        .manage(Arc::new(Mutex::new(real_vec)))
-        // .manage(Vec::new<u32>())
+        .manage(state)
         .invoke_handler(tauri::generate_handler![get_array,])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
