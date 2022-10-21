@@ -32,7 +32,7 @@
       "identifier": "com.vogler.dev",
       "longDescription": "",
       "macOS": {
-        "entitlements": "Entitlements.plist",
+        "entitlements": "./Entitlements.plist",
         "exceptionDomain": "",
         "frameworks": [],
         "providerShortName": null,

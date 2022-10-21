@@ -29,13 +29,13 @@ type S = f32;
 const SAMPLE_FORMAT: SampleFormat = SampleFormat::F32;
 
 #[tauri::command]
-fn get_array(state: State<Storage>) -> Result<Vec<f32>, String> {
-    if let Ok(mut x) = state.store.lock() {
-        let res = x.to_vec();
-        x.clear();
+fn get_samples(state: State<Storage>) -> Result<Vec<f32>, String> {
+    if let Ok(mut samples) = state.store.lock() {
+        let res = samples.to_vec();
+        samples.clear();
         return Ok(res);
     } else {
-        return Err("get_array failed.".into());
+        return Err("get_samples failed.".into());
     }
 }
 
@@ -149,7 +149,7 @@ fn main() -> Result<(), coreaudio::Error> {
                 for (ch, channel) in data.channels_mut().enumerate() {
                     let sample: S = buffers[ch].pop_front().unwrap_or(f);
                     channel[i] = sample * 12.0;
-                    state_vec.push(sample.abs() + 1.0);
+                    state_vec.push(sample.abs());
 
                     if counter < 100 {
                         channel[i] += rng.gen::<f32>() * 0.3;
@@ -167,7 +167,7 @@ fn main() -> Result<(), coreaudio::Error> {
 
     tauri::Builder::default()
         .manage(state)
-        .invoke_handler(tauri::generate_handler![get_array,])
+        .invoke_handler(tauri::generate_handler![get_samples,])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 
