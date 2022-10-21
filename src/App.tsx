@@ -24,7 +24,7 @@ const App = () => {
   const samples = useRef<number[]>([]);
   const getArray = useCallback(async () => {
     const result: number[] = await invoke("get_samples");
-    samples.current.push(...result);
+    samples.current.push(...result.map((time, sample) => sample));
   }, []);
 
   const drawSample = (

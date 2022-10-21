@@ -9,18 +9,13 @@ use coreaudio::audio_unit::macos_helpers::{audio_unit_from_device_id, get_defaul
 use coreaudio::audio_unit::render_callback::{self, data};
 use coreaudio::audio_unit::{Element, SampleFormat, Scope, StreamFormat};
 use coreaudio::sys::*;
-use std::collections::HashMap;
+use rand::Rng;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
-
-use rand::Rng;
-use std::sync::atomic::AtomicI64;
 use tauri::State;
 
 struct Storage {
-    store: Arc<Mutex<Vec<f32>>>,
+    store: Arc<Mutex<Vec<(f32, f32)>>>,
 }
 
 const SAMPLE_RATE: f64 = 44100.0;
@@ -149,7 +144,8 @@ fn main() -> Result<(), coreaudio::Error> {
                 for (ch, channel) in data.channels_mut().enumerate() {
                     let sample: S = buffers[ch].pop_front().unwrap_or(f);
                     channel[i] = sample * 12.0;
-                    state_vec.push(sample.abs());
+                    let beat = 123f32;
+                    state_vec.push((beat, sample.abs()));
 
                     if counter < 100 {
                         channel[i] += rng.gen::<f32>() * 0.3;
