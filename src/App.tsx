@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api";
 import Canvas from "./Canvas";
 
+
 const App = () => {
   useEffect(() => {
     // alert('about to try to get audio');
@@ -16,25 +17,40 @@ const App = () => {
   });
 
   const [bpm, setBpm] = useState(240);
+  const [visualGain, setVisualGain] = useState(10);
+  const [log, setLog] = useState('');
   const CANVAS_HEIGHT = 500;
   const CANVAS_WIDTH = 441;
+  const BEATS_PER_ROW = 4;
+  const PIXELS_PER_BEAT = CANVAS_WIDTH / BEATS_PER_ROW;
   const CANVAS_ROWS = 4;
   const CANVAS_ROW_HEIGHT = CANVAS_HEIGHT / CANVAS_ROWS;
+  const BEATS_PER_WINDOW = BEATS_PER_ROW * CANVAS_ROWS;
   const canvasPos = useRef(0);
-  const samples = useRef<number[]>([]);
-  const getArray = useCallback(async () => {
-    const result: number[] = await invoke("get_samples");
-    samples.current.push(...result.map((time, sample) => sample));
-  }, []);
+  const samples = useRef<[number, number][]>([]);
+  // const getArray = useCallback(async () => {
+  const getArray = async () => {
+    const result: [number, number][] = await invoke("get_samples");
+    samples.current.push(...result);
+  };
+
+  const getCanvasPos = (beat: number): [number, number] => {
+    const b = beat % BEATS_PER_WINDOW;
+    const y = Math.floor(b / BEATS_PER_ROW);
+    const x = b % BEATS_PER_ROW * PIXELS_PER_BEAT;
+    return [x, y];
+  }
 
   const drawSample = (
     ctx: CanvasRenderingContext2D,
-    pos: number,
+    pos: [number, number],
     value: number
   ) => {
-    const _pos = pos % (CANVAS_WIDTH * CANVAS_ROWS);
-    const x = (_pos % CANVAS_WIDTH) * 0.5;
-    const row = Math.floor(_pos / CANVAS_WIDTH);
+    // const _pos = pos % (CANVAS_WIDTH * CANVAS_ROWS);
+    // const x = (_pos % CANVAS_WIDTH) * 0.5;
+    const x = pos[0] / 2;
+    // const row = Math.floor(_pos / CANVAS_WIDTH);
+    const row = pos[1];
     const y = (0.5 + row) * CANVAS_ROW_HEIGHT * 0.5;
     ctx.strokeStyle = "#FFFFFF";
     ctx.beginPath();
@@ -68,11 +84,13 @@ const App = () => {
     const vals = samples.current;
     ctx.lineWidth = 0.5;
     for (let i = 0; i < vals.length; i++) {
-      const p = i + canvasPos.current;
-      max += Math.max(max, vals[i]);
-      if (p % 200 === 0) {
-        drawSample(ctx, p / 200, max * bpm);
+      const [beat, val] = vals[i];
+      const [x, y] = getCanvasPos(beat);
+      max = Math.max(max, val);
+      if (x !== canvasPos.current) {
+        drawSample(ctx, [x, y], max * visualGain / 1000);
       }
+      canvasPos.current = x;
       max = 0;
     }
     canvasPos.current += vals.length;
@@ -81,6 +99,9 @@ const App = () => {
 
   return (
     <div>
+      <div>Is this thing on???</div>
+      <div>{log}</div>
+      <label>bpm</label>
       <input
         onChange={(e) => {
           const g = parseFloat(e.target.value);
@@ -90,6 +111,17 @@ const App = () => {
         value={bpm}
       >
       </input>
+      <label>visual gain</label>
+      <input
+        onChange={(e) => {
+          const g = parseFloat(e.target.value);
+          if (!g) return;
+          setVisualGain(g);
+        }}
+        value={visualGain}
+      >
+      </input>
+
 
       <div id="output"></div>
       <Canvas

@@ -18,13 +18,15 @@ struct Storage {
     store: Arc<Mutex<Vec<(f32, f32)>>>,
 }
 
+struct Bpm(f64);
+
 const SAMPLE_RATE: f64 = 44100.0;
 
 type S = f32;
 const SAMPLE_FORMAT: SampleFormat = SampleFormat::F32;
 
 #[tauri::command]
-fn get_samples(state: State<Storage>) -> Result<Vec<f32>, String> {
+fn get_samples(state: State<Storage>) -> Result<Vec<(f32, f32)>, String> {
     if let Ok(mut samples) = state.store.lock() {
         let res = samples.to_vec();
         samples.clear();
@@ -98,12 +100,16 @@ fn main() -> Result<(), coreaudio::Error> {
 
     type Args = render_callback::Args<data::NonInterleaved<S>>;
 
-    let mut counter: i32 = 0;
+    let mut click_sound_counter: i32 = 0;
     let mut rng = rand::thread_rng();
 
     let state = Storage {
         store: Default::default(),
     };
+    let bpm: Bpm = Bpm(205.0);
+    let beats_per_sample: f64 = bpm.0 / SAMPLE_RATE / 60f64;
+    let mut beat: f64 = 0.0;
+    let mut last_beat: u32 = 0;
 
     let state_arc_clone = state.store.clone();
 
@@ -144,17 +150,18 @@ fn main() -> Result<(), coreaudio::Error> {
                 for (ch, channel) in data.channels_mut().enumerate() {
                     let sample: S = buffers[ch].pop_front().unwrap_or(f);
                     channel[i] = sample * 12.0;
-                    let beat = 123f32;
-                    state_vec.push((beat, sample.abs()));
+                    state_vec.push((beat as f32, sample.abs()));
 
-                    if counter < 100 {
-                        channel[i] += rng.gen::<f32>() * 0.3;
+                    if (beat as u32) > last_beat {
+                        click_sound_counter = 100;
+                        last_beat = beat as u32;
                     }
-                    counter += 1;
-                    if counter >= 22050 {
-                        counter = 0;
+                    if (click_sound_counter > 0) {
+                        channel[i] += rng.gen::<f32>() * 0.3;
+                        click_sound_counter -= 1;
                     }
                 }
+                beat += beats_per_sample;
             }
         }
         Ok(())
