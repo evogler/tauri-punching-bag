@@ -51,24 +51,26 @@ const App = () => {
     const x = pos[0] / 2;
     // const row = Math.floor(_pos / CANVAS_WIDTH);
     const row = pos[1];
-    const y = (0.5 + row) * CANVAS_ROW_HEIGHT * 0.5;
+    const y = (1 + row) * CANVAS_ROW_HEIGHT * 0.5;
     ctx.strokeStyle = "#FFFFFF";
     ctx.beginPath();
-    ctx.moveTo(x, y - CANVAS_ROW_HEIGHT / 2 / 2);
-    ctx.lineTo(x, y + CANVAS_ROW_HEIGHT / 2 / 2);
+    ctx.moveTo(x, y);
+    ctx.lineTo(x, y - (CANVAS_ROW_HEIGHT - 1) / 2 );
     ctx.stroke();
 
     ctx.beginPath();
-    ctx.moveTo(x + 0.5, y - CANVAS_ROW_HEIGHT / 2 / 2);
-    ctx.lineTo(x + 0.5, y + CANVAS_ROW_HEIGHT / 2 / 2);
+    ctx.moveTo(x + 0.5, y);
+    ctx.lineTo(x + 0.5, y - (CANVAS_ROW_HEIGHT - 1) / 2);
     ctx.stroke();
 
     ctx.strokeStyle = "#000000";
     ctx.beginPath();
     ctx.moveTo(x, y); //- value * CANVAS_ROW_HEIGHT / 2 / 2);
-    ctx.lineTo(x, y - (value * CANVAS_ROW_HEIGHT) / 2 / 2);
+    ctx.lineTo(x, y - (value * (CANVAS_ROW_HEIGHT - 1)) / 2);
     ctx.stroke();
   };
+
+	let max = 0;
 
   const draw = (ctx: CanvasRenderingContext2D, frameCount: number) => {
     for (let i = 0; i < 4; i++) {
@@ -80,7 +82,6 @@ const App = () => {
       ctx.stroke();
     }
 
-    let max = 0;
     const vals = samples.current;
     ctx.lineWidth = 0.5;
     for (let i = 0; i < vals.length; i++) {
@@ -88,12 +89,11 @@ const App = () => {
       const [x, y] = getCanvasPos(beat);
       max = Math.max(max, val);
       if (x !== canvasPos.current) {
-        drawSample(ctx, [x, y], max * visualGain / 1000);
+				drawSample(ctx, [x, y], Math.min(1, max * visualGain));
+				max = 0;
+				canvasPos.current = x;
       }
-      canvasPos.current = x;
-      max = 0;
     }
-    canvasPos.current += vals.length;
     samples.current = [];
   };
 
