@@ -1,16 +1,16 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api";
 import Canvas from "./Canvas";
 
 
 const App = () => {
-  useEffect(() => {
-    // alert('about to try to get audio');
-    // navigator.mediaDevices.getUserMedia({
-    //   audio: true,
-    // });
-    // alert('just tried');
-  })
+  // useEffect(() => {
+  //   alert('about to try to get audio');
+  //   navigator.mediaDevices.getUserMedia({
+  //     audio: true,
+  //   });
+  //   alert('just tried');
+  // })
 
   useEffect(() => {
     setInterval(getArray, 1000 / 100);
@@ -18,7 +18,8 @@ const App = () => {
 
   const [bpm, setBpm] = useState(240);
   const [visualGain, setVisualGain] = useState(10);
-  const [log, setLog] = useState('');
+  // const [log, setLog] = useState('');
+  const [log] = useState('');
   const CANVAS_HEIGHT = 500;
   const CANVAS_WIDTH = 441;
   const BEATS_PER_ROW = 4;

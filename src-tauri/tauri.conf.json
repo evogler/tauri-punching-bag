@@ -7,7 +7,7 @@
     "distDir": "../build"
   },
   "package": {
-    "productName": "tauri-counter-app",
+    "productName": "tauri-punching-bag",
     "version": "0.1.0"
   },
   "tauri": {
@@ -32,7 +32,7 @@
       "identifier": "com.vogler.dev",
       "longDescription": "",
       "macOS": {
-        "entitlements": "./Entitlements.plist",
+        "entitlements": "Entitlements.plist",
         "exceptionDomain": "",
         "frameworks": [],
         "providerShortName": null,
@@ -58,7 +58,7 @@
         "fullscreen": false,
         "height": 600,
         "resizable": true,
-        "title": "tauri-counter-app",
+        "title": "Tauri Punching Bag",
         "width": 800
       }
     ]
