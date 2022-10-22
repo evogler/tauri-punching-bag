@@ -4,6 +4,7 @@
 )]
 
 extern crate coreaudio;
+use atomic_float::AtomicF64;
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::macos_helpers::{audio_unit_from_device_id, get_default_device_id};
 use coreaudio::audio_unit::render_callback::{self, data};
@@ -11,6 +12,7 @@ use coreaudio::audio_unit::{Element, SampleFormat, Scope, StreamFormat};
 use coreaudio::sys::*;
 use rand::Rng;
 use std::collections::VecDeque;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use tauri::State;
 
@@ -18,7 +20,7 @@ struct Storage {
     store: Arc<Mutex<Vec<(f32, f32)>>>,
 }
 
-struct Bpm(f64);
+struct Bpm(Arc<AtomicF64>);
 
 const SAMPLE_RATE: f64 = 44100.0;
 
@@ -34,6 +36,11 @@ fn get_samples(state: State<Storage>) -> Result<Vec<(f32, f32)>, String> {
     } else {
         return Err("get_samples failed.".into());
     }
+}
+
+#[tauri::command]
+fn set_bpm(bpm_state: State<Bpm>, bpm: f64) {
+    bpm_state.0.store(bpm, Ordering::Relaxed);
 }
 
 fn main() -> Result<(), coreaudio::Error> {
@@ -106,8 +113,9 @@ fn main() -> Result<(), coreaudio::Error> {
     let state = Storage {
         store: Default::default(),
     };
-    let bpm: Bpm = Bpm(205.0);
-    let beats_per_sample: f64 = bpm.0 / SAMPLE_RATE / 60f64;
+    let bpm_atomic_arc = Arc::new(AtomicF64::new(180.0));
+    let bpm = bpm_atomic_arc.clone();
+    let bpm_state: Bpm = Bpm(bpm_atomic_arc.clone());
     let mut beat: f64 = 0.0;
     let mut last_beat: u32 = 0;
 
@@ -141,6 +149,7 @@ fn main() -> Result<(), coreaudio::Error> {
         let buffer_left = consumer_left.lock().unwrap();
         let buffer_right = consumer_right.lock().unwrap();
         let mut buffers = vec![buffer_left, buffer_right];
+        let beats_per_sample: f64 = bpm.load(Ordering::Relaxed) / SAMPLE_RATE / 60f64;
 
         if let Ok(mut state_vec) = state_arc_clone.lock() {
             for i in 0..num_frames {
@@ -156,7 +165,7 @@ fn main() -> Result<(), coreaudio::Error> {
                         click_sound_counter = 100;
                         last_beat = beat as u32;
                     }
-                    if (click_sound_counter > 0) {
+                    if click_sound_counter > 0 {
                         channel[i] += rng.gen::<f32>() * 0.3;
                         click_sound_counter -= 1;
                     }
@@ -170,7 +179,8 @@ fn main() -> Result<(), coreaudio::Error> {
 
     tauri::Builder::default()
         .manage(state)
-        .invoke_handler(tauri::generate_handler![get_samples,])
+        .manage(bpm_state)
+        .invoke_handler(tauri::generate_handler![get_samples, set_bpm])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 

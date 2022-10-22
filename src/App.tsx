@@ -34,6 +34,10 @@ const App = () => {
     samples.current.push(...result);
   };
 
+	const setRustBpm = (bpm: number) => {
+		invoke("set_bpm", { bpm });
+	}
+
   const getCanvasPos = (beat: number): [number, number] => {
     const b = beat % BEATS_PER_WINDOW;
     const y = Math.floor(b / BEATS_PER_ROW);
@@ -46,13 +50,11 @@ const App = () => {
     pos: [number, number],
     value: number
   ) => {
-    // const _pos = pos % (CANVAS_WIDTH * CANVAS_ROWS);
-    // const x = (_pos % CANVAS_WIDTH) * 0.5;
     const x = pos[0] / 2;
-    // const row = Math.floor(_pos / CANVAS_WIDTH);
     const row = pos[1];
     const y = (1 + row) * CANVAS_ROW_HEIGHT * 0.5;
     ctx.strokeStyle = "#FFFFFF";
+
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(x, y - (CANVAS_ROW_HEIGHT - 1) / 2 );
@@ -104,9 +106,10 @@ const App = () => {
       <label>bpm</label>
       <input
         onChange={(e) => {
-          const g = parseFloat(e.target.value);
-          if (!g) return;
-          setBpm(g);
+          const n = parseFloat(e.target.value);
+          if (!n) return;
+          setBpm(n);
+					setRustBpm(n);
         }}
         value={bpm}
       >
