@@ -113,13 +113,20 @@ fn main() -> Result<(), coreaudio::Error> {
     let state = Storage {
         store: Default::default(),
     };
+    let state_arc_clone = state.store.clone();
+
     let bpm_atomic_arc = Arc::new(AtomicF64::new(180.0));
     let bpm = bpm_atomic_arc.clone();
     let bpm_state: Bpm = Bpm(bpm_atomic_arc.clone());
     let mut beat: f64 = 0.0;
     let mut last_beat: u32 = 0;
 
-    let state_arc_clone = state.store.clone();
+    let beats_to_loop = 16f64;
+    let loop_buffer_size =
+        (beats_to_loop / bpm.load(Ordering::Relaxed) * SAMPLE_RATE * 60.0 * 2.0) as usize;
+    println!("loop_buffer_size: {}", loop_buffer_size);
+    let mut loop_buffer = vec![0f32; loop_buffer_size];
+    let mut loop_buffer_pos = 0;
 
     input_audio_unit.set_input_callback(move |args| {
         let Args {
@@ -158,8 +165,15 @@ fn main() -> Result<(), coreaudio::Error> {
                 let f: S = *buffers[0].front().unwrap_or(&zero);
                 for (ch, channel) in data.channels_mut().enumerate() {
                     let sample: S = buffers[ch].pop_front().unwrap_or(f);
-                    channel[i] = sample * 12.0;
-                    state_vec.push((beat as f32, sample.abs()));
+                    let out = sample + loop_buffer[loop_buffer_pos];
+                    channel[i] = out * 12.0;
+                    loop_buffer[loop_buffer_pos] = sample;
+                    loop_buffer_pos += 1;
+                    if loop_buffer_pos >= loop_buffer_size {
+                        loop_buffer_pos = 0;
+                    }
+
+                    state_vec.push((beat as f32, out.abs()));
 
                     if (beat as u32) > last_beat {
                         click_sound_counter = 100;

@@ -16,12 +16,12 @@ const App = () => {
     setInterval(getArray, 1000 / 100);
   });
 
-  const [bpm, setBpm] = useState(240);
+  const [bpm, setBpm] = useState(180);
   const [visualGain, setVisualGain] = useState(10);
   // const [log, setLog] = useState('');
   const [log] = useState('');
   const CANVAS_HEIGHT = 500;
-  const CANVAS_WIDTH = 441;
+  const CANVAS_WIDTH = 800;
   const BEATS_PER_ROW = 4;
   const PIXELS_PER_BEAT = CANVAS_WIDTH / BEATS_PER_ROW;
   const CANVAS_ROWS = 4;
