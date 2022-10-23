@@ -2,7 +2,6 @@ import { useEffect, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api";
 import Canvas from "./Canvas";
 
-
 const App = () => {
   // useEffect(() => {
   //   alert('about to try to get audio');
@@ -17,9 +16,10 @@ const App = () => {
   });
 
   const [bpm, setBpm] = useState(180);
+	const [beatsToLoop, setBeatsToLoop] = useState(4);
   const [visualGain, setVisualGain] = useState(10);
   // const [log, setLog] = useState('');
-  const [log] = useState('');
+  const [log] = useState("");
   const CANVAS_HEIGHT = 500;
   const CANVAS_WIDTH = 800;
   const BEATS_PER_ROW = 4;
@@ -35,16 +35,29 @@ const App = () => {
     samples.current.push(...result);
   };
 
-	const setRustBpm = (bpm: number) => {
-		invoke("set_bpm", { bpm });
-	}
+  const setRustConfig = ({
+    bpm,
+    beatsToLoop,
+    loopingOn,
+  }: {
+    bpm: number;
+    beatsToLoop: number;
+    loopingOn: boolean;
+  }) => {
+    console.log("calling set_config");
+    invoke("set_config", {
+      bpm,
+      beatstoloop: beatsToLoop,
+      loopingon: loopingOn,
+    });
+  };
 
   const getCanvasPos = (beat: number): [number, number] => {
     const b = beat % BEATS_PER_WINDOW;
     const y = Math.floor(b / BEATS_PER_ROW);
-    const x = b % BEATS_PER_ROW * PIXELS_PER_BEAT;
+    const x = (b % BEATS_PER_ROW) * PIXELS_PER_BEAT;
     return [x, y];
-  }
+  };
 
   const drawSample = (
     ctx: CanvasRenderingContext2D,
@@ -58,7 +71,7 @@ const App = () => {
 
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.lineTo(x, y - (CANVAS_ROW_HEIGHT - 1) / 2 );
+    ctx.lineTo(x, y - (CANVAS_ROW_HEIGHT - 1) / 2);
     ctx.stroke();
 
     ctx.beginPath();
@@ -73,7 +86,7 @@ const App = () => {
     ctx.stroke();
   };
 
-	let max = 0;
+  let max = 0;
 
   const draw = (ctx: CanvasRenderingContext2D, frameCount: number) => {
     for (let i = 0; i < 4; i++) {
@@ -92,9 +105,9 @@ const App = () => {
       const [x, y] = getCanvasPos(beat);
       max = Math.max(max, val);
       if (x !== canvasPos.current) {
-				drawSample(ctx, [x, y], Math.min(1, max * visualGain));
-				max = 0;
-				canvasPos.current = x;
+        drawSample(ctx, [x, y], Math.min(1, max * visualGain));
+        max = 0;
+        canvasPos.current = x;
       }
     }
     samples.current = [];
@@ -102,19 +115,30 @@ const App = () => {
 
   return (
     <div>
-      <div>Is this thing on???</div>
       <div>{log}</div>
+
       <label>bpm</label>
       <input
         onChange={(e) => {
           const n = parseFloat(e.target.value);
           if (!n) return;
           setBpm(n);
-					setRustBpm(n);
+          setRustConfig({ bpm: n, beatsToLoop, loopingOn: true });
         }}
         value={bpm}
-      >
-      </input>
+      ></input>
+
+			<label>loop size</label>
+      <input
+        onChange={(e) => {
+          const n = parseFloat(e.target.value);
+          if (!n) return;
+          setBeatsToLoop(n);
+          setRustConfig({ bpm, beatsToLoop: n, loopingOn: true });
+        }}
+        value={beatsToLoop}
+      ></input>
+
       <label>visual gain</label>
       <input
         onChange={(e) => {
@@ -123,9 +147,7 @@ const App = () => {
           setVisualGain(g);
         }}
         value={visualGain}
-      >
-      </input>
-
+      ></input>
 
       <div id="output"></div>
       <Canvas

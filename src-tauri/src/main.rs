@@ -4,7 +4,6 @@
 )]
 
 extern crate coreaudio;
-use atomic_float::AtomicF64;
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::macos_helpers::{audio_unit_from_device_id, get_default_device_id};
 use coreaudio::audio_unit::render_callback::{self, data};
@@ -12,24 +11,41 @@ use coreaudio::audio_unit::{Element, SampleFormat, Scope, StreamFormat};
 use coreaudio::sys::*;
 use rand::Rng;
 use std::collections::VecDeque;
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
-use tauri::State;
+use tauri::{Manager, State};
 
-struct Storage {
-    store: Arc<Mutex<Vec<(f32, f32)>>>,
+struct SampleOutputBuffer {
+    buffer: Arc<Mutex<Vec<(f32, f32)>>>,
 }
 
-struct Bpm(Arc<AtomicF64>);
+struct LoopBuffer {
+    buffer: Vec<f32>,
+    pos: usize,
+}
+
+struct LoopBufferState(Arc<Mutex<LoopBuffer>>);
+
+#[derive(Clone)]
+struct Config {
+    bpm: f64,
+    beats_to_loop: f64,
+    looping_on: bool,
+}
+struct ConfigState(Arc<Mutex<Config>>);
 
 const SAMPLE_RATE: f64 = 44100.0;
 
 type S = f32;
 const SAMPLE_FORMAT: SampleFormat = SampleFormat::F32;
 
+fn get_loop_buffer_size(config: &Config) -> usize {
+    let res = config.beats_to_loop / config.bpm * SAMPLE_RATE * 60.0 * 2.0;
+    res as usize
+}
+
 #[tauri::command]
-fn get_samples(state: State<Storage>) -> Result<Vec<(f32, f32)>, String> {
-    if let Ok(mut samples) = state.store.lock() {
+fn get_samples(state: State<SampleOutputBuffer>) -> Result<Vec<(f32, f32)>, String> {
+    if let Ok(mut samples) = state.buffer.lock() {
         let res = samples.to_vec();
         samples.clear();
         return Ok(res);
@@ -39,8 +55,28 @@ fn get_samples(state: State<Storage>) -> Result<Vec<(f32, f32)>, String> {
 }
 
 #[tauri::command]
-fn set_bpm(bpm_state: State<Bpm>, bpm: f64) {
-    bpm_state.0.store(bpm, Ordering::Relaxed);
+fn set_config(app_handle: tauri::AppHandle, bpm: f64, beatstoloop: f64, loopingon: bool) {
+    println!("set_config called");
+    let config_state: tauri::State<ConfigState> = app_handle.state();
+    let mut config = config_state.0.lock().unwrap();
+
+    let changed = bpm != config.bpm || beatstoloop != config.beats_to_loop;
+    config.bpm = bpm;
+    config.beats_to_loop = beatstoloop;
+    config.looping_on = loopingon;
+
+    if changed {
+        println!("hi!");
+        // let c = config_state.0.clone();
+        let c = config.clone();
+        let new_buffer_size = get_loop_buffer_size(&c);
+        let loop_buffer_state: tauri::State<LoopBufferState> = app_handle.state();
+        let mut loop_buffer = loop_buffer_state.0.lock().unwrap();
+        // loop_buffer.buffer.clear();
+        loop_buffer.buffer.resize(new_buffer_size, 0.0);
+        loop_buffer.pos = 0;
+        println!("new_buffer_size: {}", new_buffer_size);
+    }
 }
 
 fn main() -> Result<(), coreaudio::Error> {
@@ -110,23 +146,34 @@ fn main() -> Result<(), coreaudio::Error> {
     let mut click_sound_counter: i32 = 0;
     let mut rng = rand::thread_rng();
 
-    let state = Storage {
-        store: Default::default(),
+    let config = Config {
+        bpm: 180.0,
+        beats_to_loop: 8.0,
+        looping_on: true,
     };
-    let state_arc_clone = state.store.clone();
+    let config_state = ConfigState(Arc::new(Mutex::new(config)));
+    let config1 = config_state.0.clone();
 
-    let bpm_atomic_arc = Arc::new(AtomicF64::new(180.0));
-    let bpm = bpm_atomic_arc.clone();
-    let bpm_state: Bpm = Bpm(bpm_atomic_arc.clone());
+    let sample_output_buffer = SampleOutputBuffer {
+        buffer: Default::default(),
+    };
+    let sample_output_buffer_clone = sample_output_buffer.buffer.clone();
+
+    let loop_buffer_size: usize;
+    {
+        let c = config1.lock().unwrap();
+        loop_buffer_size = get_loop_buffer_size(&c);
+    }
+    let loop_buffer = LoopBuffer {
+        buffer: vec![0f32; loop_buffer_size],
+        pos: 0,
+    };
+    let loop_buffer_mutex_arc = Arc::new(Mutex::new(loop_buffer));
+    let loop_buffer_clone = loop_buffer_mutex_arc.clone();
+    let loop_buffer_state = LoopBufferState(loop_buffer_mutex_arc.clone());
+
     let mut beat: f64 = 0.0;
     let mut last_beat: u32 = 0;
-
-    let beats_to_loop = 16f64;
-    let loop_buffer_size =
-        (beats_to_loop / bpm.load(Ordering::Relaxed) * SAMPLE_RATE * 60.0 * 2.0) as usize;
-    println!("loop_buffer_size: {}", loop_buffer_size);
-    let mut loop_buffer = vec![0f32; loop_buffer_size];
-    let mut loop_buffer_pos = 0;
 
     input_audio_unit.set_input_callback(move |args| {
         let Args {
@@ -156,21 +203,24 @@ fn main() -> Result<(), coreaudio::Error> {
         let buffer_left = consumer_left.lock().unwrap();
         let buffer_right = consumer_right.lock().unwrap();
         let mut buffers = vec![buffer_left, buffer_right];
-        let beats_per_sample: f64 = bpm.load(Ordering::Relaxed) / SAMPLE_RATE / 60f64;
+        let config = config1.lock().unwrap();
+        let mut loop_buffer = loop_buffer_clone.lock().unwrap();
+        let beats_per_sample: f64 = config.bpm / SAMPLE_RATE / 60f64;
 
-        if let Ok(mut state_vec) = state_arc_clone.lock() {
+        if let Ok(mut state_vec) = sample_output_buffer_clone.lock() {
             for i in 0..num_frames {
                 // Default other channels to copy value from first channel as a fallback
                 let zero: S = 0 as S;
                 let f: S = *buffers[0].front().unwrap_or(&zero);
                 for (ch, channel) in data.channels_mut().enumerate() {
                     let sample: S = buffers[ch].pop_front().unwrap_or(f);
-                    let out = sample + loop_buffer[loop_buffer_pos];
+                    let out = sample + loop_buffer.buffer[loop_buffer.pos];
                     channel[i] = out * 12.0;
-                    loop_buffer[loop_buffer_pos] = sample;
-                    loop_buffer_pos += 1;
-                    if loop_buffer_pos >= loop_buffer_size {
-                        loop_buffer_pos = 0;
+                    let p = loop_buffer.pos;
+                    loop_buffer.buffer[p] = sample;
+                    loop_buffer.pos += 1;
+                    if loop_buffer.pos >= loop_buffer.buffer.len() {
+                        loop_buffer.pos = 0;
                     }
 
                     state_vec.push((beat as f32, out.abs()));
@@ -192,9 +242,10 @@ fn main() -> Result<(), coreaudio::Error> {
     output_audio_unit.start()?;
 
     tauri::Builder::default()
-        .manage(state)
-        .manage(bpm_state)
-        .invoke_handler(tauri::generate_handler![get_samples, set_bpm])
+        .manage(sample_output_buffer)
+        .manage(config_state)
+        .manage(loop_buffer_state)
+        .invoke_handler(tauri::generate_handler![get_samples, set_config])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 
