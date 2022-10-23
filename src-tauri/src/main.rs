@@ -30,6 +30,9 @@ struct Config {
     bpm: f64,
     beats_to_loop: f64,
     looping_on: bool,
+    click_on: bool,
+    monitor_on: bool,
+    buffer_compensation: usize,
 }
 struct ConfigState(Arc<Mutex<Config>>);
 
@@ -39,8 +42,12 @@ type S = f32;
 const SAMPLE_FORMAT: SampleFormat = SampleFormat::F32;
 
 fn get_loop_buffer_size(config: &Config) -> usize {
-    let res = config.beats_to_loop / config.bpm * SAMPLE_RATE * 60.0 * 2.0;
-    res as usize
+    let buffer_size = 512;
+    let mut res = config.beats_to_loop / config.bpm * SAMPLE_RATE * 60.0 * 2.0;
+    if res < 0.0 {
+        res = 0.0;
+    }
+    (res as usize) - config.buffer_compensation
 }
 
 #[tauri::command]
@@ -55,15 +62,28 @@ fn get_samples(state: State<SampleOutputBuffer>) -> Result<Vec<(f32, f32)>, Stri
 }
 
 #[tauri::command]
-fn set_config(app_handle: tauri::AppHandle, bpm: f64, beatstoloop: f64, loopingon: bool) {
+fn set_config(
+    app_handle: tauri::AppHandle,
+    bpm: f64,
+    beatstoloop: f64,
+    loopingon: bool,
+    clickon: bool,
+    monitoron: bool,
+    buffercompensation: usize,
+) {
     println!("set_config called");
     let config_state: tauri::State<ConfigState> = app_handle.state();
     let mut config = config_state.0.lock().unwrap();
 
-    let changed = bpm != config.bpm || beatstoloop != config.beats_to_loop;
+    let changed = bpm != config.bpm
+        || beatstoloop != config.beats_to_loop
+        || buffercompensation != config.buffer_compensation;
     config.bpm = bpm;
     config.beats_to_loop = beatstoloop;
     config.looping_on = loopingon;
+    config.click_on = clickon;
+    config.monitor_on = monitoron;
+    config.buffer_compensation = buffercompensation;
 
     if changed {
         println!("hi!");
@@ -148,8 +168,11 @@ fn main() -> Result<(), coreaudio::Error> {
 
     let config = Config {
         bpm: 180.0,
-        beats_to_loop: 8.0,
+        beats_to_loop: 4.0,
         looping_on: true,
+        click_on: true,
+        monitor_on: true,
+        buffer_compensation: 1024,
     };
     let config_state = ConfigState(Arc::new(Mutex::new(config)));
     let config1 = config_state.0.clone();
@@ -214,10 +237,20 @@ fn main() -> Result<(), coreaudio::Error> {
                 let f: S = *buffers[0].front().unwrap_or(&zero);
                 for (ch, channel) in data.channels_mut().enumerate() {
                     let sample: S = buffers[ch].pop_front().unwrap_or(f);
-                    let out = sample + loop_buffer.buffer[loop_buffer.pos];
-                    channel[i] = out * 12.0;
+                    let mut out = 0.0;
+                    if config.monitor_on {
+                        out += sample;
+                    }
                     let p = loop_buffer.pos;
-                    loop_buffer.buffer[p] = sample;
+                    if config.looping_on {
+                        out += loop_buffer.buffer[loop_buffer.pos];
+                        loop_buffer.buffer[p] = sample;
+                    } else {
+                        loop_buffer.buffer[p] = 0.0;
+                    }
+
+                    channel[i] = out * 12.0;
+
                     loop_buffer.pos += 1;
                     if loop_buffer.pos >= loop_buffer.buffer.len() {
                         loop_buffer.pos = 0;
@@ -230,8 +263,10 @@ fn main() -> Result<(), coreaudio::Error> {
                         last_beat = beat as u32;
                     }
                     if click_sound_counter > 0 {
-                        channel[i] += rng.gen::<f32>() * 0.3;
                         click_sound_counter -= 1;
+                        if config.click_on {
+                            channel[i] += rng.gen::<f32>() * 0.3;
+                        }
                     }
                 }
                 beat += beats_per_sample;

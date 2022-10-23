@@ -2,6 +2,27 @@ import { useEffect, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api";
 import Canvas from "./Canvas";
 
+interface RustConfig {
+	bpm: number,
+	beatsToLoop: number,
+	clickOn: boolean,
+	loopingOn: boolean,
+	monitorOn: boolean,
+	bufferCompensation: number,
+}
+
+const defaultRustConfig: RustConfig = {
+	bpm: 180,
+	beatsToLoop: 4,
+	clickOn: true,
+	loopingOn: true,
+	monitorOn: true,
+	bufferCompensation: 1024
+};
+
+const lowercaseKeys = <T,>(obj: T extends {} ? T : never) =>
+  Object.fromEntries(Object.entries(obj).map(([k, v]) => [k.toLowerCase(), v]));
+
 const App = () => {
   // useEffect(() => {
   //   alert('about to try to get audio');
@@ -15,9 +36,10 @@ const App = () => {
     setInterval(getArray, 1000 / 100);
   });
 
-  const [bpm, setBpm] = useState(180);
-	const [beatsToLoop, setBeatsToLoop] = useState(4);
+	const [rustConfig, setRustConfig] = useState(defaultRustConfig);
+
   const [visualGain, setVisualGain] = useState(10);
+
   // const [log, setLog] = useState('');
   const [log] = useState("");
   const CANVAS_HEIGHT = 500;
@@ -35,21 +57,11 @@ const App = () => {
     samples.current.push(...result);
   };
 
-  const setRustConfig = ({
-    bpm,
-    beatsToLoop,
-    loopingOn,
-  }: {
-    bpm: number;
-    beatsToLoop: number;
-    loopingOn: boolean;
-  }) => {
+  const updateRustConfig = (args: Partial<RustConfig>) => {
     console.log("calling set_config");
-    invoke("set_config", {
-      bpm,
-      beatstoloop: beatsToLoop,
-      loopingon: loopingOn,
-    });
+		const newRustConfig = {...rustConfig, ...args};
+		setRustConfig(newRustConfig);
+		invoke("set_config", lowercaseKeys(newRustConfig));
   };
 
   const getCanvasPos = (beat: number): [number, number] => {
@@ -120,23 +132,21 @@ const App = () => {
       <label>bpm</label>
       <input
         onChange={(e) => {
-          const n = parseFloat(e.target.value);
-          if (!n) return;
-          setBpm(n);
-          setRustConfig({ bpm: n, beatsToLoop, loopingOn: true });
+          const bpm = parseFloat(e.target.value);
+          if (!bpm) return;
+          updateRustConfig({ bpm });
         }}
-        value={bpm}
+        value={rustConfig.bpm}
       ></input>
 
-			<label>loop size</label>
+      <label>loop size</label>
       <input
         onChange={(e) => {
-          const n = parseFloat(e.target.value);
-          if (!n) return;
-          setBeatsToLoop(n);
-          setRustConfig({ bpm, beatsToLoop: n, loopingOn: true });
+          const beatsToLoop = parseFloat(e.target.value);
+          if (!beatsToLoop) return;
+          updateRustConfig({ beatsToLoop });
         }}
-        value={beatsToLoop}
+        value={rustConfig.beatsToLoop}
       ></input>
 
       <label>visual gain</label>
@@ -148,6 +158,47 @@ const App = () => {
         }}
         value={visualGain}
       ></input>
+
+      <label>click</label>
+      <input
+        onChange={(e) => {
+					const clickOn = !rustConfig.clickOn;
+					updateRustConfig({ clickOn })
+        }}
+        type="checkbox"
+        checked={rustConfig.clickOn}
+      />
+
+      <label>loop</label>
+      <input
+        onChange={(e) => {
+					const loopingOn = !rustConfig.loopingOn;
+					updateRustConfig({ loopingOn })
+        }}
+        type="checkbox"
+        checked={rustConfig.loopingOn}
+      />
+
+			<label>monitor</label>
+      <input
+        onChange={(e) => {
+					const monitorOn = !rustConfig.monitorOn;
+					updateRustConfig({ monitorOn })
+        }}
+        type="checkbox"
+        checked={rustConfig.monitorOn}
+      />
+
+		  <label>buf comp</label>
+      <input
+        onChange={(e) => {
+          const bufferCompensation = parseFloat(e.target.value);
+          if (!bufferCompensation) return;
+          updateRustConfig({ bufferCompensation });
+        }}
+        value={rustConfig.bufferCompensation}
+      ></input>
+
 
       <div id="output"></div>
       <Canvas
