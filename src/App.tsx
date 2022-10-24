@@ -42,8 +42,8 @@ const App = () => {
 
   // const [log, setLog] = useState('');
   const [log] = useState("");
-  const CANVAS_HEIGHT = 500;
-  const CANVAS_WIDTH = 800;
+  const CANVAS_HEIGHT = 1000;
+  const CANVAS_WIDTH = 2000;
   const BEATS_PER_ROW = 4;
   const PIXELS_PER_BEAT = CANVAS_WIDTH / BEATS_PER_ROW;
   const CANVAS_ROWS = 4;
@@ -76,25 +76,25 @@ const App = () => {
     pos: [number, number],
     value: number
   ) => {
-    const x = pos[0] / 2;
+    const x = pos[0];
     const row = pos[1];
-    const y = (1 + row) * CANVAS_ROW_HEIGHT * 0.5;
+    const y = (1 + row) * CANVAS_ROW_HEIGHT;
     ctx.strokeStyle = "#FFFFFF";
 
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.lineTo(x, y - (CANVAS_ROW_HEIGHT - 1) / 2);
+    ctx.lineTo(x, y - (CANVAS_ROW_HEIGHT - 1));
     ctx.stroke();
 
     ctx.beginPath();
-    ctx.moveTo(x + 0.5, y);
-    ctx.lineTo(x + 0.5, y - (CANVAS_ROW_HEIGHT - 1) / 2);
+    ctx.moveTo(x + 1, y);
+    ctx.lineTo(x + 1, y - (CANVAS_ROW_HEIGHT - 1));
     ctx.stroke();
 
     ctx.strokeStyle = "#000000";
     ctx.beginPath();
     ctx.moveTo(x, y); //- value * CANVAS_ROW_HEIGHT / 2 / 2);
-    ctx.lineTo(x, y - (value * (CANVAS_ROW_HEIGHT - 1)) / 2);
+    ctx.lineTo(x, y - (value * (CANVAS_ROW_HEIGHT - 1)));
     ctx.stroke();
   };
 
@@ -102,7 +102,7 @@ const App = () => {
 
   const draw = (ctx: CanvasRenderingContext2D, frameCount: number) => {
     for (let i = 0; i < 4; i++) {
-      let x = (CANVAS_WIDTH / 8) * i;
+      let x = (CANVAS_WIDTH / 4) * i;
       ctx.strokeStyle = "#00880005";
       ctx.beginPath();
       ctx.moveTo(x, 0);
@@ -206,11 +206,11 @@ const App = () => {
         draw={draw}
         style={{
           border: "1px solid black",
-          height: CANVAS_HEIGHT + "px",
-          width: CANVAS_WIDTH + "px",
+          height: CANVAS_HEIGHT / 2 + "px",
+          width: CANVAS_WIDTH / 2 + "px",
         }}
-        width={CANVAS_WIDTH / 2}
-        height={CANVAS_HEIGHT / 2}
+        width={CANVAS_WIDTH}
+        height={CANVAS_HEIGHT}
       />
     </div>
   );

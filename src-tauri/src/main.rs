@@ -105,6 +105,8 @@ fn main() -> Result<(), coreaudio::Error> {
     let mut output_audio_unit =
         audio_unit_from_device_id(get_default_device_id(false).unwrap(), false)?;
 
+    // input_audio_unit.set_property(id, scope, elem, maybe_data);
+
     let format_flag = match SAMPLE_FORMAT {
         SampleFormat::F32 => LinearPcmFlags::IS_FLOAT,
         SampleFormat::I32 | SampleFormat::I16 | SampleFormat::I8 => {
