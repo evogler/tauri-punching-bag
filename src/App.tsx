@@ -84,15 +84,12 @@ const App = () => {
     const y = row * CANVAS_ROW_HEIGHT;
     ctx.strokeStyle = "#FFFFFF";
 
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x, y + (CANVAS_ROW_HEIGHT - 1));
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(x + 1, y);
-    ctx.lineTo(x + 1, y + (CANVAS_ROW_HEIGHT - 1));
-    ctx.stroke();
+    for (let x0 = 0; x0 < 2; x0++) {
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x, y + (CANVAS_ROW_HEIGHT - 1));
+      ctx.stroke();
+    }
 
     ctx.strokeStyle = "#000000";
     ctx.beginPath();
@@ -106,11 +103,11 @@ const App = () => {
   let max = 0;
 
   const draw = (ctx: CanvasRenderingContext2D, frameCount: number) => {
-		const totalLines = BEATS_PER_ROW * rustConfig.subdivision;
+    const totalLines = BEATS_PER_ROW * rustConfig.subdivision;
     for (let i = 0; i < totalLines; i++) {
       let x = (CANVAS_WIDTH / totalLines) * i;
       ctx.strokeStyle = "#00880020";
-      ctx.lineWidth = i % rustConfig.subdivision == 0 ? 4 : 2;
+      ctx.lineWidth = i % rustConfig.subdivision === 0 ? 4 : 2;
       ctx.beginPath();
       ctx.moveTo(x, 0);
       ctx.lineTo(x, CANVAS_HEIGHT);
@@ -133,102 +130,80 @@ const App = () => {
   };
 
   return (
-    <div>
+    <>
       <div>{log}</div>
-
-      <label>bpm</label>
-      <input
-        onChange={(e) => {
-          const bpm = parseFloat(e.target.value);
-          if (!bpm) return;
-          updateRustConfig({ bpm });
-        }}
-        value={rustConfig.bpm}
-      ></input>
-
-      <label>loop size</label>
-      <input
-        onChange={(e) => {
-          const beatsToLoop = parseFloat(e.target.value);
-          if (!beatsToLoop) return;
-          updateRustConfig({ beatsToLoop });
-        }}
-        value={rustConfig.beatsToLoop}
-      ></input>
-
-      <label>subdivision</label>
-      <input
-        onChange={(e) => {
-          const subdivision = parseFloat(e.target.value);
-          if (!subdivision) return;
-          updateRustConfig({ subdivision });
-        }}
-        value={rustConfig.subdivision}
-      ></input>
-
-      <label>visual gain</label>
-      <input
-        onChange={(e) => {
-          const g = parseFloat(e.target.value);
-          if (!g) return;
-          setVisualGain(g);
-        }}
-        value={visualGain}
-      ></input>
-
-      <label>click</label>
-      <input
-        onChange={(e) => {
-          const clickOn = !rustConfig.clickOn;
-          updateRustConfig({ clickOn });
-        }}
-        type="checkbox"
-        checked={rustConfig.clickOn}
-      />
-
-      <label>loop</label>
-      <input
-        onChange={(e) => {
-          const loopingOn = !rustConfig.loopingOn;
-          updateRustConfig({ loopingOn });
-        }}
-        type="checkbox"
-        checked={rustConfig.loopingOn}
-      />
-
-      <label>monitor</label>
-      <input
-        onChange={(e) => {
-          const monitorOn = !rustConfig.monitorOn;
-          updateRustConfig({ monitorOn });
-        }}
-        type="checkbox"
-        checked={rustConfig.monitorOn}
-      />
-
-      <label>buf comp</label>
-      <input
-        onChange={(e) => {
-          const bufferCompensation = parseFloat(e.target.value);
-          if (!bufferCompensation) return;
-          updateRustConfig({ bufferCompensation });
-        }}
-        value={rustConfig.bufferCompensation}
-      ></input>
-
-      <div id="output"></div>
-      <Canvas
-        // @ts-expect-error TODO figure out canvas draw type
-        draw={draw}
-        style={{
-          border: "1px solid black",
-          height: CANVAS_HEIGHT / 2 + "px",
-          width: CANVAS_WIDTH / 2 + "px",
-        }}
-        width={CANVAS_WIDTH}
-        height={CANVAS_HEIGHT}
-      />
-    </div>
+      <div style={{ display: "flex", flexDirection: "row" }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            padding: "8px",
+            gap: "8px",
+          }}
+        >
+          {(["clickOn", "loopingOn", "monitorOn"] as (keyof RustConfig)[]).map(
+            (s) => (
+              <div
+                style={{ display: "flex", flexDirection: "row", gap: "4px" }}
+              >
+                <label>{s}</label>
+                <input
+                  onChange={(e) => updateRustConfig({ [s]: !rustConfig[s] })}
+                  type="checkbox"
+                  checked={Boolean(rustConfig[s])}
+                />
+              </div>
+            )
+          )}
+          {(
+            [
+              "bpm",
+              "beatsToLoop",
+              "subdivision",
+              "bufferCompensation",
+            ] as (keyof RustConfig)[]
+          ).map((s) => (
+            <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
+              <label>{s}</label>
+              <input
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  if (!val) return;
+                  updateRustConfig({ [s]: val });
+                }}
+                value={Number(rustConfig[s])}
+                style={{ width: "4em" }}
+              />
+            </div>
+          ))}
+          <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
+            <label>visual gain</label>
+            <input
+              onChange={(e) => {
+                const g = parseFloat(e.target.value);
+                if (!g) return;
+                setVisualGain(g);
+              }}
+              value={visualGain}
+              style={{ width: "4em" }}
+            ></input>
+          </div>
+        </div>
+        {/* <div id="output"></div> */}
+        <Canvas
+          // @ts-expect-error TODO figure out canvas draw type
+          draw={draw}
+          style={{
+            border: "1px solid black",
+            height: CANVAS_HEIGHT / 2 + "px",
+            margin: "8px",
+            width: CANVAS_WIDTH / 2 + "px",
+          }}
+          width={CANVAS_WIDTH}
+          height={CANVAS_HEIGHT}
+        />
+      </div>
+    </>
   );
 };
 
