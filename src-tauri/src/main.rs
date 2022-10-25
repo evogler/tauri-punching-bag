@@ -33,6 +33,7 @@ struct Config {
     click_on: bool,
     monitor_on: bool,
     buffer_compensation: usize,
+    subdivision: f64,
 }
 struct ConfigState(Arc<Mutex<Config>>);
 
@@ -70,12 +71,13 @@ fn set_config(
     clickon: bool,
     monitoron: bool,
     buffercompensation: usize,
+    subdivision: f64,
 ) {
     println!("set_config called");
     let config_state: tauri::State<ConfigState> = app_handle.state();
     let mut config = config_state.0.lock().unwrap();
 
-    let changed = bpm != config.bpm
+    let should_update_loop_buffer = bpm != config.bpm
         || beatstoloop != config.beats_to_loop
         || buffercompensation != config.buffer_compensation;
     config.bpm = bpm;
@@ -84,8 +86,9 @@ fn set_config(
     config.click_on = clickon;
     config.monitor_on = monitoron;
     config.buffer_compensation = buffercompensation;
+    config.subdivision = subdivision;
 
-    if changed {
+    if should_update_loop_buffer {
         println!("hi!");
         // let c = config_state.0.clone();
         let c = config.clone();
@@ -175,6 +178,7 @@ fn main() -> Result<(), coreaudio::Error> {
         click_on: true,
         monitor_on: true,
         buffer_compensation: 1024,
+        subdivision: 3.0,
     };
     let config_state = ConfigState(Arc::new(Mutex::new(config)));
     let config1 = config_state.0.clone();
@@ -198,7 +202,7 @@ fn main() -> Result<(), coreaudio::Error> {
     let loop_buffer_state = LoopBufferState(loop_buffer_mutex_arc.clone());
 
     let mut beat: f64 = 0.0;
-    let mut last_beat: u32 = 0;
+    let mut last_beat: usize = 0;
 
     input_audio_unit.set_input_callback(move |args| {
         let Args {
@@ -260,9 +264,14 @@ fn main() -> Result<(), coreaudio::Error> {
 
                     state_vec.push((beat as f32, out.abs()));
 
-                    if (beat as u32) > last_beat {
-                        click_sound_counter = 100;
-                        last_beat = beat as u32;
+                    let adjusted_beat = (beat * config.subdivision) as usize;
+                    if adjusted_beat != last_beat {
+                        if adjusted_beat % (config.subdivision as usize) == 0 {
+                            click_sound_counter = 400;
+                        } else {
+                            click_sound_counter = 100;
+                        }
+                        last_beat = adjusted_beat;
                     }
                     if click_sound_counter > 0 {
                         click_sound_counter -= 1;

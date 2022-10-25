@@ -1,23 +1,26 @@
 import { useEffect, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api";
 import Canvas from "./Canvas";
+import { config } from "process";
 
 interface RustConfig {
-	bpm: number,
-	beatsToLoop: number,
-	clickOn: boolean,
-	loopingOn: boolean,
-	monitorOn: boolean,
-	bufferCompensation: number,
+  bpm: number;
+  beatsToLoop: number;
+  clickOn: boolean;
+  loopingOn: boolean;
+  monitorOn: boolean;
+  bufferCompensation: number;
+  subdivision: number;
 }
 
 const defaultRustConfig: RustConfig = {
-	bpm: 180,
-	beatsToLoop: 4,
-	clickOn: true,
-	loopingOn: true,
-	monitorOn: true,
-	bufferCompensation: 1024
+  bpm: 180,
+  beatsToLoop: 4,
+  clickOn: true,
+  loopingOn: true,
+  monitorOn: true,
+  bufferCompensation: 1024,
+  subdivision: 3,
 };
 
 const lowercaseKeys = <T,>(obj: T extends {} ? T : never) =>
@@ -36,7 +39,7 @@ const App = () => {
     setInterval(getArray, 1000 / 100);
   });
 
-	const [rustConfig, setRustConfig] = useState(defaultRustConfig);
+  const [rustConfig, setRustConfig] = useState(defaultRustConfig);
 
   const [visualGain, setVisualGain] = useState(10);
 
@@ -59,9 +62,9 @@ const App = () => {
 
   const updateRustConfig = (args: Partial<RustConfig>) => {
     console.log("calling set_config");
-		const newRustConfig = {...rustConfig, ...args};
-		setRustConfig(newRustConfig);
-		invoke("set_config", lowercaseKeys(newRustConfig));
+    const newRustConfig = { ...rustConfig, ...args };
+    setRustConfig(newRustConfig);
+    invoke("set_config", lowercaseKeys(newRustConfig));
   };
 
   const getCanvasPos = (beat: number): [number, number] => {
@@ -78,32 +81,36 @@ const App = () => {
   ) => {
     const x = pos[0];
     const row = pos[1];
-    const y = (1 + row) * CANVAS_ROW_HEIGHT;
+    const y = row * CANVAS_ROW_HEIGHT;
     ctx.strokeStyle = "#FFFFFF";
 
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.lineTo(x, y - (CANVAS_ROW_HEIGHT - 1));
+    ctx.lineTo(x, y + (CANVAS_ROW_HEIGHT - 1));
     ctx.stroke();
 
     ctx.beginPath();
     ctx.moveTo(x + 1, y);
-    ctx.lineTo(x + 1, y - (CANVAS_ROW_HEIGHT - 1));
+    ctx.lineTo(x + 1, y + (CANVAS_ROW_HEIGHT - 1));
     ctx.stroke();
 
     ctx.strokeStyle = "#000000";
     ctx.beginPath();
-    ctx.moveTo(x, y); //- value * CANVAS_ROW_HEIGHT / 2 / 2);
-    ctx.lineTo(x, y - (value * (CANVAS_ROW_HEIGHT - 1)));
+    const ch = CANVAS_ROW_HEIGHT - 1;
+
+    ctx.moveTo(x, y + (0.5 - 0.5 * value) * ch);
+    ctx.lineTo(x, y + (0.5 + 0.5 * value) * ch);
     ctx.stroke();
   };
 
   let max = 0;
 
   const draw = (ctx: CanvasRenderingContext2D, frameCount: number) => {
-    for (let i = 0; i < 4; i++) {
-      let x = (CANVAS_WIDTH / 4) * i;
-      ctx.strokeStyle = "#00880005";
+		const totalLines = BEATS_PER_ROW * rustConfig.subdivision;
+    for (let i = 0; i < totalLines; i++) {
+      let x = (CANVAS_WIDTH / totalLines) * i;
+      ctx.strokeStyle = "#00880020";
+      ctx.lineWidth = i % rustConfig.subdivision == 0 ? 4 : 2;
       ctx.beginPath();
       ctx.moveTo(x, 0);
       ctx.lineTo(x, CANVAS_HEIGHT);
@@ -149,6 +156,16 @@ const App = () => {
         value={rustConfig.beatsToLoop}
       ></input>
 
+      <label>subdivision</label>
+      <input
+        onChange={(e) => {
+          const subdivision = parseFloat(e.target.value);
+          if (!subdivision) return;
+          updateRustConfig({ subdivision });
+        }}
+        value={rustConfig.subdivision}
+      ></input>
+
       <label>visual gain</label>
       <input
         onChange={(e) => {
@@ -162,8 +179,8 @@ const App = () => {
       <label>click</label>
       <input
         onChange={(e) => {
-					const clickOn = !rustConfig.clickOn;
-					updateRustConfig({ clickOn })
+          const clickOn = !rustConfig.clickOn;
+          updateRustConfig({ clickOn });
         }}
         type="checkbox"
         checked={rustConfig.clickOn}
@@ -172,24 +189,24 @@ const App = () => {
       <label>loop</label>
       <input
         onChange={(e) => {
-					const loopingOn = !rustConfig.loopingOn;
-					updateRustConfig({ loopingOn })
+          const loopingOn = !rustConfig.loopingOn;
+          updateRustConfig({ loopingOn });
         }}
         type="checkbox"
         checked={rustConfig.loopingOn}
       />
 
-			<label>monitor</label>
+      <label>monitor</label>
       <input
         onChange={(e) => {
-					const monitorOn = !rustConfig.monitorOn;
-					updateRustConfig({ monitorOn })
+          const monitorOn = !rustConfig.monitorOn;
+          updateRustConfig({ monitorOn });
         }}
         type="checkbox"
         checked={rustConfig.monitorOn}
       />
 
-		  <label>buf comp</label>
+      <label>buf comp</label>
       <input
         onChange={(e) => {
           const bufferCompensation = parseFloat(e.target.value);
@@ -198,7 +215,6 @@ const App = () => {
         }}
         value={rustConfig.bufferCompensation}
       ></input>
-
 
       <div id="output"></div>
       <Canvas
