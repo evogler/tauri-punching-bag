@@ -31,7 +31,8 @@ struct Config {
     beats_to_loop: f64,
     looping_on: bool,
     click_on: bool,
-    monitor_on: bool,
+    visual_monitor_on: bool,
+    audio_monitor_on: bool,
     buffer_compensation: usize,
     subdivision: f64,
 }
@@ -43,12 +44,19 @@ type S = f32;
 const SAMPLE_FORMAT: SampleFormat = SampleFormat::F32;
 
 fn get_loop_buffer_size(config: &Config) -> usize {
-    let buffer_size = 512;
     let mut res = config.beats_to_loop / config.bpm * SAMPLE_RATE * 60.0 * 2.0;
     if res < 0.0 {
         res = 0.0;
     }
-    (res as usize) - config.buffer_compensation
+    res as usize
+}
+
+fn mod_add(a: usize, b: usize, max: usize) -> usize {
+    let mut res = a + b;
+    while res >= max {
+        res -= max;
+    }
+    res
 }
 
 #[tauri::command]
@@ -69,7 +77,8 @@ fn set_config(
     beatstoloop: f64,
     loopingon: bool,
     clickon: bool,
-    monitoron: bool,
+    visualmonitoron: bool,
+    audiomonitoron: bool,
     buffercompensation: usize,
     subdivision: f64,
 ) {
@@ -84,7 +93,8 @@ fn set_config(
     config.beats_to_loop = beatstoloop;
     config.looping_on = loopingon;
     config.click_on = clickon;
-    config.monitor_on = monitoron;
+    config.audio_monitor_on = audiomonitoron;
+    config.visual_monitor_on = visualmonitoron;
     config.buffer_compensation = buffercompensation;
     config.subdivision = subdivision;
 
@@ -176,7 +186,8 @@ fn main() -> Result<(), coreaudio::Error> {
         beats_to_loop: 4.0,
         looping_on: true,
         click_on: true,
-        monitor_on: true,
+        visual_monitor_on: true,
+        audio_monitor_on: true,
         buffer_compensation: 1024,
         subdivision: 3.0,
     };
@@ -243,26 +254,41 @@ fn main() -> Result<(), coreaudio::Error> {
                 let f: S = *buffers[0].front().unwrap_or(&zero);
                 for (ch, channel) in data.channels_mut().enumerate() {
                     let sample: S = buffers[ch].pop_front().unwrap_or(f);
-                    let mut out = 0.0;
-                    if config.monitor_on {
-                        out += sample;
+                    let mut audio_out = 0.0;
+                    let mut visual_out = 0.0;
+                    if config.audio_monitor_on {
+                        audio_out += sample;
                     }
+                    if config.visual_monitor_on {
+                        visual_out += sample;
+                    }
+
                     let p = loop_buffer.pos;
+
+                    let compensated_loop_buffer_pos = mod_add(
+                        loop_buffer.pos,
+                        config.buffer_compensation,
+                        loop_buffer.buffer.len(),
+                    );
+
                     if config.looping_on {
-                        out += loop_buffer.buffer[loop_buffer.pos];
+                        audio_out += loop_buffer.buffer[compensated_loop_buffer_pos];
+                        visual_out += loop_buffer.buffer[loop_buffer.pos];
                         loop_buffer.buffer[p] = sample;
                     } else {
                         loop_buffer.buffer[p] = 0.0;
                     }
 
-                    channel[i] = out * 12.0;
+                    channel[i] = audio_out * 12.0;
 
                     loop_buffer.pos += 1;
                     if loop_buffer.pos >= loop_buffer.buffer.len() {
                         loop_buffer.pos = 0;
                     }
 
-                    state_vec.push((beat as f32, out.abs()));
+                    let visual_beat =
+                        (beat - (config.buffer_compensation as f64) * beats_per_sample) as f32;
+                    state_vec.push((visual_beat, visual_out.abs()));
 
                     let adjusted_beat = (beat * config.subdivision) as usize;
                     if adjusted_beat != last_beat {

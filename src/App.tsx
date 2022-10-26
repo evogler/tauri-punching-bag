@@ -1,14 +1,14 @@
 import { useEffect, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api";
 import Canvas from "./Canvas";
-import { config } from "process";
 
 interface RustConfig {
   bpm: number;
   beatsToLoop: number;
   clickOn: boolean;
   loopingOn: boolean;
-  monitorOn: boolean;
+  visualMonitorOn: boolean;
+  audioMonitorOn: boolean;
   bufferCompensation: number;
   subdivision: number;
 }
@@ -18,7 +18,8 @@ const defaultRustConfig: RustConfig = {
   beatsToLoop: 4,
   clickOn: true,
   loopingOn: true,
-  monitorOn: true,
+  visualMonitorOn: true,
+  audioMonitorOn: true,
   bufferCompensation: 1024,
   subdivision: 3,
 };
@@ -141,20 +142,23 @@ const App = () => {
             gap: "8px",
           }}
         >
-          {(["clickOn", "loopingOn", "monitorOn"] as (keyof RustConfig)[]).map(
-            (s) => (
-              <div
-                style={{ display: "flex", flexDirection: "row", gap: "4px" }}
-              >
-                <label>{s}</label>
-                <input
-                  onChange={(e) => updateRustConfig({ [s]: !rustConfig[s] })}
-                  type="checkbox"
-                  checked={Boolean(rustConfig[s])}
-                />
-              </div>
-            )
-          )}
+          {(
+            [
+              "clickOn",
+              "loopingOn",
+              "visualMonitorOn",
+              "audioMonitorOn",
+            ] as (keyof RustConfig)[]
+          ).map((s) => (
+            <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
+              <label>{s}</label>
+              <input
+                onChange={(e) => updateRustConfig({ [s]: !rustConfig[s] })}
+                type="checkbox"
+                checked={Boolean(rustConfig[s])}
+              />
+            </div>
+          ))}
           {(
             [
               "bpm",
