@@ -31,6 +31,7 @@ struct Config {
     beats_to_loop: f64,
     looping_on: bool,
     click_on: bool,
+    click_toggle: bool,
     visual_monitor_on: bool,
     audio_monitor_on: bool,
     buffer_compensation: usize,
@@ -77,6 +78,7 @@ fn set_config(
     beatstoloop: f64,
     loopingon: bool,
     clickon: bool,
+    clicktoggle: bool,
     visualmonitoron: bool,
     audiomonitoron: bool,
     buffercompensation: usize,
@@ -93,6 +95,7 @@ fn set_config(
     config.beats_to_loop = beatstoloop;
     config.looping_on = loopingon;
     config.click_on = clickon;
+    config.click_toggle = clicktoggle;
     config.audio_monitor_on = audiomonitoron;
     config.visual_monitor_on = visualmonitoron;
     config.buffer_compensation = buffercompensation;
@@ -167,15 +170,6 @@ fn main() -> Result<(), coreaudio::Error> {
     let producer_right = buffer_right.clone();
     let consumer_right = buffer_right.clone();
 
-    // seed roughly 1 second of data to create a delay in the feedback loop for easier testing
-    // for buffer in vec![buffer_left, buffer_right] {
-    // let mut buffer = buffer.lock().unwrap();
-    // for _ in 0..(out_stream_format.sample_rate as i32) {
-    // for _ in 0..32 {
-    //    buffer.push_back(0 as S);
-    //}
-    // }
-
     type Args = render_callback::Args<data::NonInterleaved<S>>;
 
     let mut click_sound_counter: i32 = 0;
@@ -186,9 +180,10 @@ fn main() -> Result<(), coreaudio::Error> {
         beats_to_loop: 4.0,
         looping_on: true,
         click_on: true,
+        click_toggle: false,
         visual_monitor_on: true,
         audio_monitor_on: true,
-        buffer_compensation: 1024,
+        buffer_compensation: 1250,
         subdivision: 3.0,
     };
     let config_state = ConfigState(Arc::new(Mutex::new(config)));
@@ -301,8 +296,11 @@ fn main() -> Result<(), coreaudio::Error> {
                     }
                     if click_sound_counter > 0 {
                         click_sound_counter -= 1;
+                        let in_loop = beat % (config.beats_to_loop * 2.0) < config.beats_to_loop;
                         if config.click_on {
-                            channel[i] += rng.gen::<f32>() * 0.3;
+                            if !config.click_toggle || in_loop {
+                                channel[i] += rng.gen::<f32>() * 0.3;
+                            }
                         }
                     }
                 }

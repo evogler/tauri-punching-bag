@@ -6,6 +6,7 @@ interface RustConfig {
   bpm: number;
   beatsToLoop: number;
   clickOn: boolean;
+	clickToggle: boolean;
   loopingOn: boolean;
   visualMonitorOn: boolean;
   audioMonitorOn: boolean;
@@ -17,10 +18,11 @@ const defaultRustConfig: RustConfig = {
   bpm: 180,
   beatsToLoop: 4,
   clickOn: true,
+	clickToggle: false,
   loopingOn: true,
   visualMonitorOn: true,
   audioMonitorOn: true,
-  bufferCompensation: 1024,
+  bufferCompensation: 1250,
   subdivision: 3,
 };
 
@@ -41,9 +43,8 @@ const App = () => {
   });
 
   const [rustConfig, setRustConfig] = useState(defaultRustConfig);
-
   const [visualGain, setVisualGain] = useState(10);
-
+	const [visualSubdivision, setVisualSubdivision] = useState(3);
   // const [log, setLog] = useState('');
   const [log] = useState("");
   const CANVAS_HEIGHT = 1000;
@@ -104,11 +105,11 @@ const App = () => {
   let max = 0;
 
   const draw = (ctx: CanvasRenderingContext2D, frameCount: number) => {
-    const totalLines = BEATS_PER_ROW * rustConfig.subdivision;
+    const totalLines = BEATS_PER_ROW * visualSubdivision;
     for (let i = 0; i < totalLines; i++) {
       let x = (CANVAS_WIDTH / totalLines) * i;
       ctx.strokeStyle = "#00880020";
-      ctx.lineWidth = i % rustConfig.subdivision === 0 ? 4 : 2;
+      ctx.lineWidth = i % visualSubdivision === 0 ? 4 : 2;
       ctx.beginPath();
       ctx.moveTo(x, 0);
       ctx.lineTo(x, CANVAS_HEIGHT);
@@ -145,6 +146,7 @@ const App = () => {
           {(
             [
               "clickOn",
+							"clickToggle",
               "loopingOn",
               "visualMonitorOn",
               "audioMonitorOn",
@@ -189,6 +191,18 @@ const App = () => {
                 setVisualGain(g);
               }}
               value={visualGain}
+              style={{ width: "4em" }}
+            ></input>
+          </div>
+					<div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
+            <label>visual subdivision</label>
+            <input
+              onChange={(e) => {
+                const g = parseFloat(e.target.value);
+                if (!g) return;
+                setVisualSubdivision(g);
+              }}
+              value={visualSubdivision}
               style={{ width: "4em" }}
             ></input>
           </div>
