@@ -3,12 +3,18 @@
     windows_subsystem = "windows"
 )]
 
+mod read_audio_file;
+
 extern crate coreaudio;
+
+use read_audio_file::get_samples_from_filename;
+
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::macos_helpers::{audio_unit_from_device_id, get_default_device_id};
 use coreaudio::audio_unit::render_callback::{self, data};
-use coreaudio::audio_unit::{Element, SampleFormat, Scope, StreamFormat};
+use coreaudio::audio_unit::{AudioUnit, Element, SampleFormat, Scope, StreamFormat};
 use coreaudio::sys::*;
+use coreaudio::Error;
 use rand::Rng;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -43,6 +49,8 @@ const SAMPLE_RATE: f64 = 44100.0;
 
 type S = f32;
 const SAMPLE_FORMAT: SampleFormat = SampleFormat::F32;
+
+type Args = render_callback::Args<data::NonInterleaved<S>>;
 
 fn get_loop_buffer_size(config: &Config) -> usize {
     let mut res = config.beats_to_loop / config.bpm * SAMPLE_RATE * 60.0 * 2.0;
@@ -115,7 +123,7 @@ fn set_config(
     }
 }
 
-fn main() -> Result<(), coreaudio::Error> {
+fn get_input_output_channels() -> Result<(AudioUnit, AudioUnit), Error> {
     let mut input_audio_unit =
         audio_unit_from_device_id(get_default_device_id(true).unwrap(), true)?;
     let mut output_audio_unit =
@@ -163,14 +171,61 @@ fn main() -> Result<(), coreaudio::Error> {
     let asbd = out_stream_format.to_asbd();
     output_audio_unit.set_property(id, Scope::Input, Element::Output, Some(&asbd))?;
 
-    let buffer_left = Arc::new(Mutex::new(VecDeque::<S>::new()));
-    let producer_left = buffer_left.clone();
-    let consumer_left = buffer_left.clone();
-    let buffer_right = Arc::new(Mutex::new(VecDeque::<S>::new()));
-    let producer_right = buffer_right.clone();
-    let consumer_right = buffer_right.clone();
+    Ok((input_audio_unit, output_audio_unit))
+}
 
-    type Args = render_callback::Args<data::NonInterleaved<S>>;
+fn start_input_audio_unit(
+    input_audio_unit: &mut AudioUnit,
+    producer_left: Arc<Mutex<VecDeque<f32>>>,
+    producer_right: Arc<Mutex<VecDeque<f32>>>,
+) -> Result<(), Error> {
+    input_audio_unit.set_input_callback(move |args| {
+        let Args {
+            num_frames,
+            mut data,
+            ..
+        } = args;
+        let buffer_left = producer_left.lock().unwrap();
+        let buffer_right = producer_right.lock().unwrap();
+        let mut buffers = vec![buffer_left, buffer_right];
+        for i in 0..num_frames {
+            for (ch, channel) in data.channels_mut().enumerate() {
+                let value: S = channel[i];
+                buffers[ch].push_back(value);
+            }
+        }
+        Ok(())
+    })?;
+    input_audio_unit.start()?;
+    Ok(())
+}
+
+struct Buffers {
+    producer_left: Arc<Mutex<VecDeque<f32>>>,
+    consumer_left: Arc<Mutex<VecDeque<f32>>>,
+    producer_right: Arc<Mutex<VecDeque<f32>>>,
+    consumer_right: Arc<Mutex<VecDeque<f32>>>,
+}
+
+fn make_buffers() -> Buffers {
+    let buffer_left = Arc::new(Mutex::new(VecDeque::<S>::new()));
+    let buffer_right = Arc::new(Mutex::new(VecDeque::<S>::new()));
+    Buffers {
+        producer_left: buffer_left.clone(),
+        consumer_left: buffer_left.clone(),
+        producer_right: buffer_right.clone(),
+        consumer_right: buffer_right.clone(),
+    }
+}
+fn main() -> Result<(), coreaudio::Error> {
+    let path = "/Users/eric/Music/Logic/ICHTY180.wav".into();
+    let mp3 = get_samples_from_filename(&path).unwrap();
+    let mut mp3_pos: usize = 0;
+
+    println!("Read mp3 file with length: {}.", mp3.len());
+
+    let (mut input_audio_unit, mut output_audio_unit) = get_input_output_channels().unwrap();
+    let buffers = make_buffers();
 
     let mut click_sound_counter: i32 = 0;
     let mut rng = rand::thread_rng();
@@ -210,24 +265,18 @@ fn main() -> Result<(), coreaudio::Error> {
     let mut beat: f64 = 0.0;
     let mut last_beat: usize = 0;
 
-    input_audio_unit.set_input_callback(move |args| {
-        let Args {
-            num_frames,
-            mut data,
-            ..
-        } = args;
-        let buffer_left = producer_left.lock().unwrap();
-        let buffer_right = producer_right.lock().unwrap();
-        let mut buffers = vec![buffer_left, buffer_right];
-        for i in 0..num_frames {
-            for (ch, channel) in data.channels_mut().enumerate() {
-                let value: S = channel[i];
-                buffers[ch].push_back(value);
-            }
-        }
-        Ok(())
-    })?;
-    input_audio_unit.start()?;
+    // let mp3_bpm: f64;
+    // mp3_bpm = config.clone().bpm;
+    let mp3_bpm = 180.0f64;
+
+    let mp3_loop_len = ((SAMPLE_RATE * 60.0 / mp3_bpm) * 32.0) as usize;
+
+    start_input_audio_unit(
+        &mut input_audio_unit,
+        buffers.producer_left,
+        buffers.producer_right,
+    )
+    .unwrap();
 
     output_audio_unit.set_render_callback(move |args: Args| {
         let Args {
@@ -235,8 +284,8 @@ fn main() -> Result<(), coreaudio::Error> {
             mut data,
             ..
         } = args;
-        let buffer_left = consumer_left.lock().unwrap();
-        let buffer_right = consumer_right.lock().unwrap();
+        let buffer_left = buffers.consumer_left.lock().unwrap();
+        let buffer_right = buffers.consumer_right.lock().unwrap();
         let mut buffers = vec![buffer_left, buffer_right];
         let config = config1.lock().unwrap();
         let mut loop_buffer = loop_buffer_clone.lock().unwrap();
@@ -275,6 +324,11 @@ fn main() -> Result<(), coreaudio::Error> {
                     }
 
                     channel[i] = audio_out * 12.0;
+                    channel[i] += mp3[mp3_pos];
+                    mp3_pos += 1;
+                    if mp3_pos >= mp3_loop_len {
+                        mp3_pos = 0;
+                    }
 
                     loop_buffer.pos += 1;
                     if loop_buffer.pos >= loop_buffer.buffer.len() {
