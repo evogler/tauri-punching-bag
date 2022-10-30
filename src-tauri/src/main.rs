@@ -269,7 +269,10 @@ fn main() -> Result<(), coreaudio::Error> {
     // mp3_bpm = config.clone().bpm;
     let mp3_bpm = 180.0f64;
 
-    let mp3_loop_len = ((SAMPLE_RATE * 60.0 / mp3_bpm) * 32.0) as usize;
+    let mp3_loop_len = ((SAMPLE_RATE * 60.0 / mp3_bpm) * (2.0 * 4.0 * 32.0)) as usize;
+    if mp3_loop_len > mp3.len() {
+        panic!("trying to loop past EOF");
+    }
 
     start_input_audio_unit(
         &mut input_audio_unit,

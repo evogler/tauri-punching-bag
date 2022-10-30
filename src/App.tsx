@@ -6,7 +6,7 @@ interface RustConfig {
   bpm: number;
   beatsToLoop: number;
   clickOn: boolean;
-	clickToggle: boolean;
+  clickToggle: boolean;
   loopingOn: boolean;
   visualMonitorOn: boolean;
   audioMonitorOn: boolean;
@@ -18,7 +18,7 @@ const defaultRustConfig: RustConfig = {
   bpm: 180,
   beatsToLoop: 4,
   clickOn: true,
-	clickToggle: false,
+  clickToggle: false,
   loopingOn: true,
   visualMonitorOn: true,
   audioMonitorOn: true,
@@ -44,16 +44,16 @@ const App = () => {
 
   const [rustConfig, setRustConfig] = useState(defaultRustConfig);
   const [visualGain, setVisualGain] = useState(10);
-	const [visualSubdivision, setVisualSubdivision] = useState(3);
+  const [visualSubdivision, setVisualSubdivision] = useState(3);
+  const [beatsPerRow, setBeatsPerRow] = useState(4);
   // const [log, setLog] = useState('');
+  const [canvasRows, setCanvasRows] = useState(4);
   const [log] = useState("");
   const CANVAS_HEIGHT = 1000;
   const CANVAS_WIDTH = 2000;
-  const BEATS_PER_ROW = 4;
-  const PIXELS_PER_BEAT = CANVAS_WIDTH / BEATS_PER_ROW;
-  const CANVAS_ROWS = 4;
-  const CANVAS_ROW_HEIGHT = CANVAS_HEIGHT / CANVAS_ROWS;
-  const BEATS_PER_WINDOW = BEATS_PER_ROW * CANVAS_ROWS;
+  const PIXELS_PER_BEAT = CANVAS_WIDTH / beatsPerRow;
+  const CANVAS_ROW_HEIGHT = CANVAS_HEIGHT / canvasRows;
+  const BEATS_PER_WINDOW = beatsPerRow * canvasRows;
   const canvasPos = useRef(0);
   const samples = useRef<[number, number][]>([]);
   // const getArray = useCallback(async () => {
@@ -71,8 +71,8 @@ const App = () => {
 
   const getCanvasPos = (beat: number): [number, number] => {
     const b = beat % BEATS_PER_WINDOW;
-    const y = Math.floor(b / BEATS_PER_ROW);
-    const x = (b % BEATS_PER_ROW) * PIXELS_PER_BEAT;
+    const y = Math.floor(b / beatsPerRow);
+    const x = (b % beatsPerRow) * PIXELS_PER_BEAT;
     return [x, y];
   };
 
@@ -105,7 +105,7 @@ const App = () => {
   let max = 0;
 
   const draw = (ctx: CanvasRenderingContext2D, frameCount: number) => {
-    const totalLines = BEATS_PER_ROW * visualSubdivision;
+    const totalLines = beatsPerRow * visualSubdivision;
     for (let i = 0; i < totalLines; i++) {
       let x = (CANVAS_WIDTH / totalLines) * i;
       ctx.strokeStyle = "#00880020";
@@ -146,7 +146,7 @@ const App = () => {
           {(
             [
               "clickOn",
-							"clickToggle",
+              "clickToggle",
               "loopingOn",
               "visualMonitorOn",
               "audioMonitorOn",
@@ -194,7 +194,7 @@ const App = () => {
               style={{ width: "4em" }}
             ></input>
           </div>
-					<div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
+          <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
             <label>visual subdivision</label>
             <input
               onChange={(e) => {
@@ -203,6 +203,32 @@ const App = () => {
                 setVisualSubdivision(g);
               }}
               value={visualSubdivision}
+              style={{ width: "4em" }}
+            ></input>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
+            <label>beats per row</label>
+            <input
+              onChange={(e) => {
+                const g = parseFloat(e.target.value);
+                if (!g) return;
+                setBeatsPerRow(g);
+              }}
+              value={beatsPerRow}
+              style={{ width: "4em" }}
+            ></input>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
+            <label>rows</label>
+            <input
+              onChange={(e) => {
+                const g = parseFloat(e.target.value);
+                if (!g) return;
+                setCanvasRows(g);
+              }}
+              value={canvasRows}
               style={{ width: "4em" }}
             ></input>
           </div>
