@@ -38,6 +38,7 @@ struct Config {
     looping_on: bool,
     click_on: bool,
     click_toggle: bool,
+    play_file: bool,
     visual_monitor_on: bool,
     audio_monitor_on: bool,
     buffer_compensation: usize,
@@ -87,6 +88,7 @@ fn set_config(
     loopingon: bool,
     clickon: bool,
     clicktoggle: bool,
+    playfile: bool,
     visualmonitoron: bool,
     audiomonitoron: bool,
     buffercompensation: usize,
@@ -104,6 +106,7 @@ fn set_config(
     config.looping_on = loopingon;
     config.click_on = clickon;
     config.click_toggle = clicktoggle;
+    config.play_file = playfile;
     config.audio_monitor_on = audiomonitoron;
     config.visual_monitor_on = visualmonitoron;
     config.buffer_compensation = buffercompensation;
@@ -236,6 +239,7 @@ fn main() -> Result<(), coreaudio::Error> {
         looping_on: true,
         click_on: true,
         click_toggle: false,
+        play_file: true,
         visual_monitor_on: true,
         audio_monitor_on: true,
         buffer_compensation: 1250,
@@ -327,7 +331,10 @@ fn main() -> Result<(), coreaudio::Error> {
                     }
 
                     channel[i] = audio_out * 12.0;
-                    channel[i] += mp3[mp3_pos];
+
+                    if config.play_file {
+                        channel[i] += mp3[mp3_pos];
+                    }
                     mp3_pos += 1;
                     if mp3_pos >= mp3_loop_len {
                         mp3_pos = 0;

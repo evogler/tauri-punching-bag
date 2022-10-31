@@ -35,8 +35,8 @@
         "entitlements": "Entitlements.plist",
         "exceptionDomain": "",
         "frameworks": [],
-        "providerShortName": null,
-        "signingIdentity": null
+        "providerShortName": "Eric Vogler",
+        "signingIdentity": "-"
       },
       "resources": [],
       "shortDescription": "",
