@@ -221,7 +221,8 @@ fn make_buffers() -> Buffers {
     }
 }
 fn main() -> Result<(), coreaudio::Error> {
-    let path = "/Users/eric/Music/Logic/ICHTY180.wav".into();
+    // let path = "/Users/eric/Music/Logic/ICHTY180.wav".into();
+    let path = "/Users/eric/Music/Logic/neosoul140.wav".into();
     let mp3 = get_samples_from_filename(&path).unwrap();
     let mut mp3_pos: usize = 0;
 
@@ -234,7 +235,7 @@ fn main() -> Result<(), coreaudio::Error> {
     let mut rng = rand::thread_rng();
 
     let config = Config {
-        bpm: 180.0,
+        bpm: 140.0,
         beats_to_loop: 4.0,
         looping_on: true,
         click_on: true,
@@ -243,7 +244,7 @@ fn main() -> Result<(), coreaudio::Error> {
         visual_monitor_on: true,
         audio_monitor_on: true,
         buffer_compensation: 1250,
-        subdivision: 3.0,
+        subdivision: 1.0,
     };
     let config_state = ConfigState(Arc::new(Mutex::new(config)));
     let config1 = config_state.0.clone();
@@ -271,9 +272,9 @@ fn main() -> Result<(), coreaudio::Error> {
 
     // let mp3_bpm: f64;
     // mp3_bpm = config.clone().bpm;
-    let mp3_bpm = 180.0f64;
+    let mp3_bpm = 140.0f64;
 
-    let mp3_loop_len = ((SAMPLE_RATE * 60.0 / mp3_bpm) * (2.0 * 4.0 * 32.0)) as usize;
+    let mp3_loop_len = ((SAMPLE_RATE * 60.0 / mp3_bpm) * (2.0 * 4.0 * 8.0)) as usize;
     if mp3_loop_len > mp3.len() {
         panic!("trying to loop past EOF");
     }
@@ -335,7 +336,9 @@ fn main() -> Result<(), coreaudio::Error> {
                     if config.play_file {
                         channel[i] += mp3[mp3_pos];
                     }
-                    mp3_pos += 1;
+                    if ch == 0 || ch == 1 {
+                        mp3_pos += 1;
+                    }
                     if mp3_pos >= mp3_loop_len {
                         mp3_pos = 0;
                     }

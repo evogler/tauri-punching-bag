@@ -2,31 +2,49 @@ import { useEffect, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api";
 import Canvas from "./Canvas";
 
-interface RustConfig {
-  bpm: number;
-  beatsToLoop: number;
-  clickOn: boolean;
-  clickToggle: boolean;
-  playFile: boolean;
-  loopingOn: boolean;
-  visualMonitorOn: boolean;
-  audioMonitorOn: boolean;
-  bufferCompensation: number;
-  subdivision: number;
-}
+// interface RustConfig {
+//   bpm: number;
+//   beatsToLoop: number;
+//   clickOn: boolean;
+//   clickToggle: boolean;
+//   playFile: boolean;
+//   loopingOn: boolean;
+//   visualMonitorOn: boolean;
+//   audioMonitorOn: boolean;
+//   bufferCompensation: number;
+//   subdivision: number;
+// }
 
-const defaultRustConfig: RustConfig = {
-  bpm: 180,
+const defaultRustConfig = {
+  audioMonitorOn: true,
   beatsToLoop: 4,
+  bpm: 140,
+  bufferCompensation: 1250,
   clickOn: true,
   clickToggle: false,
-  playFile: true,
   loopingOn: true,
+  playFile: true,
+  subdivision: 1,
   visualMonitorOn: true,
-  audioMonitorOn: true,
-  bufferCompensation: 1250,
-  subdivision: 3,
 };
+type RustConfig = typeof defaultRustConfig;
+type RustConfigKey = keyof RustConfig;
+const isRustConfigKey = (k: string): k is RustConfigKey =>
+  k in defaultRustConfig;
+
+const defaultJsConfig = {
+  barColorMode: false,
+  beatsPerRow: 4,
+  canvasRows: 4,
+  subDivisions: [0, 0.6],
+  visualGain: 10,
+  visualSubdivision: 3,
+};
+type JsConfig = typeof defaultJsConfig;
+type JsConfigKey = keyof JsConfig;
+const isJsConfigKey = (k: string): k is JsConfigKey => k in defaultJsConfig;
+
+type ConfigKey = (RustConfigKey | JsConfigKey);
 
 const ArrayInput = ({
   value,
@@ -70,10 +88,10 @@ const App = () => {
   //     const mic =(async () => {return await navigator.mediaDevices.getUserMedia({
   //       audio: true,
   //     });})();
-	// 		alert('it worked ' + JSON.stringify(mic));
+  // 		alert('it worked ' + JSON.stringify(mic));
   //   } catch (e) {
-	// 		let message = 'Unknown Error';
-	// 		if (e instanceof Error) message = e.message;
+  // 		let message = 'Unknown Error';
+  // 		if (e instanceof Error) message = e.message;
   //     alert("error: " + message);
   //   }
   //   alert("just tried and didn't error");
@@ -84,19 +102,25 @@ const App = () => {
   });
 
   const [rustConfig, setRustConfig] = useState(defaultRustConfig);
-  const [visualGain, setVisualGain] = useState(10);
-  const [visualSubdivision, setVisualSubdivision] = useState(3);
-  const [beatsPerRow, setBeatsPerRow] = useState(4);
-  // const [log, setLog] = useState('');
-  const [canvasRows, setCanvasRows] = useState(4);
-  const [barColorMode, setBarColorMode] = useState(false);
-  const [subDivisions, setSubDivisions] = useState([0, 0.6]);
+  const [jsConfig, setJsConfig] = useState(defaultJsConfig);
+  const get = <T extends ConfigKey>(k: T) => {
+    if (isRustConfigKey(k)) return rustConfig[k] as RustConfig[typeof k];
+    else if (isJsConfigKey(k)) return jsConfig[k] as JsConfig[typeof k];
+    else return "never" as never;
+  };
+  const set = <T,>(k: string, v: T) => {
+    if (isRustConfigKey(k)) {
+      updateRustConfig({ [k]: v });
+    } else if (isJsConfigKey(k)) {
+      setJsConfig((jsConfig) => ({ ...jsConfig, [k]: v }));
+    }
+  };
   const [log] = useState("");
-  const CANVAS_HEIGHT = 1000;
+  const CANVAS_HEIGHT = 800;
   const CANVAS_WIDTH = 2000;
-  const PIXELS_PER_BEAT = CANVAS_WIDTH / beatsPerRow;
-  const CANVAS_ROW_HEIGHT = CANVAS_HEIGHT / canvasRows;
-  const BEATS_PER_WINDOW = beatsPerRow * canvasRows;
+  const PIXELS_PER_BEAT = CANVAS_WIDTH / get("beatsPerRow");
+  const CANVAS_ROW_HEIGHT = CANVAS_HEIGHT / get("canvasRows");
+  const BEATS_PER_WINDOW = get("beatsPerRow") * get("canvasRows");
   const canvasPos = useRef(0);
   const samples = useRef<[number, number][]>([]);
   // const getArray = useCallback(async () => {
@@ -114,8 +138,8 @@ const App = () => {
 
   const getCanvasPos = (beat: number): [number, number] => {
     const b = beat % BEATS_PER_WINDOW;
-    const y = Math.floor(b / beatsPerRow);
-    const x = (b % beatsPerRow) * PIXELS_PER_BEAT;
+    const y = Math.floor(b / get("beatsPerRow"));
+    const x = (b % get("beatsPerRow")) * PIXELS_PER_BEAT;
     return [x, y];
   };
 
@@ -142,7 +166,7 @@ const App = () => {
     const color = Math.floor(Math.abs(Math.min(1, Math.max(value, 0))) * 255);
     const colorHex = color.toString(16).padStart(2, "0");
     ctx.beginPath();
-    if (barColorMode) {
+    if (get("barColorMode")) {
       ctx.strokeStyle = `#${colorHex}${colorHex}${colorHex}`;
       ctx.moveTo(x, y);
       ctx.lineTo(x, y + (CANVAS_ROW_HEIGHT - 1));
@@ -158,10 +182,10 @@ const App = () => {
   let max = 0;
 
   const draw = (ctx: CanvasRenderingContext2D, frameCount: number) => {
-    for (let b = 0; b < beatsPerRow; b++) {
-      for (const d of subDivisions) {
+    for (let b = 0; b < get("beatsPerRow"); b++) {
+      for (const d of get("subDivisions")) {
         const n = b + d;
-        const x = (CANVAS_WIDTH / beatsPerRow) * n;
+        const x = (CANVAS_WIDTH / get("beatsPerRow")) * n;
         ctx.strokeStyle = "#0088ff";
         ctx.lineWidth = d === 0 ? 3 : 1;
         ctx.beginPath();
@@ -179,7 +203,7 @@ const App = () => {
       const [x, y] = getCanvasPos(beat);
       max = Math.max(max, val);
       if (x !== canvasPos.current) {
-        drawSample(ctx, [x, y], Math.min(1, max * visualGain));
+        drawSample(ctx, [x, y], Math.min(1, max * get("visualGain")));
         max = 0;
         canvasPos.current = x;
       }
@@ -241,48 +265,43 @@ const App = () => {
           ))}
           {(
             [
-              ["visual gain", visualGain, setVisualGain],
-              ["visual subdivision", visualSubdivision, setVisualSubdivision],
-              ["beats per row", beatsPerRow, setBeatsPerRow],
-              ["canvas rows", canvasRows, setCanvasRows],
-            ] as [
-              string,
-              number,
-              React.Dispatch<React.SetStateAction<number>>
-            ][]
-          ).map(([label, value, setter]) => (
+              ["visual gain", "visualGain"],
+              ["visual subdivision", "visualSubdivision"],
+              ["beats per row", "beatsPerRow"],
+              ["canvas rows", "canvasRows"],
+            ] as [string, ConfigKey][]
+          ).map(([label, key]) => (
             <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
               <label>{label}</label>
               <input
                 onChange={(e) => {
                   const g = parseFloat(e.target.value);
                   if (!g) return;
-                  setter(g);
+                  set(key, g);
                 }}
-                value={value}
+                value={JSON.stringify(get(key))}
                 style={{ width: "4em" }}
               ></input>
             </div>
           ))}
           {(
-            [["bar color mode", barColorMode, setBarColorMode]] as [
+            [["bar color mode", 'barColorMode']] as [
               string,
-              boolean,
-              React.Dispatch<React.SetStateAction<boolean>>
+              ConfigKey,
             ][]
-          ).map(([label, value, setter]) => (
+          ).map(([label, key]) => (
             <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
               <label>{label}</label>
               <input
-                onChange={(e) => setter((b) => !b)}
+                onChange={(e) => set(key, !get(key))}
                 type="checkbox"
-                checked={value}
+                checked={get(key) as boolean}
               ></input>
             </div>
           ))}
           <ArrayInput
-            value={subDivisions}
-            set={setSubDivisions}
+            value={get('subDivisions')}
+            set={((v: any) => set('subDivisions', v))}
             label="subdivisions"
           />
         </div>
