@@ -5,6 +5,7 @@ export const defaultRustConfig = {
   bufferCompensation: 1250,
   clickOn: true,
   clickToggle: false,
+	clickVolume: 0.3,
   loopingOn: true,
   playFile: true,
   subdivision: 1,

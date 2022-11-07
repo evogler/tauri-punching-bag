@@ -38,6 +38,7 @@ struct Config {
     looping_on: bool,
     click_on: bool,
     click_toggle: bool,
+    click_volume: f64,
     play_file: bool,
     visual_monitor_on: bool,
     audio_monitor_on: bool,
@@ -88,6 +89,7 @@ fn set_config(
     loopingon: bool,
     clickon: bool,
     clicktoggle: bool,
+    clickvolume: f64,
     playfile: bool,
     visualmonitoron: bool,
     audiomonitoron: bool,
@@ -106,6 +108,7 @@ fn set_config(
     config.looping_on = loopingon;
     config.click_on = clickon;
     config.click_toggle = clicktoggle;
+    config.click_volume = clickvolume;
     config.play_file = playfile;
     config.audio_monitor_on = audiomonitoron;
     config.visual_monitor_on = visualmonitoron;
@@ -240,6 +243,7 @@ fn main() -> Result<(), coreaudio::Error> {
         looping_on: true,
         click_on: true,
         click_toggle: false,
+        click_volume: 0.3,
         play_file: true,
         visual_monitor_on: true,
         audio_monitor_on: true,
@@ -366,7 +370,11 @@ fn main() -> Result<(), coreaudio::Error> {
                         let in_loop = beat % (config.beats_to_loop * 2.0) < config.beats_to_loop;
                         if config.click_on {
                             if !config.click_toggle || in_loop {
-                                channel[i] += rng.gen::<f32>() * 0.3;
+                                let mut r = rng.gen::<f32>() * (config.click_volume as f32);
+                                if r > 1.0 {
+                                    r = 1.0;
+                                }
+                                channel[i] += r;
                             }
                         }
                     }

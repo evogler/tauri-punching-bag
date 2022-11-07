@@ -164,6 +164,7 @@ const App = () => {
             [
               ["click", "clickOn"],
               ["click toggle", "clickToggle"],
+							["click volume", "clickVolume"],
               ["looping", "loopingOn"],
               ["play file", "playFile"],
               ["visual monitor", "visualMonitorOn"],
