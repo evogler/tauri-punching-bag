@@ -21,10 +21,9 @@ export const isRustConfigKey = (k: string): k is RustConfigKey =>
 
 export const defaultJsConfig = {
   barColorMode: false,
-  beatsPerRow: 4,
+  beatsPerRow: [5, 5, 7],
 	canvasHeight: 500,
 	canvasWidth: 1000,
-  canvasRows: 4,
   subDivisions: [0, 0.6],
   visualGain: 10,
   visualSubdivision: 3,

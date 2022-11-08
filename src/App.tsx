@@ -15,7 +15,7 @@ import { Input } from "./Input";
 // const log = <T,>(label: string, x: T) => {
 //   console.log(label, x);
 //   return x;
-// };
+// // };
 
 const lowercaseKeys = <T,>(obj: T extends {} ? T : never) =>
   Object.fromEntries(Object.entries(obj).map(([k, v]) => [k.toLowerCase(), v]));
@@ -55,13 +55,18 @@ const App = () => {
     }
   };
 
-  const [log] = useState("");
-  const pixelsPerBeat = get("canvasWidth") / get("beatsPerRow");
-  const canvasRowHeight = get("canvasHeight") / get("canvasRows");
-  const beatsPerWindow = get("beatsPerRow") * get("canvasRows");
+  const [log, setLog] = useState("");
+
+  const maxBeatsInRow = Math.max(...get("beatsPerRow"));
+  const rowBeatsCumulative = get("beatsPerRow").reduce(
+    (acc, n) => [...acc, acc.slice(-1)[0] + n],
+    [0]
+  );
+  const pixelsPerBeat = get("canvasWidth") / maxBeatsInRow;
+  const canvasRowHeight = get("canvasHeight") / get("beatsPerRow").length;
+  const beatsPerWindow = get("beatsPerRow").reduce((sum, n) => sum + n);
   const canvasPos = useRef(0);
   const samples = useRef<[number, number][]>([]);
-  // const getArray = useCallback(async () => {
   const getArray = async () => {
     const result: [number, number][] = await invoke("get_samples");
     samples.current.push(...result);
@@ -75,9 +80,17 @@ const App = () => {
   };
 
   const getCanvasPos = (beat: number): [number, number] => {
+    const rows = rowBeatsCumulative;
     const b = beat % beatsPerWindow;
-    const y = Math.floor(b / get("beatsPerRow"));
-    const x = (b % get("beatsPerRow")) * pixelsPerBeat;
+    let y = 0;
+    for (let i = 1; i < rows.length; i++) {
+      if (b >= rows[i]) {
+        y = i;
+      } else {
+        break;
+      }
+    }
+    const x = (b - rows[y]) * pixelsPerBeat;
     return [x, y];
   };
 
@@ -89,7 +102,6 @@ const App = () => {
     const x = pos[0];
     const row = pos[1];
     const y = row * canvasRowHeight;
-    // ctx.strokeStyle = "#FFFFFF";
     ctx.strokeStyle = "#222222";
     ctx.lineWidth = 1;
 
@@ -120,15 +132,16 @@ const App = () => {
   let maxSample = 0;
 
   const draw = (ctx: CanvasRenderingContext2D, frameCount: number) => {
-    for (let b = 0; b < get("beatsPerRow"); b++) {
+    for (let b = 0; b < beatsPerWindow; b++) {
       for (const d of get("subDivisions")) {
         const n = b + d;
-        const x = (get("canvasWidth") / get("beatsPerRow")) * n;
+        const [x, row] = getCanvasPos(n);
+        const y = row * canvasRowHeight;
         ctx.strokeStyle = "#0088ff";
         ctx.lineWidth = d === 0 ? 3 : 1;
         ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, get("canvasHeight"));
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y + canvasRowHeight);
         ctx.stroke();
       }
     }
@@ -164,7 +177,7 @@ const App = () => {
             [
               ["click", "clickOn"],
               ["click toggle", "clickToggle"],
-							["click volume", "clickVolume"],
+              ["click volume", "clickVolume"],
               ["looping", "loopingOn"],
               ["play file", "playFile"],
               ["visual monitor", "visualMonitorOn"],
