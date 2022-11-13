@@ -1,15 +1,27 @@
 export const defaultRustConfig = {
-  audioMonitorOn: true,
+  audioMonitorOn: false,
   beatsToLoop: 4,
-  bpm: 140,
-  bufferCompensation: 1250,
+  bpm: 91,
+  bufferCompensation: 440,
   clickOn: true,
   clickToggle: false,
 	clickVolume: 0.3,
-  loopingOn: true,
+  loopingOn: false,
   playFile: true,
   subdivision: 1,
   visualMonitorOn: true,
+};
+
+export const defaultJsConfig = {
+  barColorMode: false,
+  beatsPerRow: [5, 5, 7],
+	canvasHeight: 500,
+	canvasWidth: 2000,
+  subDivisions: [0, 0.6],
+	subdivisionLoop: 1,
+	subdivisionOffset: 0,
+  visualGain: 10,
+  visualSubdivision: 3,
 };
 
 export type RustConfig = typeof defaultRustConfig;
@@ -18,16 +30,6 @@ export type RustConfigKey = keyof RustConfig;
 
 export const isRustConfigKey = (k: string): k is RustConfigKey =>
   k in defaultRustConfig;
-
-export const defaultJsConfig = {
-  barColorMode: false,
-  beatsPerRow: [5, 5, 7],
-	canvasHeight: 500,
-	canvasWidth: 1000,
-  subDivisions: [0, 0.6],
-  visualGain: 10,
-  visualSubdivision: 3,
-};
 
 export type JsConfig = typeof defaultJsConfig;
 

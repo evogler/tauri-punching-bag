@@ -17,6 +17,7 @@ use coreaudio::sys::*;
 use coreaudio::Error;
 use rand::Rng;
 use std::collections::VecDeque;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use tauri::{Manager, State};
 
@@ -30,6 +31,8 @@ struct LoopBuffer {
 }
 
 struct LoopBufferState(Arc<Mutex<LoopBuffer>>);
+
+struct BeatResetState(Arc<AtomicBool>);
 
 #[derive(Clone)]
 struct Config {
@@ -79,6 +82,12 @@ fn get_samples(state: State<SampleOutputBuffer>) -> Result<Vec<(f32, f32)>, Stri
     } else {
         return Err("get_samples failed.".into());
     }
+}
+
+#[tauri::command]
+fn reset_beat(state: State<BeatResetState>) -> Result<(), String> {
+    state.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    Ok(())
 }
 
 #[tauri::command]
@@ -177,6 +186,12 @@ fn get_input_output_channels() -> Result<(AudioUnit, AudioUnit), Error> {
     let asbd = out_stream_format.to_asbd();
     output_audio_unit.set_property(id, Scope::Input, Element::Output, Some(&asbd))?;
 
+    // set audiounit buffer size to 32 samples
+    let id = kAudioDevicePropertyBufferFrameSize;
+    let buffer_size: u32 = 32;
+    input_audio_unit.set_property(id, Scope::Output, Element::Input, Some(&buffer_size))?;
+    output_audio_unit.set_property(id, Scope::Input, Element::Output, Some(&buffer_size))?;
+
     Ok((input_audio_unit, output_audio_unit))
 }
 
@@ -225,7 +240,7 @@ fn make_buffers() -> Buffers {
 }
 fn main() -> Result<(), coreaudio::Error> {
     // let path = "/Users/eric/Music/Logic/ICHTY180.wav".into();
-    let path = "/Users/eric/Music/Logic/neosoul140.wav".into();
+    let path = "/Users/eric/Music/Logic/tauri-file.wav".into();
     let mp3 = get_samples_from_filename(&path).unwrap();
     let mut mp3_pos: usize = 0;
 
@@ -238,16 +253,16 @@ fn main() -> Result<(), coreaudio::Error> {
     let mut rng = rand::thread_rng();
 
     let config = Config {
-        bpm: 140.0,
+        bpm: 91.0,
         beats_to_loop: 4.0,
-        looping_on: true,
+        looping_on: false,
         click_on: true,
         click_toggle: false,
         click_volume: 0.3,
         play_file: true,
         visual_monitor_on: true,
-        audio_monitor_on: true,
-        buffer_compensation: 1250,
+        audio_monitor_on: false,
+        buffer_compensation: 440,
         subdivision: 1.0,
     };
     let config_state = ConfigState(Arc::new(Mutex::new(config)));
@@ -271,17 +286,22 @@ fn main() -> Result<(), coreaudio::Error> {
     let loop_buffer_clone = loop_buffer_mutex_arc.clone();
     let loop_buffer_state = LoopBufferState(loop_buffer_mutex_arc.clone());
 
+    let should_reset_beat_arc = Arc::new(AtomicBool::new(false));
+    let should_reset_beat = should_reset_beat_arc.clone();
+    let should_reset_beat_state = BeatResetState(should_reset_beat_arc.clone());
+
     let mut beat: f64 = 0.0;
     let mut last_beat: usize = 0;
 
     // let mp3_bpm: f64;
     // mp3_bpm = config.clone().bpm;
-    let mp3_bpm = 140.0f64;
+    // let mp3_bpm = 91.0f64;
 
-    let mp3_loop_len = ((SAMPLE_RATE * 60.0 / mp3_bpm) * (2.0 * 4.0 * 8.0)) as usize;
-    if mp3_loop_len > mp3.len() {
-        panic!("trying to loop past EOF");
-    }
+    // let mp3_loop_len = ((SAMPLE_RATE * 60.0 / mp3_bpm) * (2.0 * 4.0 * 4.0)) as usize;
+    let mp3_loop_len = (&mp3).len();
+    // if mp3_loop_len > mp3.len() {
+    //     panic!("trying to loop past EOF");
+    // }
 
     start_input_audio_unit(
         &mut input_audio_unit,
@@ -302,6 +322,12 @@ fn main() -> Result<(), coreaudio::Error> {
         let config = config1.lock().unwrap();
         let mut loop_buffer = loop_buffer_clone.lock().unwrap();
         let beats_per_sample: f64 = config.bpm / SAMPLE_RATE / 60f64;
+
+        if should_reset_beat.load(std::sync::atomic::Ordering::Relaxed) {
+            beat = 0.0;
+            mp3_pos = 0;
+            should_reset_beat_arc.store(false, std::sync::atomic::Ordering::Relaxed);
+        }
 
         if let Ok(mut state_vec) = sample_output_buffer_clone.lock() {
             for i in 0..num_frames {
@@ -390,7 +416,12 @@ fn main() -> Result<(), coreaudio::Error> {
         .manage(sample_output_buffer)
         .manage(config_state)
         .manage(loop_buffer_state)
-        .invoke_handler(tauri::generate_handler![get_samples, set_config])
+        .manage(should_reset_beat_state)
+        .invoke_handler(tauri::generate_handler![
+            get_samples,
+            set_config,
+            reset_beat,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 

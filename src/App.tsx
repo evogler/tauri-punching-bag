@@ -11,6 +11,7 @@ import {
   ConfigKey,
 } from "./config";
 import { Input } from "./Input";
+import { appWindow } from "@tauri-apps/api/window";
 
 // const log = <T,>(label: string, x: T) => {
 //   console.log(label, x);
@@ -20,7 +21,16 @@ import { Input } from "./Input";
 const lowercaseKeys = <T,>(obj: T extends {} ? T : never) =>
   Object.fromEntries(Object.entries(obj).map(([k, v]) => [k.toLowerCase(), v]));
 
+// const getIntervals = (nums: number[]): number[] => {
+//   const res: number[] = [];
+//   for (let i = 1; i < res.length; i++) {
+//     res.push(res[i] - res[i - 1]);
+//   }
+//   return res;
+// };
+
 const App = () => {
+  const [log, setLog] = useState("");
   // useEffect(() => {
   //   alert("about to try to get audio");
   //   try {
@@ -40,6 +50,18 @@ const App = () => {
     setInterval(getArray, 1000 / 100);
   });
 
+  useEffect(() => {
+    appWindow.onFileDropEvent((event) => {
+      if (event.payload.type === "hover") {
+        setLog("User hovering " + JSON.stringify(event.payload.paths));
+      } else if (event.payload.type === "drop") {
+        setLog("User dropped " + JSON.stringify(event.payload.paths));
+      } else {
+        setLog("File drop cancelled");
+      }
+    });
+  });
+
   const [rustConfig, setRustConfig] = useState(defaultRustConfig);
   const [jsConfig, setJsConfig] = useState(defaultJsConfig);
   const get = <T extends ConfigKey>(k: T) => {
@@ -55,7 +77,6 @@ const App = () => {
     }
   };
 
-  const [log, setLog] = useState("");
 
   const maxBeatsInRow = Math.max(...get("beatsPerRow"));
   const rowBeatsCumulative = get("beatsPerRow").reduce(
@@ -78,6 +99,10 @@ const App = () => {
     setRustConfig(newRustConfig);
     invoke("set_config", lowercaseKeys(newRustConfig));
   };
+
+	const resetBeat = () => {
+		invoke("reset_beat");
+	}
 
   const getCanvasPos = (beat: number): [number, number] => {
     const rows = rowBeatsCumulative;
@@ -132,10 +157,13 @@ const App = () => {
   let maxSample = 0;
 
   const draw = (ctx: CanvasRenderingContext2D, frameCount: number) => {
-    for (let b = 0; b < beatsPerWindow; b++) {
+    let startBeat = 0;
+    let b = 0;
+    while (b < beatsPerWindow) {
       for (const d of get("subDivisions")) {
-        const n = b + d;
-        const [x, row] = getCanvasPos(n);
+        b = startBeat + d + get("subdivisionOffset");
+        if (b >= beatsPerWindow) break;
+        const [x, row] = getCanvasPos(b);
         const y = row * canvasRowHeight;
         ctx.strokeStyle = "#0088ff";
         ctx.lineWidth = d === 0 ? 3 : 1;
@@ -144,6 +172,7 @@ const App = () => {
         ctx.lineTo(x, y + canvasRowHeight);
         ctx.stroke();
       }
+      startBeat += get("subdivisionLoop");
     }
 
     const vals = samples.current;
@@ -164,6 +193,7 @@ const App = () => {
   return (
     <>
       <div>{log}</div>
+			<button onClick={resetBeat}>RESET TIME</button>
       <div style={{ display: "flex", flexDirection: "row" }}>
         <div
           style={{
@@ -188,10 +218,10 @@ const App = () => {
               ["subdivision", "subdivision"],
               ["bufferCompensation", "bufferCompensation"],
               ["visual gain", "visualGain"],
-              ["visual subdivision", "visualSubdivision"],
+              ["visual subdivision loop", "subdivisionLoop"],
               ["beats per row", "beatsPerRow"],
-              ["canvas rows", "canvasRows"],
               ["subdivisions", "subDivisions"],
+              ["subdivision offset", "subdivisionOffset"],
               ["canvas height", "canvasHeight"],
               ["canvas width", "canvasWidth"],
             ] as [string, ConfigKey][]
