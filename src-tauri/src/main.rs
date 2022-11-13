@@ -32,6 +32,13 @@ struct LoopBuffer {
 
 struct LoopBufferState(Arc<Mutex<LoopBuffer>>);
 
+struct Mp3Buffer {
+    buffer: Vec<f32>,
+    pos: usize,
+}
+
+struct Mp3BufferState(Arc<Mutex<Mp3Buffer>>);
+
 struct BeatResetState(Arc<AtomicBool>);
 
 #[derive(Clone)]
@@ -138,6 +145,25 @@ fn set_config(
     }
 }
 
+#[tauri::command]
+fn set_mp3_buffer(app_handle: tauri::AppHandle, filename: String) {
+    let mp3_buffer_state: tauri::State<Mp3BufferState> = app_handle.state();
+    let beat_state_reset: tauri::State<BeatResetState> = app_handle.state();
+    let mut mp3_buffer = mp3_buffer_state.0.lock().unwrap();
+    let samples = get_samples_from_filename(&filename);
+    if let Err(_err) = samples {
+        println!("Error while reading file: {}", _err);
+    } else {
+        let samples = samples.unwrap();
+        println!("samples: {}", samples.len());
+        mp3_buffer.buffer = samples;
+        mp3_buffer.pos = 0;
+        beat_state_reset
+            .0
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 fn get_input_output_channels() -> Result<(AudioUnit, AudioUnit), Error> {
     let mut input_audio_unit =
         audio_unit_from_device_id(get_default_device_id(true).unwrap(), true)?;
@@ -239,12 +265,25 @@ fn make_buffers() -> Buffers {
     }
 }
 fn main() -> Result<(), coreaudio::Error> {
-    // let path = "/Users/eric/Music/Logic/ICHTY180.wav".into();
+    let mut mp3_loaded = false;
     let path = "/Users/eric/Music/Logic/tauri-file.wav".into();
-    let mp3 = get_samples_from_filename(&path).unwrap();
-    let mut mp3_pos: usize = 0;
+    let data = get_samples_from_filename(&path);
+    let mp3_arc: Arc<Mutex<Mp3Buffer>>;
+    if let Ok(data) = data {
+        mp3_loaded = true;
+        mp3_arc = Arc::new(Mutex::new(Mp3Buffer {
+            buffer: data,
+            pos: 0,
+        }));
+    } else {
+        mp3_arc = Arc::new(Mutex::new(Mp3Buffer {
+            buffer: vec![],
+            pos: 0,
+        }));
+    }
 
-    println!("Read mp3 file with length: {}.", mp3.len());
+    let mp3 = mp3_arc.clone();
+    let mp3_state = Mp3BufferState(mp3_arc.clone());
 
     let (mut input_audio_unit, mut output_audio_unit) = get_input_output_channels().unwrap();
     let buffers = make_buffers();
@@ -293,15 +332,7 @@ fn main() -> Result<(), coreaudio::Error> {
     let mut beat: f64 = 0.0;
     let mut last_beat: usize = 0;
 
-    // let mp3_bpm: f64;
-    // mp3_bpm = config.clone().bpm;
-    // let mp3_bpm = 91.0f64;
-
-    // let mp3_loop_len = ((SAMPLE_RATE * 60.0 / mp3_bpm) * (2.0 * 4.0 * 4.0)) as usize;
-    let mp3_loop_len = (&mp3).len();
-    // if mp3_loop_len > mp3.len() {
-    //     panic!("trying to loop past EOF");
-    // }
+    // let mut mp3_sample = 0f32;
 
     start_input_audio_unit(
         &mut input_audio_unit,
@@ -322,10 +353,11 @@ fn main() -> Result<(), coreaudio::Error> {
         let config = config1.lock().unwrap();
         let mut loop_buffer = loop_buffer_clone.lock().unwrap();
         let beats_per_sample: f64 = config.bpm / SAMPLE_RATE / 60f64;
+        let mut mp3 = mp3.lock().unwrap();
 
         if should_reset_beat.load(std::sync::atomic::Ordering::Relaxed) {
             beat = 0.0;
-            mp3_pos = 0;
+            mp3.pos = 0;
             should_reset_beat_arc.store(false, std::sync::atomic::Ordering::Relaxed);
         }
 
@@ -363,14 +395,16 @@ fn main() -> Result<(), coreaudio::Error> {
 
                     channel[i] = audio_out * 12.0;
 
-                    if config.play_file {
-                        channel[i] += mp3[mp3_pos];
+                    // mp3_sample = mp3_sample * 0.995 + mp3[mp3_pos] * 0.005;
+                    if mp3_loaded && config.play_file {
+                        channel[i] += mp3.buffer[mp3.pos];
+                        // channel[i] += mp3_sample;
                     }
                     if ch == 0 || ch == 1 {
-                        mp3_pos += 1;
+                        mp3.pos += 1;
                     }
-                    if mp3_pos >= mp3_loop_len {
-                        mp3_pos = 0;
+                    if mp3.pos >= mp3.buffer.len() {
+                        mp3.pos = 0;
                     }
 
                     loop_buffer.pos += 1;
@@ -416,11 +450,13 @@ fn main() -> Result<(), coreaudio::Error> {
         .manage(sample_output_buffer)
         .manage(config_state)
         .manage(loop_buffer_state)
+        .manage(mp3_state)
         .manage(should_reset_beat_state)
         .invoke_handler(tauri::generate_handler![
             get_samples,
             set_config,
             reset_beat,
+            set_mp3_buffer,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

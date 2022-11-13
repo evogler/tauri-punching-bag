@@ -9,7 +9,11 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
 pub fn get_samples_from_filename(filename: &String) -> Result<Vec<f32>, String> {
-    let src = std::fs::File::open(&filename).expect("failed to open media");
+    let src_result = std::fs::File::open(&filename);
+    if let Err(e) = src_result {
+        return Err(format!("Failed to open file: {}", e));
+    }
+    let src = src_result.unwrap();
 
     // Create the media source stream.
     let mss = MediaSourceStream::new(Box::new(src), Default::default());
@@ -23,27 +27,34 @@ pub fn get_samples_from_filename(filename: &String) -> Result<Vec<f32>, String> 
     let fmt_opts: FormatOptions = Default::default();
 
     // Probe the media source.
-    let probed = symphonia::default::get_probe()
-        .format(&hint, mss, &fmt_opts, &meta_opts)
-        .expect("unsupported format");
+    let probed_result = symphonia::default::get_probe().format(&hint, mss, &fmt_opts, &meta_opts);
+    if let Err(_err) = probed_result {
+        return Err("unsupported format".to_string());
+    }
+    let probed = probed_result.unwrap();
 
     // Get the instantiated format reader.
     let mut format = probed.format;
 
     // Find the first audio track with a known (decodeable) codec.
-    let track = format
+    let track_result = format
         .tracks()
         .iter()
-        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-        .expect("no supported audio tracks");
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL);
+    if let None = track_result {
+        return Err("no audio track found".to_string());
+    }
+    let track = track_result.unwrap();
 
     // Use the default options for the decoder.
     let dec_opts: DecoderOptions = Default::default();
 
     // Create a decoder for the track.
-    let mut decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &dec_opts)
-        .expect("unsupported codec");
+    let decoder_result = symphonia::default::get_codecs().make(&track.codec_params, &dec_opts);
+    if let Err(_err) = decoder_result {
+        return Err("unsupported codec".to_string());
+    }
+    let mut decoder = decoder_result.unwrap();
 
     // Store the track identifier, it will be used to filter packets.
     let track_id = track.id;

@@ -50,12 +50,17 @@ const App = () => {
     setInterval(getArray, 1000 / 100);
   });
 
-  useEffect(() => {
+	const pickNewMp3 = (filename: string) => () => {
+    invoke("set_mp3_buffer", { filename });
+  };
+
+	useEffect(() => {
     appWindow.onFileDropEvent((event) => {
       if (event.payload.type === "hover") {
         setLog("User hovering " + JSON.stringify(event.payload.paths));
       } else if (event.payload.type === "drop") {
         setLog("User dropped " + JSON.stringify(event.payload.paths));
+				pickNewMp3(event.payload.paths[0])();
       } else {
         setLog("File drop cancelled");
       }
@@ -76,7 +81,6 @@ const App = () => {
       setJsConfig((jsConfig) => ({ ...jsConfig, [k]: v }));
     }
   };
-
 
   const maxBeatsInRow = Math.max(...get("beatsPerRow"));
   const rowBeatsCumulative = get("beatsPerRow").reduce(
@@ -100,9 +104,9 @@ const App = () => {
     invoke("set_config", lowercaseKeys(newRustConfig));
   };
 
-	const resetBeat = () => {
-		invoke("reset_beat");
-	}
+  const resetBeat = () => {
+    invoke("reset_beat");
+  };
 
   const getCanvasPos = (beat: number): [number, number] => {
     const rows = rowBeatsCumulative;
@@ -193,7 +197,9 @@ const App = () => {
   return (
     <>
       <div>{log}</div>
-			<button onClick={resetBeat}>RESET TIME</button>
+      <button onClick={resetBeat}>RESET TIME</button>
+      <button onClick={pickNewMp3( "/Users/eric/Music/Logic/Logic_3.wav")}>NEW MP3 1</button>
+      <button onClick={pickNewMp3( "/Users/eric/Music/Logic/Logic_4.wav")}>NEW MP3 2</button>
       <div style={{ display: "flex", flexDirection: "row" }}>
         <div
           style={{
