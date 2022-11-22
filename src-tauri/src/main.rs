@@ -53,7 +53,7 @@ struct Config {
     visual_monitor_on: bool,
     audio_monitor_on: bool,
     buffer_compensation: usize,
-    subdivision: f64,
+    audio_subdivisions: Vec<f64>,
 }
 struct ConfigState(Arc<Mutex<Config>>);
 
@@ -78,6 +78,36 @@ fn mod_add(a: usize, b: usize, max: usize) -> usize {
         res -= max;
     }
     res
+}
+
+fn bisect<T: std::cmp::PartialOrd>(arr: &Vec<T>, val: T) -> isize {
+    let mut lo = 0;
+    let mut hi = arr.len();
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if arr[mid] > val {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    lo as isize - 1
+}
+
+fn beat_bisect(subdivisions: &Vec<f64>, beat: f64) -> isize {
+    let default_subdivisions = &vec![0.0, 1.0];
+    let subdivisions = if subdivisions.len() < 2 {
+        &default_subdivisions
+    } else {
+        subdivisions
+    };
+    // the length of the subdivision loop is the last value of config subdivision
+    let subdivision_len = subdivisions[subdivisions.len() - 1];
+    let beats_per_loop = subdivisions.len() as isize - 1;
+    let loop_count = (beat / subdivision_len).floor() as isize;
+    let sub_beat = beat - (loop_count as f64 * subdivision_len);
+    let bisection = bisect(subdivisions, sub_beat);
+    loop_count * beats_per_loop + bisection
 }
 
 #[tauri::command]
@@ -110,7 +140,7 @@ fn set_config(
     visualmonitoron: bool,
     audiomonitoron: bool,
     buffercompensation: usize,
-    subdivision: f64,
+    audiosubdivisions: Vec<f64>,
 ) {
     println!("set_config called");
     let config_state: tauri::State<ConfigState> = app_handle.state();
@@ -129,7 +159,7 @@ fn set_config(
     config.audio_monitor_on = audiomonitoron;
     config.visual_monitor_on = visualmonitoron;
     config.buffer_compensation = buffercompensation;
-    config.subdivision = subdivision;
+    config.audio_subdivisions = audiosubdivisions;
 
     if should_update_loop_buffer {
         println!("hi!");
@@ -303,7 +333,7 @@ fn main() -> Result<(), coreaudio::Error> {
         visual_monitor_on: true,
         audio_monitor_on: false,
         buffer_compensation: 4330,
-        subdivision: 1.0,
+        audio_subdivisions: vec![0.0, 1.0],
     };
     let config_state = ConfigState(Arc::new(Mutex::new(config)));
     let config1 = config_state.0.clone();
@@ -331,7 +361,7 @@ fn main() -> Result<(), coreaudio::Error> {
     let should_reset_beat_state = BeatResetState(should_reset_beat_arc.clone());
 
     let mut beat: f64 = 0.0;
-    let mut last_beat: usize = 0;
+    let mut last_beat: isize = 0;
 
     // let mut mp3_sample = 0f32;
 
@@ -417,9 +447,12 @@ fn main() -> Result<(), coreaudio::Error> {
                         (beat - (config.buffer_compensation as f64) * beats_per_sample) as f32;
                     state_vec.push((visual_beat, visual_out.abs()));
 
-                    let adjusted_beat = (beat * config.subdivision) as usize;
+                    let adjusted_beat = beat_bisect(&config.audio_subdivisions, beat);
                     if adjusted_beat != last_beat {
-                        if adjusted_beat % (config.subdivision as usize) == 0 {
+                        if config.audio_subdivisions.len() < 2
+                            || (adjusted_beat % ((config.audio_subdivisions.len() - 1) as isize)
+                                == 0)
+                        {
                             click_sound_counter = 400;
                         } else {
                             click_sound_counter = 100;

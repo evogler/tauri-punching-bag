@@ -5,24 +5,23 @@ export const defaultRustConfig = {
   bufferCompensation: 4330,
   clickOn: true,
   clickToggle: false,
-	clickVolume: 0.3,
+  clickVolume: 0.3,
   loopingOn: false,
   playFile: true,
-  subdivision: 1,
+  audioSubdivisions: [0, 1],
   visualMonitorOn: true,
 };
 
 export const defaultJsConfig = {
   barColorMode: false,
   beatsPerRow: [2, 2],
-	canvasHeight: 1000,
-	canvasWidth: 2000,
-	margin: 0.11,
-  subDivisions: [0, 0.6],
-	subdivisionLoop: 1,
-	subdivisionOffset: 0,
+  canvasHeight: 1000,
+  canvasWidth: 2000,
+  margin: 0.11,
+  visualSubdivisions: [0, 0.6],
+  subdivisionLoop: 1,
+  subdivisionOffset: 0,
   visualGain: 10,
-  visualSubdivision: 3,
 };
 
 export type RustConfig = typeof defaultRustConfig;

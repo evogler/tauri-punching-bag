@@ -191,7 +191,7 @@ const App = () => {
     let startBeat = 0;
     let b = 0;
     while (b < beatsPerWindow) {
-      for (const d of get("subDivisions")) {
+      for (const d of get("visualSubdivisions")) {
         b = startBeat + d + get("subdivisionOffset");
         if (b >= beatsPerWindow) break;
         const [x, row] = getCanvasPos(b);
@@ -256,13 +256,13 @@ const App = () => {
               ["bar color mode", "barColorMode"],
               ["bpm", "bpm"],
               ["beatsToLoop", "beatsToLoop"],
-              ["subdivision", "subdivision"],
+              ["audio subdivisions", "audioSubdivisions"],
               ["bufferCompensation", "bufferCompensation"],
               ["visual gain", "visualGain"],
               ["visual subdivision loop", "subdivisionLoop"],
               ["beats per row", "beatsPerRow"],
               ["margin", "margin"],
-              ["subdivisions", "subDivisions"],
+              ["visual subdivisions", "visualSubdivisions"],
               ["subdivision offset", "subdivisionOffset"],
               ["canvas height", "canvasHeight"],
               ["canvas width", "canvasWidth"],
