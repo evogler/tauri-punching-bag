@@ -47,20 +47,34 @@ const App = () => {
   // });
 
   useEffect(() => {
+    // console log the new window size whenever the window is resized
+    appWindow.onResized(() => {
+      appWindow.innerSize().then(({ width, height }) => {
+        // setLog(`${width}x${height}`);
+        setJsConfig((jsConfig) => ({
+          ...jsConfig,
+          canvasHeight: height - 250,
+          canvasWidth: width - 500,
+        }));
+      });
+    });
+  });
+
+  useEffect(() => {
     setInterval(getArray, 1000 / 100);
   });
 
-	const pickNewMp3 = (filename: string) => () => {
+  const pickNewMp3 = (filename: string) => () => {
     invoke("set_mp3_buffer", { filename });
   };
 
-	useEffect(() => {
+  useEffect(() => {
     appWindow.onFileDropEvent((event) => {
       if (event.payload.type === "hover") {
         setLog("User hovering " + JSON.stringify(event.payload.paths));
       } else if (event.payload.type === "drop") {
         setLog("User dropped " + JSON.stringify(event.payload.paths));
-				pickNewMp3(event.payload.paths[0])();
+        pickNewMp3(event.payload.paths[0])();
       } else {
         setLog("File drop cancelled");
       }
@@ -82,7 +96,7 @@ const App = () => {
     }
   };
 
-  const maxBeatsInRow = Math.max(...get("beatsPerRow"));
+  const maxBeatsInRow = Math.max(...get("beatsPerRow")) + 2 * get("margin");
   const rowBeatsCumulative = get("beatsPerRow").reduce(
     (acc, n) => [...acc, acc.slice(-1)[0] + n],
     [0]
@@ -90,6 +104,7 @@ const App = () => {
   const pixelsPerBeat = get("canvasWidth") / maxBeatsInRow;
   const canvasRowHeight = get("canvasHeight") / get("beatsPerRow").length;
   const beatsPerWindow = get("beatsPerRow").reduce((sum, n) => sum + n);
+  const marginPixels = get("margin") * pixelsPerBeat;
   const canvasPos = useRef(0);
   const samples = useRef<[number, number][]>([]);
   const getArray = async () => {
@@ -108,7 +123,7 @@ const App = () => {
     invoke("reset_beat");
   };
 
-  const getCanvasPos = (beat: number): [number, number] => {
+  const getCanvasPos = (beat: number, rowOffset = 0): [number, number] => {
     const rows = rowBeatsCumulative;
     const b = beat % beatsPerWindow;
     let y = 0;
@@ -119,14 +134,26 @@ const App = () => {
         break;
       }
     }
-    const x = (b - rows[y]) * pixelsPerBeat;
+    y = (y + rowOffset + (rows.length - 1)) % (rows.length - 1);
+    let x = (b - rows[y]) * pixelsPerBeat + get("margin") * pixelsPerBeat;
+    if (x > beatsPerWindow * pixelsPerBeat) {
+      x -= beatsPerWindow * pixelsPerBeat;
+    } else if (x < 0) {
+      x += beatsPerWindow * pixelsPerBeat;
+    }
+
     return [x, y];
+    // y = (y + rowOffset + rows.length) % rows.length;
+    // let x = (b - rows[y]) * pixelsPerBeat + get("margin") * pixelsPerBeat;
+    // if (x > beatsPerWindow * pixelsPerBeat) x -= beatsPerWindow * pixelsPerBeat;
+    // return [x, y];
   };
 
   const drawSample = (
     ctx: CanvasRenderingContext2D,
     pos: [number, number],
-    value: number
+    value: number,
+    isMarginColor = false
   ) => {
     const x = pos[0];
     const row = pos[1];
@@ -150,7 +177,7 @@ const App = () => {
       ctx.moveTo(x, y);
       ctx.lineTo(x, y + (canvasRowHeight - 1));
     } else {
-      ctx.strokeStyle = "#CCC";
+      ctx.strokeStyle = isMarginColor ? "#888" : "#CCC";
       const ch = canvasRowHeight - 1;
       ctx.moveTo(x, y + (0.5 - 0.5 * value) * ch);
       ctx.lineTo(x, y + (0.5 + 0.5 * value) * ch);
@@ -186,7 +213,10 @@ const App = () => {
       const [x, y] = getCanvasPos(beat);
       maxSample = Math.max(maxSample, val);
       if (x !== canvasPos.current) {
-        drawSample(ctx, [x, y], Math.min(1, maxSample * get("visualGain")));
+        const val = Math.min(1, maxSample * get("visualGain"));
+        drawSample(ctx, [x, y], val);
+        drawSample(ctx, getCanvasPos(beat, 1), val, true);
+        drawSample(ctx, getCanvasPos(beat, -1), val, true);
         maxSample = 0;
         canvasPos.current = x;
       }
@@ -198,8 +228,12 @@ const App = () => {
     <>
       <div>{log}</div>
       <button onClick={resetBeat}>RESET TIME</button>
-      <button onClick={pickNewMp3( "/Users/eric/Music/Logic/Logic_3.wav")}>NEW MP3 1</button>
-      <button onClick={pickNewMp3( "/Users/eric/Music/Logic/Logic_4.wav")}>NEW MP3 2</button>
+      <button onClick={pickNewMp3("/Users/eric/Music/Logic/Logic_3.wav")}>
+        NEW MP3 1
+      </button>
+      <button onClick={pickNewMp3("/Users/eric/Music/Logic/Logic_4.wav")}>
+        NEW MP3 2
+      </button>
       <div style={{ display: "flex", flexDirection: "row" }}>
         <div
           style={{
@@ -207,6 +241,7 @@ const App = () => {
             flexDirection: "column",
             padding: "8px",
             gap: "8px",
+            overflowY: "auto",
           }}
         >
           {(
@@ -226,6 +261,7 @@ const App = () => {
               ["visual gain", "visualGain"],
               ["visual subdivision loop", "subdivisionLoop"],
               ["beats per row", "beatsPerRow"],
+              ["margin", "margin"],
               ["subdivisions", "subDivisions"],
               ["subdivision offset", "subdivisionOffset"],
               ["canvas height", "canvasHeight"],

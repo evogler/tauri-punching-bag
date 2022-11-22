@@ -2,7 +2,7 @@ export const defaultRustConfig = {
   audioMonitorOn: false,
   beatsToLoop: 4,
   bpm: 91,
-  bufferCompensation: 440,
+  bufferCompensation: 4330,
   clickOn: true,
   clickToggle: false,
 	clickVolume: 0.3,
@@ -14,9 +14,10 @@ export const defaultRustConfig = {
 
 export const defaultJsConfig = {
   barColorMode: false,
-  beatsPerRow: [5, 5, 7],
-	canvasHeight: 500,
+  beatsPerRow: [2, 2],
+	canvasHeight: 1000,
 	canvasWidth: 2000,
+	margin: 0.11,
   subDivisions: [0, 0.6],
 	subdivisionLoop: 1,
 	subdivisionOffset: 0,

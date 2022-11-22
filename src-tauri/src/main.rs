@@ -212,9 +212,9 @@ fn get_input_output_channels() -> Result<(AudioUnit, AudioUnit), Error> {
     let asbd = out_stream_format.to_asbd();
     output_audio_unit.set_property(id, Scope::Input, Element::Output, Some(&asbd))?;
 
-    // set audiounit buffer size to 32 samples
+    // set audiounit buffer size to 32 samples, or however
     let id = kAudioDevicePropertyBufferFrameSize;
-    let buffer_size: u32 = 32;
+    let buffer_size: u32 = 2048;
     input_audio_unit.set_property(id, Scope::Output, Element::Input, Some(&buffer_size))?;
     output_audio_unit.set_property(id, Scope::Input, Element::Output, Some(&buffer_size))?;
 
@@ -264,6 +264,7 @@ fn make_buffers() -> Buffers {
         consumer_right: buffer_right.clone(),
     }
 }
+
 fn main() -> Result<(), coreaudio::Error> {
     let mut mp3_loaded = false;
     let path = "/Users/eric/Music/Logic/tauri-file.wav".into();
@@ -301,7 +302,7 @@ fn main() -> Result<(), coreaudio::Error> {
         play_file: true,
         visual_monitor_on: true,
         audio_monitor_on: false,
-        buffer_compensation: 440,
+        buffer_compensation: 4330,
         subdivision: 1.0,
     };
     let config_state = ConfigState(Arc::new(Mutex::new(config)));
@@ -381,7 +382,7 @@ fn main() -> Result<(), coreaudio::Error> {
 
                     let compensated_loop_buffer_pos = mod_add(
                         loop_buffer.pos,
-                        config.buffer_compensation,
+                        config.buffer_compensation * 2,
                         loop_buffer.buffer.len(),
                     );
 
