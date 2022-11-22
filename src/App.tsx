@@ -18,16 +18,22 @@ import { appWindow } from "@tauri-apps/api/window";
 //   return x;
 // // };
 
-const lowercaseKeys = <T,>(obj: T extends {} ? T : never) =>
-  Object.fromEntries(Object.entries(obj).map(([k, v]) => [k.toLowerCase(), v]));
+const mapFuncOnObjectKeys = <T,>(
+	obj: Record<string, T>,
+	func: (key: string) => string
+) => {
+	const newObj: Record<string, T> = {};
+	for (const key in obj) {
+		newObj[func(key)] = obj[key];
+	}
+	return newObj;
+};
 
-// const getIntervals = (nums: number[]): number[] => {
-//   const res: number[] = [];
-//   for (let i = 1; i < res.length; i++) {
-//     res.push(res[i] - res[i - 1]);
-//   }
-//   return res;
-// };
+const camelCaseToSnakeCase = (str: string) =>
+	str.replace(/([A-Z])/g, (g) => `_${g[0].toLowerCase()}`);
+
+const snakeCaseKeys = <T,>(obj: Record<string, T>) =>
+	mapFuncOnObjectKeys(obj, camelCaseToSnakeCase);
 
 const App = () => {
   const [log, setLog] = useState("");
@@ -114,9 +120,11 @@ const App = () => {
 
   const updateRustConfig = (args: Partial<RustConfig>) => {
     console.log("calling set_config");
-    const newRustConfig = { ...rustConfig, ...args };
-    setRustConfig(newRustConfig);
-    invoke("set_config", lowercaseKeys(newRustConfig));
+    const newConfig = { ...rustConfig, ...args };
+    setRustConfig(newConfig);
+		console.log('calling set_config with ' + JSON.stringify(snakeCaseKeys(newConfig)));
+    invoke("set_config", { newConfig: snakeCaseKeys(newConfig) });
+		console.log('called set_config');
   };
 
   const resetBeat = () => {

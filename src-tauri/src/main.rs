@@ -16,6 +16,7 @@ use coreaudio::audio_unit::{AudioUnit, Element, SampleFormat, Scope, StreamForma
 use coreaudio::sys::*;
 use coreaudio::Error;
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -41,7 +42,7 @@ struct Mp3BufferState(Arc<Mutex<Mp3Buffer>>);
 
 struct BeatResetState(Arc<AtomicBool>);
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 struct Config {
     bpm: f64,
     beats_to_loop: f64,
@@ -128,42 +129,18 @@ fn reset_beat(state: State<BeatResetState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn set_config(
-    app_handle: tauri::AppHandle,
-    bpm: f64,
-    beatstoloop: f64,
-    loopingon: bool,
-    clickon: bool,
-    clicktoggle: bool,
-    clickvolume: f64,
-    playfile: bool,
-    visualmonitoron: bool,
-    audiomonitoron: bool,
-    buffercompensation: usize,
-    audiosubdivisions: Vec<f64>,
-) {
-    println!("set_config called");
+fn set_config(app_handle: tauri::AppHandle, new_config: Config) {
+    println!("set_config called: {:?}", new_config);
     let config_state: tauri::State<ConfigState> = app_handle.state();
     let mut config = config_state.0.lock().unwrap();
 
-    let should_update_loop_buffer = bpm != config.bpm
-        || beatstoloop != config.beats_to_loop
-        || buffercompensation != config.buffer_compensation;
-    config.bpm = bpm;
-    config.beats_to_loop = beatstoloop;
-    config.looping_on = loopingon;
-    config.click_on = clickon;
-    config.click_toggle = clicktoggle;
-    config.click_volume = clickvolume;
-    config.play_file = playfile;
-    config.audio_monitor_on = audiomonitoron;
-    config.visual_monitor_on = visualmonitoron;
-    config.buffer_compensation = buffercompensation;
-    config.audio_subdivisions = audiosubdivisions;
+    let should_update_loop_buffer = new_config.bpm != config.bpm
+        || new_config.beats_to_loop != config.beats_to_loop
+        || new_config.buffer_compensation != config.buffer_compensation;
+    *config = new_config;
 
     if should_update_loop_buffer {
-        println!("hi!");
-        // let c = config_state.0.clone();
+        println!("updating loop buffer");
         let c = config.clone();
         let new_buffer_size = get_loop_buffer_size(&c);
         let loop_buffer_state: tauri::State<LoopBufferState> = app_handle.state();
