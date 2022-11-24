@@ -12,6 +12,7 @@ import {
 } from "./config";
 import { Input } from "./Input";
 import { appWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 
 // const log = <T,>(label: string, x: T) => {
 //   console.log(label, x);
@@ -19,24 +20,34 @@ import { appWindow } from "@tauri-apps/api/window";
 // // };
 
 const mapFuncOnObjectKeys = <T,>(
-	obj: Record<string, T>,
-	func: (key: string) => string
+  obj: Record<string, T>,
+  func: (key: string) => string
 ) => {
-	const newObj: Record<string, T> = {};
-	for (const key in obj) {
-		newObj[func(key)] = obj[key];
-	}
-	return newObj;
+  const newObj: Record<string, T> = {};
+  for (const key in obj) {
+    newObj[func(key)] = obj[key];
+  }
+  return newObj;
 };
 
 const camelCaseToSnakeCase = (str: string) =>
-	str.replace(/([A-Z])/g, (g) => `_${g[0].toLowerCase()}`);
+  str.replace(/([A-Z])/g, (g) => `_${g[0].toLowerCase()}`);
 
 const snakeCaseKeys = <T,>(obj: Record<string, T>) =>
-	mapFuncOnObjectKeys(obj, camelCaseToSnakeCase);
+  mapFuncOnObjectKeys(obj, camelCaseToSnakeCase);
 
 const App = () => {
-  const [log, setLog] = useState("");
+	const [log, setLog] = useState("log");
+  useEffect(() => {
+		const setListener = async () => {
+			await listen('log', (msg) => {
+				// @ts-expect-error I don't feel like typing this
+				setLog(JSON.stringify(msg.payload.message));
+			});
+			setLog('listening');
+		}
+		setListener();
+  }, []);
   // useEffect(() => {
   //   alert("about to try to get audio");
   //   try {
@@ -110,7 +121,7 @@ const App = () => {
   const pixelsPerBeat = get("canvasWidth") / maxBeatsInRow;
   const canvasRowHeight = get("canvasHeight") / get("beatsPerRow").length;
   const beatsPerWindow = get("beatsPerRow").reduce((sum, n) => sum + n);
-  const marginPixels = get("margin") * pixelsPerBeat;
+  // const marginPixels = get("margin") * pixelsPerBeat;
   const canvasPos = useRef(0);
   const samples = useRef<[number, number][]>([]);
   const getArray = async () => {
@@ -122,9 +133,11 @@ const App = () => {
     console.log("calling set_config");
     const newConfig = { ...rustConfig, ...args };
     setRustConfig(newConfig);
-		console.log('calling set_config with ' + JSON.stringify(snakeCaseKeys(newConfig)));
+    console.log(
+      "calling set_config with " + JSON.stringify(snakeCaseKeys(newConfig))
+    );
     invoke("set_config", { newConfig: snakeCaseKeys(newConfig) });
-		console.log('called set_config');
+    console.log("called set_config");
   };
 
   const resetBeat = () => {
@@ -234,7 +247,6 @@ const App = () => {
 
   return (
     <>
-      <div>{log}</div>
       <button onClick={resetBeat}>RESET TIME</button>
       <button onClick={pickNewMp3("/Users/eric/Music/Logic/Logic_3.wav")}>
         NEW MP3 1
@@ -264,7 +276,7 @@ const App = () => {
               ["bar color mode", "barColorMode"],
               ["bpm", "bpm"],
               ["beatsToLoop", "beatsToLoop"],
-              ["audio subdivisions", "audioSubdivisions"],
+              ["click rhythm", "audioSubdivisions"],
               ["bufferCompensation", "bufferCompensation"],
               ["visual gain", "visualGain"],
               ["visual subdivision loop", "subdivisionLoop"],
@@ -280,6 +292,7 @@ const App = () => {
               <Input label={label} _key={key} get={get} set={set} />
             )
           )}
+					<div>{log}</div>
         </div>
         <Canvas
           // @ts-expect-error TODO figure out canvas draw type

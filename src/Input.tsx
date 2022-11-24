@@ -92,7 +92,7 @@ interface InputProps<T extends ConfigKey> {
 }
 
 // @ts-ignore
-export const Input = (props) => {
+export const Input = (props: InputProps) => {
   const { _key, get } = props;
   const valueType = typeof get(_key);
   if (valueType === "boolean") return <BooleanInput {...props} />;

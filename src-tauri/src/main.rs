@@ -42,6 +42,8 @@ struct Mp3BufferState(Arc<Mutex<Mp3Buffer>>);
 
 struct BeatResetState(Arc<AtomicBool>);
 
+struct LogState(Arc<Mutex<Vec<String>>>);
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 struct Config {
     bpm: f64,
@@ -57,6 +59,11 @@ struct Config {
     audio_subdivisions: Vec<f64>,
 }
 struct ConfigState(Arc<Mutex<Config>>);
+
+#[derive(Clone, serde::Serialize)]
+struct Payload {
+    message: Vec<String>,
+}
 
 const SAMPLE_RATE: f64 = 44100.0;
 
@@ -130,6 +137,17 @@ fn reset_beat(state: State<BeatResetState>) -> Result<(), String> {
 
 #[tauri::command]
 fn set_config(app_handle: tauri::AppHandle, new_config: Config) {
+    let logs: tauri::State<LogState> = app_handle.state();
+    let logs = logs.0.lock().unwrap();
+
+    app_handle
+        .emit_all(
+            "log",
+            Payload {
+                message: logs.to_vec(),
+            },
+        )
+        .unwrap();
     println!("set_config called: {:?}", new_config);
     let config_state: tauri::State<ConfigState> = app_handle.state();
     let mut config = config_state.0.lock().unwrap();
@@ -171,7 +189,7 @@ fn set_mp3_buffer(app_handle: tauri::AppHandle, filename: String) {
     }
 }
 
-fn get_input_output_channels() -> Result<(AudioUnit, AudioUnit), Error> {
+fn get_input_output_channels() -> Result<(AudioUnit, AudioUnit, Vec<String>), Error> {
     let mut input_audio_unit =
         audio_unit_from_device_id(get_default_device_id(true).unwrap(), true)?;
     let mut output_audio_unit =
@@ -207,10 +225,15 @@ fn get_input_output_channels() -> Result<(AudioUnit, AudioUnit), Error> {
         channels: 2,
     };
 
+    let mut result_log = vec![];
     println!("input={:#?}", &in_stream_format);
     println!("output={:#?}", &out_stream_format);
     println!("input_asbd={:#?}", &in_stream_format.to_asbd());
     println!("output_asbd={:#?}", &out_stream_format.to_asbd());
+    result_log.push(format!("{:#?}", &in_stream_format));
+    result_log.push(format!("{:#?}", &out_stream_format));
+    result_log.push(format!("{:#?}", &in_stream_format.to_asbd()));
+    result_log.push(format!("{:#?}", out_stream_format.to_asbd()));
 
     let id = kAudioUnitProperty_StreamFormat;
     let asbd = in_stream_format.to_asbd();
@@ -225,7 +248,7 @@ fn get_input_output_channels() -> Result<(AudioUnit, AudioUnit), Error> {
     input_audio_unit.set_property(id, Scope::Output, Element::Input, Some(&buffer_size))?;
     output_audio_unit.set_property(id, Scope::Input, Element::Output, Some(&buffer_size))?;
 
-    Ok((input_audio_unit, output_audio_unit))
+    Ok((input_audio_unit, output_audio_unit, result_log))
 }
 
 fn start_input_audio_unit(
@@ -293,11 +316,14 @@ fn main() -> Result<(), coreaudio::Error> {
     let mp3 = mp3_arc.clone();
     let mp3_state = Mp3BufferState(mp3_arc.clone());
 
-    let (mut input_audio_unit, mut output_audio_unit) = get_input_output_channels().unwrap();
+    let (mut input_audio_unit, mut output_audio_unit, io_log) =
+        get_input_output_channels().unwrap();
     let buffers = make_buffers();
 
     let mut click_sound_counter: i32 = 0;
     let mut rng = rand::thread_rng();
+
+    let log_state = LogState(Arc::new(Mutex::new(io_log)));
 
     let config = Config {
         bpm: 91.0,
@@ -463,6 +489,7 @@ fn main() -> Result<(), coreaudio::Error> {
         .manage(loop_buffer_state)
         .manage(mp3_state)
         .manage(should_reset_beat_state)
+        .manage(log_state)
         .invoke_handler(tauri::generate_handler![
             get_samples,
             set_config,
