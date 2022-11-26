@@ -6,9 +6,10 @@ export const defaultRustConfig = {
   clickOn: true,
   clickToggle: false,
   clickVolume: 0.3,
+  drumOn: true,
   loopingOn: false,
   playFile: true,
-  audioSubdivisions: [0, 1],
+  audioSubdivisions: { val: [0, 1], type: "parser" },
   visualMonitorOn: true,
 };
 
@@ -18,7 +19,7 @@ export const defaultJsConfig = {
   canvasHeight: 1000,
   canvasWidth: 2000,
   margin: 0.11,
-  visualSubdivisions: [0, 0.6],
+  visualSubdivisions: { val: [0], type: "parser" },
   subdivisionLoop: 1,
   subdivisionOffset: 0,
   visualGain: 10,

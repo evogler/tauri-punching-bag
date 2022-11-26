@@ -1,20 +1,22 @@
-import { useState } from "react";
-import {
-	Config,
-  ConfigKey,
-} from "./config";
+import { useRef, useState } from "react";
+import { Config, ConfigKey } from "./config";
+import parser from "./parser";
 
-const NumberArrayInput = ({
-  label,
-  _key,
-  get,
-  set,
-}: {
+interface InputProps<T extends ConfigKey> {
+  label: string;
+  _key: T;
+  get: (key: ConfigKey) => Config[T];
+  set: (key: ConfigKey, val: Config[T]) => void;
+}
+
+interface II<T> {
   label: string;
   _key: ConfigKey;
-  get: any;
-  set: any;
-}) => {
+  get: (key: ConfigKey) => T;
+  set: (key: ConfigKey, val: T) => void;
+}
+
+const NumberArrayInput = ({ label, _key, get, set }: II<number[]>) => {
   const [isFocused, setIsFocused] = useState(false);
   const [focusedVal, setFocusedVal] = useState(get(_key).join(","));
   return (
@@ -38,7 +40,7 @@ const NumberArrayInput = ({
   );
 };
 
-const BooleanInput = ({
+const ParserArrayInput = ({
   label,
   _key,
   get,
@@ -46,9 +48,38 @@ const BooleanInput = ({
 }: {
   label: string;
   _key: ConfigKey;
-  get: (key: ConfigKey) => boolean;
-  set: (key: ConfigKey, val: boolean) => void;
-}) => (
+  get: any;
+  set: any;
+}) => {
+  const [isFocused, setIsFocused] = useState(false);
+  const [focusedVal, setFocusedVal] = useState(get(_key).val.join(","));
+	const renderCount = useRef(0);
+	renderCount.current += 1;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
+			<span>{renderCount.current}</span>
+      <label>{label}</label>
+      <input
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => setIsFocused(false)}
+        onChange={(e) => {
+          const v = e.target.value;
+          setFocusedVal(v);
+          try {
+            // const g = v.split(",").map(parseFloat);
+            const g = parser.parse(v);
+            set(_key, { type: "parser", val: g });
+          } catch (e) {}
+        }}
+        value={isFocused ? focusedVal : get(_key).val.join(", ")}
+        style={{ width: "8em" }}
+      ></input>
+    </div>
+  );
+};
+
+const BooleanInput = ({ label, _key, get, set }: II<boolean>) => (
   <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
     <label>{label}</label>
     <input
@@ -59,17 +90,7 @@ const BooleanInput = ({
   </div>
 );
 
-const NumberInput = ({
-  label,
-  _key,
-  get,
-  set,
-}: {
-  label: string;
-  _key: ConfigKey;
-  get: (key: ConfigKey) => number;
-  set: (key: ConfigKey, val: number) => void;
-}) => (
+const NumberInput = ({ label, _key, get, set }: II<number>) => (
   <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
     <label>{label}</label>
     <input
@@ -84,19 +105,34 @@ const NumberInput = ({
   </div>
 );
 
-interface InputProps<T extends ConfigKey> {
-  label: string;
-  _key: T;
-  get: (key: ConfigKey) => Config[T];
-  set: (key: ConfigKey, val: number) => void;
-}
-
 // @ts-ignore
 export const Input = (props: InputProps) => {
   const { _key, get } = props;
-  const valueType = typeof get(_key);
-  if (valueType === "boolean") return <BooleanInput {...props} />;
-  else if (valueType === "number") return <NumberInput {...props} />;
-  else if (valueType === "object") return <NumberArrayInput {...props} />;
-  else return <div>error</div>;
+  const val = get(_key);
+  const valueType = Array.isArray(val) ? "array" : typeof val;
+  try {
+    switch (valueType) {
+      case "object": {
+        if (val.type === "parser") {
+          return <ParserArrayInput {...props} />;
+        } else {
+          throw new Error("Unknown object type");
+        }
+      }
+      case "boolean": {
+        return <BooleanInput {...props} />;
+      }
+      case "number": {
+        return <NumberInput {...props} />;
+      }
+      case "array": {
+        return <NumberArrayInput {...props} />;
+      }
+      default: {
+        throw new Error("Unknown value type");
+      }
+    }
+  } catch (e) {
+    return <div>error: {JSON.stringify(e)} </div>;
+  }
 };

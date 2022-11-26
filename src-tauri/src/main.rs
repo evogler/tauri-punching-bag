@@ -55,6 +55,7 @@ struct Config {
     click_on: bool,
     click_toggle: bool,
     click_volume: f64,
+    drum_on: bool,
     play_file: bool,
     visual_monitor_on: bool,
     audio_monitor_on: bool,
@@ -363,6 +364,7 @@ fn main() -> Result<(), coreaudio::Error> {
         click_on: true,
         click_toggle: false,
         click_volume: 0.3,
+        drum_on: true,
         play_file: true,
         visual_monitor_on: true,
         audio_monitor_on: false,
@@ -479,7 +481,9 @@ fn main() -> Result<(), coreaudio::Error> {
 
                     for j in (0..sounding_samples.len()).rev() {
                         if sounding_samples[j].pos < sounding_samples[j].sample.len() {
-                            channel[i] += sounding_samples[j].sample[sounding_samples[j].pos];
+                            if config.drum_on {
+                                channel[i] += sounding_samples[j].sample[sounding_samples[j].pos];
+                            }
                             sounding_samples[j].pos += 1;
                         } else {
                             sounding_samples.remove(j);

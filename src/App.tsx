@@ -30,6 +30,16 @@ const mapFuncOnObjectKeys = <T,>(
   return newObj;
 };
 
+const unwrapValues = (obj: Record<string, any>) =>
+  Object.fromEntries(
+    Object.entries(obj).map(([k, v]) => [
+      k,
+      typeof v === "object" && v !== null && v.val !== undefined
+        ? v.val
+        : v,
+    ])
+  );
+
 const camelCaseToSnakeCase = (str: string) =>
   str.replace(/([A-Z])/g, (g) => `_${g[0].toLowerCase()}`);
 
@@ -37,16 +47,16 @@ const snakeCaseKeys = <T,>(obj: Record<string, T>) =>
   mapFuncOnObjectKeys(obj, camelCaseToSnakeCase);
 
 const App = () => {
-	const [log, setLog] = useState("log");
+  const [log, setLog] = useState("log");
   useEffect(() => {
-		const setListener = async () => {
-			await listen('log', (msg) => {
-				// @ts-expect-error I don't feel like typing this
-				setLog(JSON.stringify(msg.payload.message));
-			});
-			setLog('listening');
-		}
-		setListener();
+    const setListener = async () => {
+      await listen("log", (msg) => {
+        // @ts-expect-error I don't feel like typing this
+        setLog(JSON.stringify(msg.payload.message));
+      });
+      setLog("listening");
+    };
+    setListener();
   }, []);
   // useEffect(() => {
   //   alert("about to try to get audio");
@@ -130,14 +140,15 @@ const App = () => {
   };
 
   const updateRustConfig = (args: Partial<RustConfig>) => {
-    console.log("calling set_config");
+    // console.log("calling set_config");
+
     const newConfig = { ...rustConfig, ...args };
     setRustConfig(newConfig);
-    console.log(
-      "calling set_config with " + JSON.stringify(snakeCaseKeys(newConfig))
-    );
-    invoke("set_config", { newConfig: snakeCaseKeys(newConfig) });
-    console.log("called set_config");
+    const newConfigForRust = snakeCaseKeys(unwrapValues(newConfig));
+    // console.log("calling set_config with " + newConfigForRust);
+    // alert(JSON.stringify(newConfigForRust));
+    invoke("set_config", { newConfig: newConfigForRust });
+    // console.log("called set_config");
   };
 
   const resetBeat = () => {
@@ -212,7 +223,7 @@ const App = () => {
     let startBeat = 0;
     let b = 0;
     while (b < beatsPerWindow) {
-      for (const d of get("visualSubdivisions")) {
+      for (const d of get("visualSubdivisions").val) {
         b = startBeat + d + get("subdivisionOffset");
         if (b >= beatsPerWindow) break;
         const [x, row] = getCanvasPos(b);
@@ -269,6 +280,7 @@ const App = () => {
               ["click", "clickOn"],
               ["click toggle", "clickToggle"],
               ["click volume", "clickVolume"],
+              ["drum on", "drumOn"],
               ["looping", "loopingOn"],
               ["play file", "playFile"],
               ["visual monitor", "visualMonitorOn"],
@@ -292,7 +304,7 @@ const App = () => {
               <Input label={label} _key={key} get={get} set={set} />
             )
           )}
-					<div>{log}</div>
+          <div>{log}</div>
         </div>
         <Canvas
           // @ts-expect-error TODO figure out canvas draw type
