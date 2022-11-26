@@ -10,14 +10,17 @@ extern crate coreaudio;
 use read_audio_file::get_samples_from_filename;
 
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
-use coreaudio::audio_unit::macos_helpers::{audio_unit_from_device_id, get_default_device_id};
+use coreaudio::audio_unit::macos_helpers::{
+    audio_unit_from_device_id, get_audio_device_ids, get_default_device_id, get_device_name,
+    get_supported_physical_stream_formats,
+};
 use coreaudio::audio_unit::render_callback::{self, data};
 use coreaudio::audio_unit::{AudioUnit, Element, SampleFormat, Scope, StreamFormat};
 use coreaudio::sys::*;
 use coreaudio::Error;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use tauri::{Manager, State};
@@ -63,6 +66,11 @@ struct ConfigState(Arc<Mutex<Config>>);
 #[derive(Clone, serde::Serialize)]
 struct Payload {
     message: Vec<String>,
+}
+
+struct SoundingSample {
+    sample: Arc<Vec<f32>>,
+    pos: usize,
 }
 
 const SAMPLE_RATE: f64 = 44100.0;
@@ -190,6 +198,12 @@ fn set_mp3_buffer(app_handle: tauri::AppHandle, filename: String) {
 }
 
 fn get_input_output_channels() -> Result<(AudioUnit, AudioUnit, Vec<String>), Error> {
+    let devices = get_audio_device_ids();
+    devices.unwrap().iter().for_each(|d| {
+        println!("device: {:?}", get_device_name(*d));
+        println!("{:?}", get_supported_physical_stream_formats(*d));
+    });
+
     let mut input_audio_unit =
         audio_unit_from_device_id(get_default_device_id(true).unwrap(), true)?;
     let mut output_audio_unit =
@@ -315,6 +329,23 @@ fn main() -> Result<(), coreaudio::Error> {
 
     let mp3 = mp3_arc.clone();
     let mp3_state = Mp3BufferState(mp3_arc.clone());
+
+    let mut sample_buffers = HashMap::new();
+    sample_buffers.insert(
+        "ride".to_string(),
+        Arc::new(
+            get_samples_from_filename(
+                &"/Users/eric/Workspace/tauri-punching-bag/src-tauri/samples/ride_cropped.wav"
+                    .into(),
+            )
+            .unwrap(),
+        ),
+    );
+    let mut sounding_samples = vec![];
+    sounding_samples.push(SoundingSample {
+        sample: sample_buffers.get("ride").unwrap().clone(),
+        pos: 0,
+    });
 
     let (mut input_audio_unit, mut output_audio_unit, io_log) =
         get_input_output_channels().unwrap();
@@ -446,12 +477,25 @@ fn main() -> Result<(), coreaudio::Error> {
                         loop_buffer.pos = 0;
                     }
 
+                    for j in (0..sounding_samples.len()).rev() {
+                        if sounding_samples[j].pos < sounding_samples[j].sample.len() {
+                            channel[i] += sounding_samples[j].sample[sounding_samples[j].pos];
+                            sounding_samples[j].pos += 1;
+                        } else {
+                            sounding_samples.remove(j);
+                        }
+                    }
+
                     let visual_beat =
                         (beat - (config.buffer_compensation as f64) * beats_per_sample) as f32;
                     state_vec.push((visual_beat, visual_out.abs()));
 
                     let adjusted_beat = beat_bisect(&config.audio_subdivisions, beat);
                     if adjusted_beat != last_beat {
+                        sounding_samples.push(SoundingSample {
+                            sample: sample_buffers.get("ride").unwrap().clone(),
+                            pos: 0,
+                        });
                         if config.audio_subdivisions.len() < 2
                             || (adjusted_beat % ((config.audio_subdivisions.len() - 1) as isize)
                                 == 0)
