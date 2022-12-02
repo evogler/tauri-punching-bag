@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Config, ConfigKey } from "./config";
-import parser from "./parser";
+import parser1 from "./parser1";
+import parser2 from "./parser2";
 
 interface InputProps<T extends ConfigKey> {
   label: string;
@@ -45,14 +46,18 @@ const ParserArrayInput = ({
   _key,
   get,
   set,
+	parser = parser1,
+	val,
 }: {
   label: string;
   _key: ConfigKey;
   get: any;
   set: any;
+	parser: any;
+	val: any;
 }) => {
   const [isFocused, setIsFocused] = useState(false);
-  const [focusedVal, setFocusedVal] = useState(get(_key).val.join(","));
+  const [focusedVal, setFocusedVal] = useState(JSON.stringify(get(_key)));
 	const renderCount = useRef(0);
 	renderCount.current += 1;
 
@@ -69,10 +74,10 @@ const ParserArrayInput = ({
           try {
             // const g = v.split(",").map(parseFloat);
             const g = parser.parse(v);
-            set(_key, { type: "parser", val: g });
+            set(_key, { type: val.type, val: g });
           } catch (e) {}
         }}
-        value={isFocused ? focusedVal : get(_key).val.join(", ")}
+        value={isFocused ? focusedVal : JSON.stringify(get(_key))}
         style={{ width: "8em" }}
       ></input>
     </div>
@@ -113,8 +118,10 @@ export const Input = (props: InputProps) => {
   try {
     switch (valueType) {
       case "object": {
-        if (val.type === "parser") {
-          return <ParserArrayInput {...props} />;
+        if (val.type === "parser1") {
+          return <ParserArrayInput {...{...props, parser: parser1, val}} />;
+				} else if (val.type === "parser2") {
+					return <ParserArrayInput {...{...props, parser: parser2, val}} />;
         } else {
           throw new Error("Unknown object type");
         }

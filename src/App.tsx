@@ -223,19 +223,21 @@ const App = () => {
     let startBeat = 0;
     let b = 0;
     while (b < beatsPerWindow) {
-      for (const d of get("visualSubdivisions").val) {
-        b = startBeat + d + get("subdivisionOffset");
+      for (const note of get("visualSubdivisions").val.notes) {
+				const t = note.time;
+        b = startBeat + t;
         if (b >= beatsPerWindow) break;
         const [x, row] = getCanvasPos(b);
         const y = row * canvasRowHeight;
         ctx.strokeStyle = "#0088ff";
-        ctx.lineWidth = d === 0 ? 3 : 1;
+        // ctx.lineWidth = d === 0 ? 3 : 1;
+				ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(x, y);
         ctx.lineTo(x, y + canvasRowHeight);
         ctx.stroke();
       }
-      startBeat += get("subdivisionLoop");
+      startBeat += get("visualSubdivisions").val.end;
     }
 
     const vals = samples.current;
@@ -258,6 +260,7 @@ const App = () => {
 
   return (
     <>
+			<div>{JSON.stringify(get("visualSubdivisions"))}</div>
       <button onClick={resetBeat}>RESET TIME</button>
       <button onClick={pickNewMp3("/Users/eric/Music/Logic/Logic_3.wav")}>
         NEW MP3 1

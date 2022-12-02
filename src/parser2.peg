@@ -1,0 +1,96 @@
+Result = _ l:List _
+ 	{
+    	let time = 0;
+        const notes = [];
+        for (const note of l) {
+			const newNote = { ...note, time };
+            if (note.offset) {
+            	newNote.time += note.offset;
+                delete newNote.offset;
+            }
+            notes.push(newNote);
+            time += note.time;
+        }
+        const endTime = time;
+        for (let i = 0; i < notes.length; i++) {
+        	notes[i].time = (notes[i].time % endTime + endTime) % endTime;
+        }
+        notes.sort((a, b) => a.time - b.time);
+    	return { notes, start: 0, end: endTime };
+    }
+
+List
+     = head: Note _ "," _ tail:List ","? { return [head, ...tail]}
+     / head: Range _ "," _ tail: List      ","?	{ return [...head, ...tail] }
+     / head: Squish _ "," _ tail: List     ","? { return [...head, ...tail] }
+     / r:Range
+     / s:Squish
+     / n:Note 							{ return [n] }
+     / "[" _ l:List _ ","? _ "]" 						{ return l }
+
+Squish
+    = "[" _ list:List _ "]" _ ":" space:Expression
+    { const s = space / list.reduce((sum,n) => sum + n.time, 0);
+      const res = [];
+      for (const note of list) {
+      	const newNote = { ...note };
+        newNote.time *= s;
+        if (newNote.offset) {
+        	newNote.offset *= s;
+        }
+        res.push(newNote);
+      }
+	  return res;
+    }
+
+Range
+	= n:Expression _ ":" _ d:Expression
+     { return [...new Array(n)].map((_, i) => ({ time: d / n})) }
+
+Note
+    = ds: DrumSounds? e:Expression post:(_ PostModifier)*  {
+		const mods = post.reduce((acc, m) => ({ ...acc, ...m[1]}), {});
+    	return { time: e, ...mods, ...(ds ? { sounds : ds.sounds } : null) };
+    }
+
+DrumSounds
+    = head:DrumSound + tail:(_ "+" _ DrumSound)*
+	{ return { sounds: [...head, ...tail.map(i => i[3])] } }
+
+DrumSound
+	= "k" / "s" / "h" / "r"
+
+PostModifier
+	= _ "r" _ { return { rest: true }; }
+    / _ ">" _ n:Expression { return { offset: n }; }
+
+Expression
+  = head:Term tail:(_ ("+" / "-") _ Term)* {
+      return tail.reduce(function(result, element) {
+        if (element[1] === "+") { return result + element[3]; }
+        if (element[1] === "-") { return result - element[3]; }
+      }, head);
+    }
+
+Term
+  = head:Factor tail:(_ ("*" / "/") _ Factor)* {
+      return tail.reduce(function(result, element) {
+        if (element[1] === "*") { return result * element[3]; }
+        if (element[1] === "/") { return result / element[3]; }
+      }, head);
+    }
+
+Factor
+  = "(" _ expr:Expression _ ")" { return expr; }
+  / Number
+
+Number = Float / Integer
+
+Float "float"
+  = _ [-]? [0-9]* "." [0-9]+ { return parseFloat(text(), 10); }
+
+Integer "integer"
+  = _ [-]? [0-9]+ { return parseInt(text(), 10); }
+
+_ "whitespace"
+  = [ \t\n\r]*

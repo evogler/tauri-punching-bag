@@ -47,6 +47,19 @@ struct BeatResetState(Arc<AtomicBool>);
 
 struct LogState(Arc<Mutex<Vec<String>>>);
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Note {
+    time: f64,
+    // sounds: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct ParserRhythm {
+    notes: Vec<Note>,
+    start: f64,
+    end: f64,
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 struct Config {
     bpm: f64,
@@ -60,7 +73,8 @@ struct Config {
     visual_monitor_on: bool,
     audio_monitor_on: bool,
     buffer_compensation: usize,
-    audio_subdivisions: Vec<f64>,
+    audio_subdivisions: ParserRhythm,
+    test_object: ParserRhythm,
 }
 struct ConfigState(Arc<Mutex<Config>>);
 
@@ -369,7 +383,16 @@ fn main() -> Result<(), coreaudio::Error> {
         visual_monitor_on: true,
         audio_monitor_on: false,
         buffer_compensation: 4330,
-        audio_subdivisions: vec![0.0, 1.0],
+        audio_subdivisions: ParserRhythm {
+            start: 0.0,
+            end: 1.0,
+            notes: vec![Note { time: 0.75 }],
+        },
+        test_object: ParserRhythm {
+            start: 0.0,
+            end: 0.0,
+            notes: vec![],
+        },
     };
     let config_state = ConfigState(Arc::new(Mutex::new(config)));
     let config1 = config_state.0.clone();
@@ -494,14 +517,24 @@ fn main() -> Result<(), coreaudio::Error> {
                         (beat - (config.buffer_compensation as f64) * beats_per_sample) as f32;
                     state_vec.push((visual_beat, visual_out.abs()));
 
-                    let adjusted_beat = beat_bisect(&config.audio_subdivisions, beat);
+                    // let adjusted_beat = beat_bisect(&config.audio_subdivisions, beat);
+                    let mut audio_times = config
+                        .audio_subdivisions
+                        .notes
+                        .iter()
+                        .map(|n| n.time)
+                        .collect::<Vec<f64>>();
+                    audio_times.push(config.audio_subdivisions.end);
+
+                    let adjusted_beat = beat_bisect(&audio_times, beat);
                     if adjusted_beat != last_beat {
                         sounding_samples.push(SoundingSample {
                             sample: sample_buffers.get("ride").unwrap().clone(),
                             pos: 0,
                         });
-                        if config.audio_subdivisions.len() < 2
-                            || (adjusted_beat % ((config.audio_subdivisions.len() - 1) as isize)
+                        if config.audio_subdivisions.notes.len() < 2
+                            || (adjusted_beat
+                                % ((config.audio_subdivisions.notes.len() - 1) as isize)
                                 == 0)
                         {
                             click_sound_counter = 400;

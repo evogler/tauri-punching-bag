@@ -9,8 +9,23 @@ export const defaultRustConfig = {
   drumOn: true,
   loopingOn: false,
   playFile: true,
-  audioSubdivisions: { val: [0, 1], type: "parser" },
+  audioSubdivisions: { val: {
+    notes: [
+      { time: 0.25, sounds: ["h"] },
+      { time: 0.5 },
+    ],
+    start: 0,
+    end: 1,
+  }, type: "parser2" },
   visualMonitorOn: true,
+  testObject: {
+    notes: [
+      { time: 0.25, sounds: ["h"] },
+      { time: 0.5 },
+    ],
+    start: 0,
+    end: 1,
+  },
 };
 
 export const defaultJsConfig = {
@@ -19,7 +34,10 @@ export const defaultJsConfig = {
   canvasHeight: 1000,
   canvasWidth: 2000,
   margin: 0.11,
-  visualSubdivisions: { val: [0], type: "parser" },
+  visualSubdivisions: {
+    val: { notes: [{ time: 0 }, { time: 0.5 }], start: 0, end: 1 },
+    type: "parser2",
+  },
   subdivisionLoop: 1,
   subdivisionOffset: 0,
   visualGain: 10,
