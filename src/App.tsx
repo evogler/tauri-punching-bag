@@ -34,9 +34,7 @@ const unwrapValues = (obj: Record<string, any>) =>
   Object.fromEntries(
     Object.entries(obj).map(([k, v]) => [
       k,
-      typeof v === "object" && v !== null && v.val !== undefined
-        ? v.val
-        : v,
+      typeof v === "object" && v !== null && v.val !== undefined ? v.val : v,
     ])
   );
 
@@ -50,14 +48,17 @@ const App = () => {
   const [log, setLog] = useState("log");
   useEffect(() => {
     const setListener = async () => {
-      await listen("log", (msg) => {
+      const unlisten = await listen("log", (msg) => {
         // @ts-expect-error I don't feel like typing this
         setLog(JSON.stringify(msg.payload.message));
       });
       setLog("listening");
+      return unlisten;
     };
-    setListener();
+    const unlisten = setListener();
+		return () => { (async () => await unlisten)() };
   }, []);
+
   // useEffect(() => {
   //   alert("about to try to get audio");
   //   try {
@@ -75,7 +76,7 @@ const App = () => {
 
   useEffect(() => {
     // console log the new window size whenever the window is resized
-    appWindow.onResized(() => {
+    const unlisten = appWindow.onResized(() => {
       appWindow.innerSize().then(({ width, height }) => {
         // setLog(`${width}x${height}`);
         setJsConfig((jsConfig) => ({
@@ -85,10 +86,14 @@ const App = () => {
         }));
       });
     });
+    return () => {
+      (async () => await unlisten)();
+    };
   });
 
   useEffect(() => {
-    setInterval(getArray, 1000 / 100);
+    const interval = setInterval(getArray, 1000 / 100);
+    return () => clearInterval(interval);
   });
 
   const pickNewMp3 = (filename: string) => () => {
@@ -96,7 +101,7 @@ const App = () => {
   };
 
   useEffect(() => {
-    appWindow.onFileDropEvent((event) => {
+    const unsubscribe = appWindow.onFileDropEvent((event) => {
       if (event.payload.type === "hover") {
         setLog("User hovering " + JSON.stringify(event.payload.paths));
       } else if (event.payload.type === "drop") {
@@ -106,6 +111,9 @@ const App = () => {
         setLog("File drop cancelled");
       }
     });
+    return () => {
+      (async () => await unsubscribe)();
+    };
   });
 
   const [rustConfig, setRustConfig] = useState(defaultRustConfig);
@@ -224,14 +232,14 @@ const App = () => {
     let b = 0;
     while (b < beatsPerWindow) {
       for (const note of get("visualSubdivisions").val.notes) {
-				const t = note.time;
+        const t = note.time;
         b = startBeat + t;
         if (b >= beatsPerWindow) break;
         const [x, row] = getCanvasPos(b);
         const y = row * canvasRowHeight;
         ctx.strokeStyle = "#0088ff";
         // ctx.lineWidth = d === 0 ? 3 : 1;
-				ctx.lineWidth = 2;
+        ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(x, y);
         ctx.lineTo(x, y + canvasRowHeight);
@@ -260,7 +268,7 @@ const App = () => {
 
   return (
     <>
-			<div>{JSON.stringify(get("visualSubdivisions"))}</div>
+      <div>{JSON.stringify(get("visualSubdivisions"))}</div>
       <button onClick={resetBeat}>RESET TIME</button>
       <button onClick={pickNewMp3("/Users/eric/Music/Logic/Logic_3.wav")}>
         NEW MP3 1
