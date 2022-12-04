@@ -46,6 +46,7 @@ const snakeCaseKeys = <T,>(obj: Record<string, T>) =>
 
 const App = () => {
   const [log, setLog] = useState("log");
+  const [hideConfig, setHideConfig] = useState(false);
   useEffect(() => {
     const setListener = async () => {
       const unlisten = await listen("log", (msg) => {
@@ -56,7 +57,9 @@ const App = () => {
       return unlisten;
     };
     const unlisten = setListener();
-		return () => { (async () => await unlisten)() };
+    return () => {
+      (async () => await unlisten)();
+    };
   }, []);
 
   // useEffect(() => {
@@ -268,67 +271,86 @@ const App = () => {
 
   return (
     <>
-      <div>{JSON.stringify(get("visualSubdivisions"))}</div>
-      <button onClick={resetBeat}>RESET TIME</button>
-      <button onClick={pickNewMp3("/Users/eric/Music/Logic/Logic_3.wav")}>
-        NEW MP3 1
-      </button>
-      <button onClick={pickNewMp3("/Users/eric/Music/Logic/Logic_4.wav")}>
-        NEW MP3 2
-      </button>
-      <div style={{ display: "flex", flexDirection: "row" }}>
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            padding: "8px",
-            gap: "8px",
-            overflowY: "auto",
-          }}
-        >
-          {(
-            [
-              ["click", "clickOn"],
-              ["click toggle", "clickToggle"],
-              ["click volume", "clickVolume"],
-              ["drum on", "drumOn"],
-              ["looping", "loopingOn"],
-              ["play file", "playFile"],
-              ["visual monitor", "visualMonitorOn"],
-              ["audio monitor", "audioMonitorOn"],
-              ["bar color mode", "barColorMode"],
-              ["bpm", "bpm"],
-              ["beatsToLoop", "beatsToLoop"],
-              ["click rhythm", "audioSubdivisions"],
-              ["bufferCompensation", "bufferCompensation"],
-              ["visual gain", "visualGain"],
-              ["visual subdivision loop", "subdivisionLoop"],
-              ["beats per row", "beatsPerRow"],
-              ["margin", "margin"],
-              ["visual subdivisions", "visualSubdivisions"],
-              ["subdivision offset", "subdivisionOffset"],
-              ["canvas height", "canvasHeight"],
-              ["canvas width", "canvasWidth"],
-            ] as [string, ConfigKey][]
-          ).map(
-            ([label, key]): JSX.Element => (
-              <Input label={label} _key={key} get={get} set={set} />
-            )
-          )}
-          <div>{log}</div>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          height: "100%",
+          overflow: "hidden",
+        }}
+      >
+        {!hideConfig && (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              padding: "1px",
+              gap: "2px",
+              overflow: "scroll",
+              width: "400px",
+              height: "100%",
+            }}
+          >
+            <>
+              <button onClick={resetBeat}>RESET TIME</button>
+              {/* <button onClick={pickNewMp3("/Users/eric/Music/Logic/Logic_3.wav")}>
+              NEW MP3 1
+            </button>
+            <button onClick={pickNewMp3("/Users/eric/Music/Logic/Logic_4.wav")}>
+              NEW MP3 2
+            </button> */}
+
+              {(
+                [
+                  ["click", "clickOn"],
+                  ["click toggle", "clickToggle"],
+                  ["click volume", "clickVolume"],
+                  ["drum on", "drumOn"],
+                  ["looping", "loopingOn"],
+                  ["play file", "playFile"],
+                  ["visual monitor", "visualMonitorOn"],
+                  ["audio monitor", "audioMonitorOn"],
+                  ["bar color mode", "barColorMode"],
+                  ["bpm", "bpm"],
+                  ["beatsToLoop", "beatsToLoop"],
+                  ["click rhythm", "audioSubdivisions"],
+                  ["bufferCompensation", "bufferCompensation"],
+                  ["visual gain", "visualGain"],
+                  ["visual subdivision loop", "subdivisionLoop"],
+                  ["beats per row", "beatsPerRow"],
+                  ["margin", "margin"],
+                  ["visual subdivisions", "visualSubdivisions"],
+                  ["subdivision offset", "subdivisionOffset"],
+                  ["canvas height", "canvasHeight"],
+                  ["canvas width", "canvasWidth"],
+                ] as [string, ConfigKey][]
+              ).map(
+                ([label, key]): JSX.Element => (
+                  <Input label={label} _key={key} get={get} set={set} />
+                )
+              )}
+            </>
+            <div>{log}</div>
+          </div>
+        )}
+
+        <div style={{ width: "100%", height: "100%" }}>
+          <Canvas
+            // @ts-expect-error TODO figure out canvas draw type
+            draw={draw}
+            onClick={() => setHideConfig(!hideConfig)}
+            style={{
+              // border: "1px solid black",
+              // height: get("canvasHeight") / 2 + "px",
+              height: "100%",
+              margin: "1px",
+              // width: get("canvasWidth") / 2 + "px",
+              width: "100%",
+            }}
+            width={get("canvasWidth")}
+            height={get("canvasHeight")}
+          />
         </div>
-        <Canvas
-          // @ts-expect-error TODO figure out canvas draw type
-          draw={draw}
-          style={{
-            border: "1px solid black",
-            height: get("canvasHeight") / 2 + "px",
-            margin: "8px",
-            width: get("canvasWidth") / 2 + "px",
-          }}
-          width={get("canvasWidth")}
-          height={get("canvasHeight")}
-        />
       </div>
     </>
   );

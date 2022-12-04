@@ -57,13 +57,12 @@ const ParserArrayInput = ({
 	val: any;
 }) => {
   const [isFocused, setIsFocused] = useState(false);
-  const [focusedVal, setFocusedVal] = useState(JSON.stringify(get(_key)));
+  const [focusedVal, setFocusedVal] = useState(val.inputText);
 	const renderCount = useRef(0);
 	renderCount.current += 1;
 
   return (
     <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
-			<span>{renderCount.current}</span>
       <label>{label}</label>
       <input
         onFocus={() => setIsFocused(true)}
@@ -74,10 +73,10 @@ const ParserArrayInput = ({
           try {
             // const g = v.split(",").map(parseFloat);
             const g = parser.parse(v);
-            set(_key, { type: val.type, val: g });
+            set(_key, { ...val, val: g, inputText: v });
           } catch (e) {}
         }}
-        value={isFocused ? focusedVal : JSON.stringify(get(_key))}
+        value={isFocused ? focusedVal : val.inputText}
         style={{ width: "8em" }}
       ></input>
     </div>

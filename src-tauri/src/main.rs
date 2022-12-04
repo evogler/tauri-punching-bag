@@ -386,7 +386,7 @@ fn main() -> Result<(), coreaudio::Error> {
         audio_subdivisions: ParserRhythm {
             start: 0.0,
             end: 1.0,
-            notes: vec![Note { time: 0.75 }],
+            notes: vec![Note { time: 0.0 }, Note { time: 0.5 }],
         },
         test_object: ParserRhythm {
             start: 0.0,
