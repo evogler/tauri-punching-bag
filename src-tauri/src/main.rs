@@ -533,8 +533,7 @@ fn main() -> Result<(), coreaudio::Error> {
                             pos: 0,
                         });
                         if config.audio_subdivisions.notes.len() < 2
-                            || (adjusted_beat
-                                % ((config.audio_subdivisions.notes.len() - 1) as isize)
+                            || (adjusted_beat % ((config.audio_subdivisions.notes.len()) as isize)
                                 == 0)
                         {
                             click_sound_counter = 400;

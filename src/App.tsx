@@ -287,7 +287,7 @@ const App = () => {
               padding: "1px",
               gap: "2px",
               overflow: "scroll",
-              width: "400px",
+              width: "600px",
               height: "100%",
             }}
           >
