@@ -1,14 +1,14 @@
-import { MutableRefObject, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 
 type Props = {
   panel: React.ReactNode;
   rest: React.ReactNode;
 };
 
-export const PanelAndRest = ({ panel, rest }: Props): React.ReactNode => {
-  const panelRef = useRef() as MutableRefObject<HTMLDivElement>;
-  const edge = useRef() as MutableRefObject<HTMLDivElement>;
-  const restRef = useRef() as MutableRefObject<HTMLDivElement>;
+export const SlidingDivision = ({ panel, rest }: Props): JSX.Element => {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const edge = useRef<HTMLDivElement>(null);
+  const restRef = useRef<HTMLDivElement>(null);
 
   const handleMouseMove = (e: MouseEvent) => {
     const x = e.clientX;
@@ -47,12 +47,12 @@ export const PanelAndRest = ({ panel, rest }: Props): React.ReactNode => {
   });
 
   return (
-    <div id="container">
-      <div id="panel" ref={panelRef}>
+    <div className="container">
+      <div className="panel" ref={panelRef}>
         {panel}
       </div>
-      <div id="edge" ref={edge}></div>
-      <div id="rest" ref={restRef}>
+      <div className="edge" ref={edge}></div>
+      <div className="rest" ref={restRef}>
         {rest}
       </div>
     </div>
