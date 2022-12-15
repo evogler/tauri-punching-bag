@@ -27,3 +27,11 @@ pub fn beat_bisect(subdivisions: &Vec<f64>, beat: f64) -> isize {
     let bisection = bisect(subdivisions, sub_beat);
     loop_count * beats_per_loop + bisection
 }
+
+pub fn mod_add(a: usize, b: usize, max: usize) -> usize {
+    let mut res = a + b;
+    while res >= max {
+        res -= max;
+    }
+    res
+}

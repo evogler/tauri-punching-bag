@@ -1,6 +1,8 @@
 extern crate coreaudio;
 
 use crate::constants::{SAMPLE_FORMAT, SAMPLE_RATE};
+use crate::structs::Buffers;
+use crate::types::{Args, S};
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::macos_helpers::{
     audio_unit_from_device_id, get_audio_device_ids, get_default_device_id, get_device_name,
@@ -9,6 +11,8 @@ use coreaudio::audio_unit::macos_helpers::{
 use coreaudio::audio_unit::{AudioUnit, Element, SampleFormat, Scope, StreamFormat};
 use coreaudio::sys::*;
 use coreaudio::Error;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
 pub fn get_input_output_channels() -> Result<(AudioUnit, AudioUnit, Vec<String>), Error> {
     let devices = get_audio_device_ids();
@@ -76,4 +80,41 @@ pub fn get_input_output_channels() -> Result<(AudioUnit, AudioUnit, Vec<String>)
     output_audio_unit.set_property(id, Scope::Input, Element::Output, Some(&buffer_size))?;
 
     Ok((input_audio_unit, output_audio_unit, result_log))
+}
+
+pub fn start_input_audio_unit(
+    input_audio_unit: &mut AudioUnit,
+    producer_left: Arc<Mutex<VecDeque<f32>>>,
+    producer_right: Arc<Mutex<VecDeque<f32>>>,
+) -> Result<(), Error> {
+    input_audio_unit.set_input_callback(move |args| {
+        let Args {
+            num_frames,
+            mut data,
+            ..
+        } = args;
+        let buffer_left = producer_left.lock().unwrap();
+        let buffer_right = producer_right.lock().unwrap();
+        let mut buffers = vec![buffer_left, buffer_right];
+        for i in 0..num_frames {
+            for (ch, channel) in data.channels_mut().enumerate() {
+                let value: S = channel[i];
+                buffers[ch].push_back(value);
+            }
+        }
+        Ok(())
+    })?;
+    input_audio_unit.start()?;
+    Ok(())
+}
+
+pub fn make_buffers() -> Buffers {
+    let buffer_left = Arc::new(Mutex::new(VecDeque::<S>::new()));
+    let buffer_right = Arc::new(Mutex::new(VecDeque::<S>::new()));
+    Buffers {
+        producer_left: buffer_left.clone(),
+        consumer_left: buffer_left.clone(),
+        producer_right: buffer_right.clone(),
+        consumer_right: buffer_right.clone(),
+    }
 }

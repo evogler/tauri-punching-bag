@@ -3,224 +3,34 @@
     windows_subsystem = "windows"
 )]
 
-mod beat_bisect;
+mod commands;
 mod constants;
+mod get_loop_buffer_size;
 mod io_channels;
 mod read_audio_file;
+mod structs;
+mod types;
+mod util;
 
 extern crate coreaudio;
 
-use beat_bisect::beat_bisect;
-use constants::SAMPLE_RATE;
-use coreaudio::audio_unit::render_callback::{self, data};
-use coreaudio::audio_unit::AudioUnit;
-use coreaudio::Error;
-use io_channels::get_input_output_channels;
+use crate::commands::{get_samples, reset_beat, set_config, set_mp3_buffer};
+use crate::constants::{default_config, SAMPLE_RATE};
+use crate::get_loop_buffer_size::get_loop_buffer_size;
+use crate::io_channels::{get_input_output_channels, make_buffers, start_input_audio_unit};
+use crate::read_audio_file::get_samples_from_filename;
+use crate::structs::{
+    BeatResetState, ConfigState, LogState, LoopBuffer, LoopBufferState, Mp3Buffer, Mp3BufferState,
+    SampleOutputBuffer, SoundingSample,
+};
+use crate::types::{Args, S};
+use crate::util::{beat_bisect, mod_add};
 use rand::Rng;
-use read_audio_file::get_samples_from_filename;
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
-use tauri::{Manager, State};
-
-struct SampleOutputBuffer {
-    buffer: Arc<Mutex<Vec<(f32, f32)>>>,
-}
-
-struct LoopBuffer {
-    buffer: Vec<f32>,
-    pos: usize,
-}
-
-struct LoopBufferState(Arc<Mutex<LoopBuffer>>);
-
-struct Mp3Buffer {
-    buffer: Vec<f32>,
-    pos: usize,
-}
-
-struct Mp3BufferState(Arc<Mutex<Mp3Buffer>>);
-
-struct BeatResetState(Arc<AtomicBool>);
-
-struct LogState(Arc<Mutex<Vec<String>>>);
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct Note {
-    time: f64,
-    // sounds: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-struct ParserRhythm {
-    notes: Vec<Note>,
-    start: f64,
-    end: f64,
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-struct Config {
-    bpm: f64,
-    beats_to_loop: f64,
-    looping_on: bool,
-    click_on: bool,
-    click_toggle: bool,
-    click_volume: f64,
-    drum_on: bool,
-    play_file: bool,
-    visual_monitor_on: bool,
-    audio_monitor_on: bool,
-    buffer_compensation: usize,
-    audio_subdivisions: ParserRhythm,
-    test_object: ParserRhythm,
-}
-struct ConfigState(Arc<Mutex<Config>>);
-
-#[derive(Clone, serde::Serialize)]
-struct Payload {
-    message: Vec<String>,
-}
-
-struct SoundingSample {
-    sample: Arc<Vec<f32>>,
-    pos: usize,
-}
-
-type S = f32;
-
-type Args = render_callback::Args<data::NonInterleaved<S>>;
-
-fn get_loop_buffer_size(config: &Config) -> usize {
-    let mut res = config.beats_to_loop / config.bpm * SAMPLE_RATE * 60.0 * 2.0;
-    if res < 0.0 {
-        res = 0.0;
-    }
-    res as usize
-}
-
-fn mod_add(a: usize, b: usize, max: usize) -> usize {
-    let mut res = a + b;
-    while res >= max {
-        res -= max;
-    }
-    res
-}
-
-#[tauri::command]
-fn get_samples(state: State<SampleOutputBuffer>) -> Result<Vec<(f32, f32)>, String> {
-    if let Ok(mut samples) = state.buffer.lock() {
-        let res = samples.to_vec();
-        samples.clear();
-        return Ok(res);
-    } else {
-        return Err("get_samples failed.".into());
-    }
-}
-
-#[tauri::command]
-fn reset_beat(state: State<BeatResetState>) -> Result<(), String> {
-    state.0.store(true, std::sync::atomic::Ordering::Relaxed);
-    Ok(())
-}
-
-#[tauri::command]
-fn set_config(app_handle: tauri::AppHandle, new_config: Config) {
-    let logs: tauri::State<LogState> = app_handle.state();
-    let logs = logs.0.lock().unwrap();
-
-    app_handle
-        .emit_all(
-            "log",
-            Payload {
-                message: logs.to_vec(),
-            },
-        )
-        .unwrap();
-    println!("set_config called: {:?}", new_config);
-    let config_state: tauri::State<ConfigState> = app_handle.state();
-    let mut config = config_state.0.lock().unwrap();
-
-    let should_update_loop_buffer = new_config.bpm != config.bpm
-        || new_config.beats_to_loop != config.beats_to_loop
-        || new_config.buffer_compensation != config.buffer_compensation;
-    *config = new_config;
-
-    if should_update_loop_buffer {
-        println!("updating loop buffer");
-        let c = config.clone();
-        let new_buffer_size = get_loop_buffer_size(&c);
-        let loop_buffer_state: tauri::State<LoopBufferState> = app_handle.state();
-        let mut loop_buffer = loop_buffer_state.0.lock().unwrap();
-        // loop_buffer.buffer.clear();
-        loop_buffer.buffer.resize(new_buffer_size, 0.0);
-        loop_buffer.pos = 0;
-        println!("new_buffer_size: {}", new_buffer_size);
-    }
-}
-
-#[tauri::command]
-fn set_mp3_buffer(app_handle: tauri::AppHandle, filename: String) {
-    let mp3_buffer_state: tauri::State<Mp3BufferState> = app_handle.state();
-    let beat_state_reset: tauri::State<BeatResetState> = app_handle.state();
-    let mut mp3_buffer = mp3_buffer_state.0.lock().unwrap();
-    let samples = get_samples_from_filename(&filename);
-    if let Err(_err) = samples {
-        println!("Error while reading file: {}", _err);
-    } else {
-        let samples = samples.unwrap();
-        println!("samples: {}", samples.len());
-        mp3_buffer.buffer = samples;
-        mp3_buffer.pos = 0;
-        beat_state_reset
-            .0
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-    }
-}
-
-fn start_input_audio_unit(
-    input_audio_unit: &mut AudioUnit,
-    producer_left: Arc<Mutex<VecDeque<f32>>>,
-    producer_right: Arc<Mutex<VecDeque<f32>>>,
-) -> Result<(), Error> {
-    input_audio_unit.set_input_callback(move |args| {
-        let Args {
-            num_frames,
-            mut data,
-            ..
-        } = args;
-        let buffer_left = producer_left.lock().unwrap();
-        let buffer_right = producer_right.lock().unwrap();
-        let mut buffers = vec![buffer_left, buffer_right];
-        for i in 0..num_frames {
-            for (ch, channel) in data.channels_mut().enumerate() {
-                let value: S = channel[i];
-                buffers[ch].push_back(value);
-            }
-        }
-        Ok(())
-    })?;
-    input_audio_unit.start()?;
-    Ok(())
-}
-
-struct Buffers {
-    producer_left: Arc<Mutex<VecDeque<f32>>>,
-    consumer_left: Arc<Mutex<VecDeque<f32>>>,
-    producer_right: Arc<Mutex<VecDeque<f32>>>,
-    consumer_right: Arc<Mutex<VecDeque<f32>>>,
-}
-
-fn make_buffers() -> Buffers {
-    let buffer_left = Arc::new(Mutex::new(VecDeque::<S>::new()));
-    let buffer_right = Arc::new(Mutex::new(VecDeque::<S>::new()));
-    Buffers {
-        producer_left: buffer_left.clone(),
-        consumer_left: buffer_left.clone(),
-        producer_right: buffer_right.clone(),
-        consumer_right: buffer_right.clone(),
-    }
-}
+use std::{
+    collections::HashMap,
+    sync::atomic::AtomicBool,
+    sync::{Arc, Mutex},
+};
 
 fn main() -> Result<(), coreaudio::Error> {
     let mut mp3_loaded = false;
@@ -269,29 +79,7 @@ fn main() -> Result<(), coreaudio::Error> {
 
     let log_state = LogState(Arc::new(Mutex::new(io_log)));
 
-    let config = Config {
-        bpm: 91.0,
-        beats_to_loop: 4.0,
-        looping_on: false,
-        click_on: true,
-        click_toggle: false,
-        click_volume: 0.3,
-        drum_on: true,
-        play_file: true,
-        visual_monitor_on: true,
-        audio_monitor_on: false,
-        buffer_compensation: 4330,
-        audio_subdivisions: ParserRhythm {
-            start: 0.0,
-            end: 1.0,
-            notes: vec![Note { time: 0.0 }, Note { time: 0.5 }],
-        },
-        test_object: ParserRhythm {
-            start: 0.0,
-            end: 0.0,
-            notes: vec![],
-        },
-    };
+    let config = default_config();
     let config_state = ConfigState(Arc::new(Mutex::new(config)));
     let config1 = config_state.0.clone();
 
@@ -319,8 +107,6 @@ fn main() -> Result<(), coreaudio::Error> {
 
     let mut beat: f64 = 0.0;
     let mut last_beat: isize = 0;
-
-    // let mut mp3_sample = 0f32;
 
     start_input_audio_unit(
         &mut input_audio_unit,
