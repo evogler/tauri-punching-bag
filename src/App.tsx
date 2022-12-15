@@ -355,7 +355,7 @@ const App = () => {
           overflow: "hidden",
         }}
       >
-				<SlidingDivision panel={config} rest={waveform} />
+        <SlidingDivision panel={config} rest={waveform} />
       </div>
     </>
   );
