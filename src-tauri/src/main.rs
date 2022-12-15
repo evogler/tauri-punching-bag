@@ -4,23 +4,20 @@
 )]
 
 mod beat_bisect;
+mod constants;
+mod io_channels;
 mod read_audio_file;
 
 extern crate coreaudio;
 
 use beat_bisect::beat_bisect;
-use read_audio_file::get_samples_from_filename;
-
-use coreaudio::audio_unit::audio_format::LinearPcmFlags;
-use coreaudio::audio_unit::macos_helpers::{
-    audio_unit_from_device_id, get_audio_device_ids, get_default_device_id, get_device_name,
-    get_supported_physical_stream_formats,
-};
+use constants::SAMPLE_RATE;
 use coreaudio::audio_unit::render_callback::{self, data};
-use coreaudio::audio_unit::{AudioUnit, Element, SampleFormat, Scope, StreamFormat};
-use coreaudio::sys::*;
+use coreaudio::audio_unit::AudioUnit;
 use coreaudio::Error;
+use io_channels::get_input_output_channels;
 use rand::Rng;
+use read_audio_file::get_samples_from_filename;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::AtomicBool;
@@ -90,10 +87,7 @@ struct SoundingSample {
     pos: usize,
 }
 
-const SAMPLE_RATE: f64 = 44100.0;
-
 type S = f32;
-const SAMPLE_FORMAT: SampleFormat = SampleFormat::F32;
 
 type Args = render_callback::Args<data::NonInterleaved<S>>;
 
@@ -182,74 +176,6 @@ fn set_mp3_buffer(app_handle: tauri::AppHandle, filename: String) {
             .0
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
-}
-
-fn get_input_output_channels() -> Result<(AudioUnit, AudioUnit, Vec<String>), Error> {
-    let devices = get_audio_device_ids();
-    devices.unwrap().iter().for_each(|d| {
-        println!("device: {:?}", get_device_name(*d));
-        println!("{:?}", get_supported_physical_stream_formats(*d));
-    });
-
-    let mut input_audio_unit =
-        audio_unit_from_device_id(get_default_device_id(true).unwrap(), true)?;
-    let mut output_audio_unit =
-        audio_unit_from_device_id(get_default_device_id(false).unwrap(), false)?;
-
-    // input_audio_unit.set_property(id, scope, elem, maybe_data);
-
-    let format_flag = match SAMPLE_FORMAT {
-        SampleFormat::F32 => LinearPcmFlags::IS_FLOAT,
-        SampleFormat::I32 | SampleFormat::I16 | SampleFormat::I8 => {
-            LinearPcmFlags::IS_SIGNED_INTEGER
-        }
-        _ => {
-            unimplemented!("Other formats are not implemented for this example.");
-        }
-    };
-
-    // Using IS_NON_INTERLEAVED everywhere because data::Interleaved is commented out / not implemented
-    let in_stream_format = StreamFormat {
-        sample_rate: SAMPLE_RATE,
-        sample_format: SAMPLE_FORMAT,
-        flags: format_flag | LinearPcmFlags::IS_PACKED | LinearPcmFlags::IS_NON_INTERLEAVED,
-        // audio_unit.set_input_callback is hardcoded to 1 buffer, and when using non_interleaved
-        // we are forced to 1 channel
-        channels: 1,
-    };
-
-    let out_stream_format = StreamFormat {
-        sample_rate: SAMPLE_RATE,
-        sample_format: SAMPLE_FORMAT,
-        flags: format_flag | LinearPcmFlags::IS_PACKED | LinearPcmFlags::IS_NON_INTERLEAVED,
-        // you can change this to 1
-        channels: 2,
-    };
-
-    let mut result_log = vec![];
-    println!("input={:#?}", &in_stream_format);
-    println!("output={:#?}", &out_stream_format);
-    println!("input_asbd={:#?}", &in_stream_format.to_asbd());
-    println!("output_asbd={:#?}", &out_stream_format.to_asbd());
-    result_log.push(format!("{:#?}", &in_stream_format));
-    result_log.push(format!("{:#?}", &out_stream_format));
-    result_log.push(format!("{:#?}", &in_stream_format.to_asbd()));
-    result_log.push(format!("{:#?}", out_stream_format.to_asbd()));
-
-    let id = kAudioUnitProperty_StreamFormat;
-    let asbd = in_stream_format.to_asbd();
-    input_audio_unit.set_property(id, Scope::Output, Element::Input, Some(&asbd))?;
-
-    let asbd = out_stream_format.to_asbd();
-    output_audio_unit.set_property(id, Scope::Input, Element::Output, Some(&asbd))?;
-
-    // set audiounit buffer size to 32 samples, or however
-    let id = kAudioDevicePropertyBufferFrameSize;
-    let buffer_size: u32 = 2048;
-    input_audio_unit.set_property(id, Scope::Output, Element::Input, Some(&buffer_size))?;
-    output_audio_unit.set_property(id, Scope::Input, Element::Output, Some(&buffer_size))?;
-
-    Ok((input_audio_unit, output_audio_unit, result_log))
 }
 
 fn start_input_audio_unit(
