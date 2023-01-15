@@ -7,6 +7,7 @@ pub fn default_config() -> Config {
     return Config {
         bpm: 91.0,
         beats_to_loop: 4.0,
+        audio_in_gain: 1.0,
         looping_on: false,
         click_on: true,
         click_toggle: false,

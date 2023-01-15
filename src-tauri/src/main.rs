@@ -141,7 +141,7 @@ fn main() -> Result<(), coreaudio::Error> {
                 let zero: S = 0 as S;
                 let f: S = *buffers[0].front().unwrap_or(&zero);
                 for (ch, channel) in data.channels_mut().enumerate() {
-                    let sample: S = buffers[ch].pop_front().unwrap_or(f);
+                    let sample: S = buffers[ch].pop_front().unwrap_or(f) * config.audio_in_gain;
                     let mut audio_out = 0.0;
                     let mut visual_out = 0.0;
                     if config.audio_monitor_on {

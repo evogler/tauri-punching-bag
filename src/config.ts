@@ -1,4 +1,5 @@
 export const defaultRustConfig = {
+	audioInGain: 1.0,
   audioMonitorOn: false,
   beatsToLoop: 4,
   bpm: 91,

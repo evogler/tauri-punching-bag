@@ -297,6 +297,7 @@ const App = () => {
             ["click toggle", "clickToggle"],
             ["click volume", "clickVolume"],
             ["drum on", "drumOn"],
+						["input gain", "audioInGain"],
             ["looping", "loopingOn"],
             ["play file", "playFile"],
             ["visual monitor", "visualMonitorOn"],

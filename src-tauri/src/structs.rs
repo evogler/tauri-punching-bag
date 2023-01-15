@@ -43,6 +43,7 @@ pub struct ParserRhythm {
 pub struct Config {
     pub bpm: f64,
     pub beats_to_loop: f64,
+    pub audio_in_gain: f32,
     pub looping_on: bool,
     pub click_on: bool,
     pub click_toggle: bool,
