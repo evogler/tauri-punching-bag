@@ -29,6 +29,10 @@ html {
 input {
   background-color: #444;
   border: 0;
+  color: #ccc !important;
+}
+
+label {
   color: #ccc;
 }
 

@@ -38,7 +38,6 @@ export const defaultJsConfig = {
     val: { notes: [{ time: 0 }, { time: 0.5 }], start: 0, end: 1 },
     type: "parser2",
   },
-  subdivisionLoop: 1,
   subdivisionOffset: 0,
   visualGain: 10,
 };

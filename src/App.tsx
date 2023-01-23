@@ -15,6 +15,8 @@ import { appWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { SlidingDivision } from "./SlidingDivision";
 
+const BROWSER_DEBUG_MODE = false;
+
 // const log = <T,>(label: string, x: T) => {
 //   console.log(label, x);
 //   return x;
@@ -44,6 +46,26 @@ const camelCaseToSnakeCase = (str: string) =>
 
 const snakeCaseKeys = <T,>(obj: Record<string, T>) =>
   mapFuncOnObjectKeys(obj, camelCaseToSnakeCase);
+const Section = ({
+  children,
+  label = undefined,
+}: {
+  children: React.ReactNode;
+  label?: string;
+}) => (
+  <div
+    style={{
+      border: "1px solid yellow",
+      margin: "4px",
+      padding: "4px",
+      borderRadius: "8px",
+      backgroundColor: "#444",
+    }}
+  >
+    {label && <h4 style={{ color: "#ccc", margin: "1px " }}>{label}</h4>}
+    {children}
+  </div>
+);
 
 const App = () => {
   const [log, setLog] = useState("log");
@@ -96,6 +118,8 @@ const App = () => {
   });
 
   useEffect(() => {
+    // check for new samples
+    if (BROWSER_DEBUG_MODE) return;
     const interval = setInterval(getArray, 1000 / 100);
     return () => clearInterval(interval);
   });
@@ -270,6 +294,11 @@ const App = () => {
     samples.current = [];
   };
 
+  // const Input = ({ label, _key }: { label: string; _key: string }) => (
+  // <RealInput label={label} _key={_key} set={set} get={get} />
+  // );
+  const setGet = { set, get };
+
   const config = hideConfig ? null : (
     <div
       style={{
@@ -291,36 +320,91 @@ const App = () => {
 				NEW MP3 2
 			</button> */}
 
-        {(
-          [
-            ["click", "clickOn"],
-            ["click toggle", "clickToggle"],
-            ["click volume", "clickVolume"],
-            ["drum on", "drumOn"],
-						["input gain", "audioInGain"],
-            ["looping", "loopingOn"],
-            ["play file", "playFile"],
-            ["visual monitor", "visualMonitorOn"],
-            ["audio monitor", "audioMonitorOn"],
-            ["bar color mode", "barColorMode"],
-            ["bpm", "bpm"],
-            ["beatsToLoop", "beatsToLoop"],
-            ["click rhythm", "audioSubdivisions"],
-            ["bufferCompensation", "bufferCompensation"],
-            ["visual gain", "visualGain"],
-            ["visual subdivision loop", "subdivisionLoop"],
-            ["beats per row", "beatsPerRow"],
-            ["margin", "margin"],
-            ["visual subdivisions", "visualSubdivisions"],
-            ["subdivision offset", "subdivisionOffset"],
-            ["canvas height", "canvasHeight"],
-            ["canvas width", "canvasWidth"],
-          ] as [string, ConfigKey][]
-        ).map(
-          ([label, key]): JSX.Element => (
-            <Input label={label} _key={key} get={get} set={set} />
-          )
-        )}
+        <Section label="bpm">
+          <Input
+            label="bpm"
+            _key="bpm"
+            set={set}
+            get={get}
+            validate={(n: number) => n > 0}
+          />
+        </Section>
+
+        <Section label="click">
+          <Input label="click" _key="clickOn" set={set} get={get} />
+          <Input
+            label="click rhythm"
+            _key="audioSubdivisions"
+            set={set}
+            get={get}
+          />
+          <Input label="click toggle" _key="clickToggle" set={set} get={get} />
+          <Input label="click volume" _key="clickVolume" set={set} get={get} />
+        </Section>
+
+        <Section label="drum">
+          <Input label="drum on" _key="drumOn" set={set} get={get} />
+        </Section>
+
+        <Section label="gain">
+          <Input label="input gain" _key="audioInGain" set={set} get={get} />
+          <Input label="visual gain" _key="visualGain" set={set} get={get} />
+        </Section>
+
+        <Section label="looping">
+          <Input label="looping" _key="loopingOn" set={set} get={get} />
+          <Input label="beatsToLoop" _key="beatsToLoop" set={set} get={get} />
+          <Input
+            label="audio monitor"
+            _key="audioMonitorOn"
+            set={set}
+            get={get}
+          />
+        </Section>
+
+        <Section label="file">
+          <Input label="play file" _key="playFile" set={set} get={get} />
+        </Section>
+
+        <Section label="visual">
+          <Input
+            label="visual monitor"
+            _key="visualMonitorOn"
+            set={set}
+            get={get}
+          />
+          <Input
+            label="visual subdivisions"
+            _key="visualSubdivisions"
+            set={set}
+            get={get}
+          />
+          <Input
+            label="visual subdivision offset"
+            _key="subdivisionOffset"
+            set={set}
+            get={get}
+          />
+          <Input label="beats per row" _key="beatsPerRow" set={set} get={get} />
+          <Input label="margin" _key="margin" set={set} get={get} />
+          <Input
+            label="bar color mode"
+            _key="barColorMode"
+            set={set}
+            get={get}
+          />
+        </Section>
+
+        <Section label="misc">
+          <Input
+            label="bufferCompensation"
+            _key="bufferCompensation"
+            set={set}
+            get={get}
+          />
+        </Section>
+        {/* <Input label="canvas height" _key= "canvasHeight" /> */}
+        {/* <Input label="canvas width" _key= "canvasWidth" /> */}
       </>
       <div>{log}</div>
     </div>
