@@ -15,7 +15,7 @@ import { appWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { SlidingDivision } from "./SlidingDivision";
 
-const BROWSER_DEBUG_MODE = false;
+const BROWSER_DEBUG_MODE = true;
 
 // const log = <T,>(label: string, x: T) => {
 //   console.log(label, x);
@@ -55,7 +55,7 @@ const Section = ({
 }) => (
   <div
     style={{
-      border: "1px solid yellow",
+      border: "1px solid #777",
       margin: "4px",
       padding: "4px",
       borderRadius: "8px",
@@ -117,12 +117,20 @@ const App = () => {
     };
   });
 
+  const [getArrayCount, setGetArrayCount] = useState(0);
+  const getArrayAdded = useRef(false);
   useEffect(() => {
     // check for new samples
-    if (BROWSER_DEBUG_MODE) return;
-    const interval = setInterval(getArray, 1000 / 100);
-    return () => clearInterval(interval);
-  });
+    if (getArrayAdded.current) return;
+    getArrayAdded.current = true;
+    setGetArrayCount((n) => n + 1);
+    const interval = setInterval(
+      BROWSER_DEBUG_MODE ? mockGetArray : getArray,
+      // getArray,
+      1000 / 100
+    );
+    return () => { clearInterval(interval); getArrayAdded.current = false;};
+  }, [setGetArrayCount]);
 
   const pickNewMp3 = (filename: string) => () => {
     invoke("set_mp3_buffer", { filename });
@@ -173,6 +181,22 @@ const App = () => {
   const getArray = async () => {
     const result: [number, number][] = await invoke("get_samples");
     samples.current.push(...result);
+  };
+
+  const mockGetArrayPos = useRef(0);
+  const beatsPerSample = 91 / 60 / 44100;
+  const mockGetArray = async () => {
+    for (let i = 0; i < 441; i++) {
+      samples.current.push([
+        mockGetArrayPos.current,
+        (Math.random() * 2 - 1) *
+          (Math.random() * 2 - 1) *
+          (Math.random() * 2 - 1) *
+          (Math.random() * 2 - 1) *
+          (Math.random() * 2 - 1),
+      ]);
+      mockGetArrayPos.current += beatsPerSample;
+    }
   };
 
   const updateRustConfig = (args: Partial<RustConfig>) => {
@@ -312,6 +336,7 @@ const App = () => {
       }}
     >
       <>
+        <h2>{getArrayCount}</h2>
         <button onClick={resetBeat}>RESET TIME</button>
         {/* <button onClick={pickNewMp3("/Users/eric/Music/Logic/Logic_3.wav")}>
 				NEW MP3 1
