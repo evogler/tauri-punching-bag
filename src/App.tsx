@@ -15,7 +15,7 @@ import { appWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { SlidingDivision } from "./SlidingDivision";
 
-const BROWSER_DEBUG_MODE = true;
+const BROWSER_DEBUG_MODE = false;
 
 // const log = <T,>(label: string, x: T) => {
 //   console.log(label, x);
@@ -117,20 +117,18 @@ const App = () => {
     };
   });
 
-  const [getArrayCount, setGetArrayCount] = useState(0);
   const getArrayAdded = useRef(false);
   useEffect(() => {
     // check for new samples
     if (getArrayAdded.current) return;
     getArrayAdded.current = true;
-    setGetArrayCount((n) => n + 1);
     const interval = setInterval(
       BROWSER_DEBUG_MODE ? mockGetArray : getArray,
       // getArray,
       1000 / 100
     );
     return () => { clearInterval(interval); getArrayAdded.current = false;};
-  }, [setGetArrayCount]);
+  }, []);
 
   const pickNewMp3 = (filename: string) => () => {
     invoke("set_mp3_buffer", { filename });
@@ -336,7 +334,6 @@ const App = () => {
       }}
     >
       <>
-        <h2>{getArrayCount}</h2>
         <button onClick={resetBeat}>RESET TIME</button>
         {/* <button onClick={pickNewMp3("/Users/eric/Music/Logic/Logic_3.wav")}>
 				NEW MP3 1
@@ -431,7 +428,7 @@ const App = () => {
         {/* <Input label="canvas height" _key= "canvasHeight" /> */}
         {/* <Input label="canvas width" _key= "canvasWidth" /> */}
       </>
-      <div>{log}</div>
+      {/* <div>{log}</div> */}
     </div>
   );
 
@@ -465,7 +462,10 @@ const App = () => {
           overflow: "hidden",
         }}
       >
-        <SlidingDivision panel={config} rest={waveform} />
+        {config}
+        {waveform}
+
+        {/* <SlidingDivision panel={config} rest={waveform} /> */}
       </div>
     </>
   );
