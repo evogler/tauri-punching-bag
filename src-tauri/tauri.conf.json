@@ -12,7 +12,10 @@
   },
   "tauri": {
     "allowlist": {
-      "all": true
+      "all": true,
+      "fs": {
+        "scope": ["$RESOURCE/*"]
+      }
     },
     "bundle": {
       "active": true,
@@ -38,7 +41,7 @@
         "providerShortName": "Eric Vogler",
         "signingIdentity": "-"
       },
-      "resources": [],
+      "resources": ["samples/"],
       "shortDescription": "",
       "targets": "all",
       "windows": {

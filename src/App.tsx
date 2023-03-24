@@ -15,7 +15,7 @@ import { appWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { SlidingDivision } from "./SlidingDivision";
 
-const BROWSER_DEBUG_MODE = false;
+const BROWSER_DEBUG_MODE = true;
 
 // const log = <T,>(label: string, x: T) => {
 //   console.log(label, x);

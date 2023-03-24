@@ -33,8 +33,21 @@ use std::{
 };
 
 fn main() -> Result<(), coreaudio::Error> {
+    let context = tauri::generate_context!();
+    let app_config_dir = tauri::api::path::config_dir();
+    let rd = tauri::api::path::resource_dir(&context.package_info(), &tauri::utils::Env::default());
+    let binding = rd.unwrap();
+    let resource_dir = binding.to_str().unwrap();
+    // let resource_dir = rd.unwrap().to_str().unwrap();
+    // tauri::api::path::config_dir()
+
+    // access an asset file within the tauri app
+
+    // load mp3
     let mut mp3_loaded = false;
     let path = "/Users/eric/Music/Logic/tauri-file.wav".into();
+    println!("app_config_dir: {:?}", app_config_dir);
+    println!("resource_dir: {:?}", &resource_dir);
     let data = get_samples_from_filename(&path);
     let mp3_arc: Arc<Mutex<Mp3Buffer>>;
     if let Ok(data) = data {
@@ -53,16 +66,12 @@ fn main() -> Result<(), coreaudio::Error> {
     let mp3 = mp3_arc.clone();
     let mp3_state = Mp3BufferState(mp3_arc.clone());
 
+    // load samples
     let mut sample_buffers = HashMap::new();
+    let ride_path = &format!("{}/{}", resource_dir, "samples/ride_cropped.wav");
     sample_buffers.insert(
         "ride".to_string(),
-        Arc::new(
-            get_samples_from_filename(
-                &"/Users/eric/Workspace/tauri-punching-bag/src-tauri/samples/ride_cropped.wav"
-                    .into(),
-            )
-            .unwrap(),
-        ),
+        Arc::new(get_samples_from_filename(ride_path).unwrap()),
     );
     let mut sounding_samples = vec![];
     sounding_samples.push(SoundingSample {
@@ -70,6 +79,7 @@ fn main() -> Result<(), coreaudio::Error> {
         pos: 0,
     });
 
+    // setup audio
     let (mut input_audio_unit, mut output_audio_unit, io_log) =
         get_input_output_channels().unwrap();
     let buffers = make_buffers();
