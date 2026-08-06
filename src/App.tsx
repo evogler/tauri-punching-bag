@@ -328,7 +328,7 @@ const App = () => {
         flexDirection: "column",
         padding: "1px",
         gap: "2px",
-        overflow: "scroll",
+        // overflow: "scroll",
         width: "600px",
         height: "100%",
       }}
