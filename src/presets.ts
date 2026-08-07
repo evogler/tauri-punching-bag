@@ -1,0 +1,94 @@
+import {
+  JsConfig,
+  JsConfigKey,
+  RustConfig,
+  defaultJsConfig,
+  defaultRustConfig,
+  isJsConfigKey,
+  isRustConfigKey,
+} from "./config";
+
+const STORAGE_KEY = "tpb.presets.v1";
+
+// Derived from the window size on every resize, so a preset must not restore
+// stale values over them.
+const TRANSIENT_JS_KEYS: JsConfigKey[] = ["canvasHeight", "canvasWidth"];
+
+export type Preset = {
+  rust: Partial<RustConfig>;
+  js: Partial<JsConfig>;
+};
+
+export type Presets = Record<string, Preset>;
+
+const pickKnownKeys = <T,>(
+  obj: Record<string, unknown>,
+  isKnownKey: (k: string) => boolean,
+  skip: string[] = []
+) => {
+  const out: Record<string, unknown> = {};
+  for (const key in obj) {
+    if (isKnownKey(key) && !skip.includes(key)) out[key] = obj[key];
+  }
+  return out as T;
+};
+
+export const makePreset = (
+  rustConfig: RustConfig,
+  jsConfig: JsConfig
+): Preset => ({
+  rust: pickKnownKeys<Partial<RustConfig>>(rustConfig, isRustConfigKey),
+  js: pickKnownKeys<Partial<JsConfig>>(jsConfig, isJsConfigKey, TRANSIENT_JS_KEYS),
+});
+
+// Drops keys that no longer exist in the config, so presets saved by an older
+// build still load. Keys added since the preset was saved keep their current
+// value.
+const sanitizePreset = (preset: unknown): Preset | null => {
+  if (typeof preset !== "object" || preset === null) return null;
+  const { rust, js } = preset as Record<string, unknown>;
+  return {
+    rust: pickKnownKeys<Partial<RustConfig>>(
+      typeof rust === "object" && rust !== null
+        ? (rust as Record<string, unknown>)
+        : {},
+      isRustConfigKey
+    ),
+    js: pickKnownKeys<Partial<JsConfig>>(
+      typeof js === "object" && js !== null
+        ? (js as Record<string, unknown>)
+        : {},
+      isJsConfigKey,
+      TRANSIENT_JS_KEYS
+    ),
+  };
+};
+
+export const readPresets = (): Presets => {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return {};
+    const presets: Presets = {};
+    for (const [name, preset] of Object.entries(parsed)) {
+      const sanitized = sanitizePreset(preset);
+      if (sanitized) presets[name] = sanitized;
+    }
+    return presets;
+  } catch (e) {
+    console.error("failed to read presets", e);
+    return {};
+  }
+};
+
+export const writePresets = (presets: Presets) => {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(presets));
+  } catch (e) {
+    console.error("failed to write presets", e);
+  }
+};
+
+export const defaultPreset = (): Preset =>
+  makePreset(defaultRustConfig, defaultJsConfig);

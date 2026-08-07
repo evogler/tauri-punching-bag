@@ -14,8 +14,13 @@ import { Input } from "./Input";
 import { appWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { SlidingDivision } from "./SlidingDivision";
+import { PresetBar } from "./PresetBar";
+import { Preset, makePreset } from "./presets";
 
-const BROWSER_DEBUG_MODE = true;
+// True only in a plain browser (`yarn start`), where there's no Rust backend to
+// call, so samples are faked. Inside the Tauri app -- dev or release -- the IPC
+// global is injected and we always use real samples.
+const BROWSER_DEBUG_MODE = !("__TAURI_IPC__" in window);
 
 // const log = <T,>(label: string, x: T) => {
 //   console.log(label, x);
@@ -209,6 +214,13 @@ const App = () => {
     // console.log("called set_config");
   };
 
+  const getCurrentPreset = () => makePreset(rustConfig, jsConfig);
+
+  const loadPreset = (preset: Preset) => {
+    setJsConfig((jsConfig) => ({ ...jsConfig, ...preset.js }));
+    updateRustConfig(preset.rust);
+  };
+
   const resetBeat = () => {
     invoke("reset_beat");
   };
@@ -341,6 +353,10 @@ const App = () => {
 			<button onClick={pickNewMp3("/Users/eric/Music/Logic/Logic_4.wav")}>
 				NEW MP3 2
 			</button> */}
+
+        <Section label="configs">
+          <PresetBar getCurrent={getCurrentPreset} onLoad={loadPreset} />
+        </Section>
 
         <Section label="bpm">
           <Input
