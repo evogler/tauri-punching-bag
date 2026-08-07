@@ -31,12 +31,19 @@ export const PresetBar = ({
     writePresets(next);
   };
 
+  // So SAVE always does something, even before anything has been typed.
+  const nextDefaultName = () => {
+    let i = 1;
+    while (`config ${i}` in presets) i++;
+    return `config ${i}`;
+  };
+
   const save = () => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
+    const trimmed = name.trim() || nextDefaultName();
     if (trimmed in presets && !window.confirm(`Overwrite "${trimmed}"?`)) return;
     update({ ...presets, [trimmed]: getCurrent() });
     setSelected(trimmed);
+    setName(trimmed);
   };
 
   const load = () => {
@@ -73,10 +80,20 @@ export const PresetBar = ({
             </option>
           ))}
         </select>
-        <button onClick={load} disabled={!presets[selected]}>
+        <button
+          onClick={load}
+          disabled={!presets[selected]}
+          title={presets[selected] ? `Load "${selected}"` : "Pick a config first"}
+        >
           LOAD
         </button>
-        <button onClick={remove} disabled={!presets[selected]}>
+        <button
+          onClick={remove}
+          disabled={!presets[selected]}
+          title={
+            presets[selected] ? `Delete "${selected}"` : "Pick a config first"
+          }
+        >
           DELETE
         </button>
       </div>
@@ -87,14 +104,24 @@ export const PresetBar = ({
           onKeyDown={(e) => {
             if (e.key === "Enter") save();
           }}
-          placeholder="name"
+          placeholder={nextDefaultName()}
           style={{ flex: 1, minWidth: 0 }}
         />
-        <button onClick={save} disabled={!name.trim()}>
+        <button onClick={save} title="Save the current settings">
           SAVE
         </button>
-        <button onClick={() => onLoad(defaultPreset())}>DEFAULTS</button>
+        <button
+          onClick={() => onLoad(defaultPreset())}
+          title="Reset every setting to its default"
+        >
+          DEFAULTS
+        </button>
       </div>
+      {!names.length && (
+        <div style={{ color: "#aaa", fontSize: "0.8em" }}>
+          Name the current settings and hit SAVE.
+        </div>
+      )}
     </div>
   );
 };
