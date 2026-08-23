@@ -238,7 +238,7 @@ fn main() -> Result<(), coreaudio::Error> {
                     }
 
                     let visual_beat =
-                        (beat - (config.buffer_compensation as f64) * beats_per_sample) as f32;
+                        beat - (config.buffer_compensation as f64) * beats_per_sample;
                     state_vec.push((visual_beat, visual_out.abs()));
 
                     // let adjusted_beat = beat_bisect(&config.audio_subdivisions, beat);

@@ -14,7 +14,11 @@ pub struct Mp3Buffer {
 pub struct Mp3BufferState(pub Arc<Mutex<Mp3Buffer>>);
 
 pub struct SampleOutputBuffer {
-    pub buffer: Arc<Mutex<Vec<(f32, f32)>>>,
+    // The beat is f64, not f32: it counts up from launch and never wraps, so at
+    // f32 precision the gap between representable values outgrows a screen pixel
+    // after a while and the display stops being redrawn densely enough to paint
+    // over the previous pass.
+    pub buffer: Arc<Mutex<Vec<(f64, f32)>>>,
 }
 
 pub struct LoopBuffer {

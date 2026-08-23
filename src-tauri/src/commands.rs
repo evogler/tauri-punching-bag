@@ -26,7 +26,7 @@ pub fn set_mp3_buffer(app_handle: tauri::AppHandle, filename: String) {
 }
 
 #[tauri::command]
-pub fn get_samples(state: State<SampleOutputBuffer>) -> Result<Vec<(f32, f32)>, String> {
+pub fn get_samples(state: State<SampleOutputBuffer>) -> Result<Vec<(f64, f32)>, String> {
     if let Ok(mut samples) = state.buffer.lock() {
         let res = samples.to_vec();
         samples.clear();
