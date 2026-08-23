@@ -9,6 +9,7 @@ import {
   JsConfig,
   isJsConfigKey,
   ConfigKey,
+  gridAlpha,
 } from "./config";
 import { Input } from "./Input";
 import { appWindow } from "@tauri-apps/api/window";
@@ -16,6 +17,7 @@ import { listen } from "@tauri-apps/api/event";
 import { SlidingDivision } from "./SlidingDivision";
 import { PresetBar } from "./PresetBar";
 import { Preset, makePreset } from "./presets";
+import { GridList } from "./GridList";
 
 // True only in a plain browser (`yarn start`), where there's no Rust backend to
 // call, so samples are faked. Inside the Tauri app -- dev or release -- the IPC
@@ -289,26 +291,37 @@ const App = () => {
 
   let maxSample = 0;
 
-  const draw = (ctx: CanvasRenderingContext2D, frameCount: number) => {
-    let startBeat = 0;
-    let b = 0;
-    while (b < beatsPerWindow) {
-      for (const note of get("visualSubdivisions").val.notes) {
-        const t = note.time;
-        b = startBeat + t;
-        if (b >= beatsPerWindow) break;
-        const [x, row] = getCanvasPos(b);
-        const y = row * canvasRowHeight;
-        ctx.strokeStyle = "#0088ff";
-        // ctx.lineWidth = d === 0 ? 3 : 1;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(x, y + canvasRowHeight);
-        ctx.stroke();
+  // Tiles each grid's rhythm across the window. Drawn last-to-first so the top
+  // of the list ends up on top of the stack.
+  const drawGrids = (ctx: CanvasRenderingContext2D) => {
+    const grids = get("grids");
+    for (let i = grids.length - 1; i >= 0; i--) {
+      const grid = grids[i];
+      const { notes, end } = grid.subdivisions.val;
+      // A pattern of zero (or negative) length would never advance the tiling.
+      if (!(end > 0) || !notes.length) continue;
+      ctx.strokeStyle = grid.color;
+      ctx.globalAlpha = gridAlpha(grid);
+      ctx.lineWidth = 2;
+      for (let startBeat = 0; startBeat < beatsPerWindow; startBeat += end) {
+        for (const note of notes) {
+          const b = startBeat + note.time;
+          if (b >= beatsPerWindow) break;
+          const [x, row] = getCanvasPos(b);
+          const y = row * canvasRowHeight;
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x, y + canvasRowHeight);
+          ctx.stroke();
+        }
       }
-      startBeat += get("visualSubdivisions").val.end;
     }
+    // The samples drawn afterwards are always fully opaque.
+    ctx.globalAlpha = 1;
+  };
+
+  const draw = (ctx: CanvasRenderingContext2D, frameCount: number) => {
+    drawGrids(ctx);
 
     const vals = samples.current;
     ctx.lineWidth = 0.5;
@@ -412,12 +425,6 @@ const App = () => {
             get={get}
           />
           <Input
-            label="visual subdivisions"
-            _key="visualSubdivisions"
-            set={set}
-            get={get}
-          />
-          <Input
             label="visual subdivision offset"
             _key="subdivisionOffset"
             set={set}
@@ -430,6 +437,13 @@ const App = () => {
             _key="barColorMode"
             set={set}
             get={get}
+          />
+        </Section>
+
+        <Section label="grids">
+          <GridList
+            grids={get("grids")}
+            setGrids={(grids) => set("grids", grids)}
           />
         </Section>
 

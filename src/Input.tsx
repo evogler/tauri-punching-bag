@@ -3,7 +3,10 @@ import { Config, ConfigKey } from "./config";
 import parser1 from "./parser1";
 import parser2 from "./parser2";
 
-const useFocusedValue = (
+// While the field has focus it shows exactly what was typed, so half-finished
+// text that doesn't parse yet survives instead of being overwritten by the last
+// value that did parse.
+export const useFocusedValue = (
   val: unknown,
   { toString }: { toString?: (val: unknown) => string } = {
     toString: undefined,
@@ -12,10 +15,14 @@ const useFocusedValue = (
   const _toString = toString ?? JSON.stringify;
   const [isFocused, setIsFocused] = useState(false);
   const [focusedVal, setFocusedVal] = useState<string>(_toString(val));
-  const onFocus = () => setIsFocused(true);
+  const onFocus = () => {
+    // Start from what's on screen now, not from whatever was typed last time
+    // the field had focus.
+    setFocusedVal(_toString(val));
+    setIsFocused(true);
+  };
   const onBlur = () => setIsFocused(false);
   const value = isFocused ? focusedVal : _toString(val);
-  console.log(val, _toString(val), toString, JSON.stringify(val), value);
   return [{ onFocus, onBlur, value }, setFocusedVal] as const;
 };
 

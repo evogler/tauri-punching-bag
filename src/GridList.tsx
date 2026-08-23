@@ -1,0 +1,226 @@
+import { useRef, useState } from "react";
+import { GRID_COLORS, Rhythm, VisualGrid, gridAlpha } from "./config";
+import { useFocusedValue } from "./Input";
+import parser1 from "./parser1";
+import parser2 from "./parser2";
+
+const parserFor = (rhythm: Rhythm) =>
+  rhythm.type === "parser1" ? parser1 : parser2;
+
+// One line per beat -- the least surprising thing for a grid you just added.
+const NEW_GRID_TEXT = "1:1";
+
+const DROP_LINE = "#0af";
+
+// Picks the first palette color not already on screen so a new grid doesn't
+// land invisibly on top of an existing one.
+const nextColor = (grids: VisualGrid[]) =>
+  GRID_COLORS.find((c) => !grids.some((g) => g.color === c)) ??
+  GRID_COLORS[grids.length % GRID_COLORS.length];
+
+const makeGrid = (grids: VisualGrid[]): VisualGrid => ({
+  color: nextColor(grids),
+  alpha: 1,
+  subdivisions: {
+    inputText: NEW_GRID_TEXT,
+    val: parser2.parse(NEW_GRID_TEXT),
+    type: "parser2",
+  },
+});
+
+const rowStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "row",
+  gap: "4px",
+  alignItems: "center",
+};
+
+const GridRow = ({
+  grid,
+  index,
+  dragging,
+  onChange,
+  onRemove,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
+}: {
+  grid: VisualGrid;
+  index: number;
+  dragging: boolean;
+  onChange: (grid: VisualGrid) => void;
+  onRemove: () => void;
+  onDragStart: (e: React.PointerEvent) => void;
+  onDragMove: (e: React.PointerEvent) => void;
+  onDragEnd: () => void;
+}) => {
+  const [props, setFocusedVal] = useFocusedValue(grid.subdivisions.inputText, {
+    toString: (x) => x as string,
+  });
+  const alpha = gridAlpha(grid);
+
+  return (
+    <div style={{ ...rowStyle, opacity: dragging ? 0.4 : 1 }}>
+      <span
+        onPointerDown={onDragStart}
+        onPointerMove={onDragMove}
+        onPointerUp={onDragEnd}
+        onPointerCancel={onDragEnd}
+        title="Drag to reorder -- the top of the list draws on top"
+        style={{
+          cursor: "grab",
+          color: "#aaa",
+          // Keep the gesture from turning into text selection or a pan.
+          userSelect: "none",
+          touchAction: "none",
+        }}
+      >
+        ⠿
+      </span>
+      <input
+        type="color"
+        value={grid.color}
+        onChange={(e) => onChange({ ...grid, color: e.target.value })}
+        title="Grid color"
+        style={{
+          width: "2em",
+          height: "1.6em",
+          padding: 0,
+          border: "none",
+          background: "none",
+        }}
+      />
+      <input
+        {...props}
+        onChange={(e) => {
+          const v = e.target.value;
+          setFocusedVal(v);
+          try {
+            const parsed = parserFor(grid.subdivisions).parse(v);
+            onChange({
+              ...grid,
+              subdivisions: { ...grid.subdivisions, val: parsed, inputText: v },
+            });
+          } catch (e) {}
+        }}
+        title={`Grid ${index + 1} rhythm`}
+        style={{ flex: 1, minWidth: 0 }}
+      />
+      <input
+        type="range"
+        min={0}
+        max={1}
+        step={0.05}
+        value={alpha}
+        onChange={(e) =>
+          onChange({ ...grid, alpha: parseFloat(e.target.value) })
+        }
+        title={`Opacity ${Math.round(alpha * 100)}%`}
+        style={{ width: "5em" }}
+      />
+      <button onClick={onRemove} title={`Remove grid ${index + 1}`}>
+        ✕
+      </button>
+    </div>
+  );
+};
+
+export const GridList = ({
+  grids,
+  setGrids,
+}: {
+  grids: VisualGrid[];
+  setGrids: (grids: VisualGrid[]) => void;
+}) => {
+  const rowsRef = useRef<HTMLDivElement>(null);
+  // `to` is where the dragged grid lands in the reordered list.
+  const [drag, setDrag] = useState<{ from: number; to: number } | null>(null);
+
+  // Rows hold still during a drag, so the landing spot is just a count of how
+  // many of the *other* rows sit above the pointer.
+  const insertionIndex = (clientY: number, from: number) => {
+    const rows = Array.from(rowsRef.current?.children ?? []);
+    let to = 0;
+    rows.forEach((row, i) => {
+      if (i === from) return;
+      const r = row.getBoundingClientRect();
+      if (clientY > r.top + r.height / 2) to++;
+    });
+    return to;
+  };
+
+  const startDrag = (i: number) => (e: React.PointerEvent) => {
+    // Routes the rest of the gesture to the handle even as the pointer leaves
+    // it, which is what makes a plain span usable as a drag handle.
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDrag({ from: i, to: i });
+  };
+
+  const moveDrag = (e: React.PointerEvent) => {
+    if (!drag) return;
+    const to = insertionIndex(e.clientY, drag.from);
+    if (to !== drag.to) setDrag({ from: drag.from, to });
+  };
+
+  const endDrag = () => {
+    if (!drag) return;
+    if (drag.to !== drag.from) {
+      const next = [...grids];
+      const [moved] = next.splice(drag.from, 1);
+      next.splice(drag.to, 0, moved);
+      setGrids(next);
+    }
+    setDrag(null);
+  };
+
+  // The rows haven't moved yet, so translate the landing index back into a gap
+  // between the rows as they're currently drawn.
+  const dropGap = !drag
+    ? -1
+    : drag.to <= drag.from
+    ? drag.to
+    : drag.to + 1;
+
+  const gapStyle = (gap: number): React.CSSProperties => ({
+    borderTop: `2px solid ${dropGap === gap ? DROP_LINE : "transparent"}`,
+  });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+      <div ref={rowsRef} style={{ display: "flex", flexDirection: "column" }}>
+        {grids.map((grid, i) => (
+          <div key={i} style={gapStyle(i)}>
+            <GridRow
+              grid={grid}
+              index={i}
+              dragging={drag?.from === i}
+              onChange={(next) =>
+                setGrids(grids.map((g, j) => (j === i ? next : g)))
+              }
+              onRemove={() => setGrids(grids.filter((_, j) => j !== i))}
+              onDragStart={startDrag(i)}
+              onDragMove={moveDrag}
+              onDragEnd={endDrag}
+            />
+          </div>
+        ))}
+      </div>
+      {/* The landing spot below the last row. Kept outside rowsRef so it doesn't
+          throw off the row indexing above. */}
+      <div style={gapStyle(grids.length)} />
+      <div style={rowStyle}>
+        <button
+          onClick={() => setGrids([...grids, makeGrid(grids)])}
+          title="Add another grid"
+        >
+          + ADD GRID
+        </button>
+        {!grids.length && (
+          <span style={{ color: "#aaa", fontSize: "0.8em" }}>
+            No grids -- the waveform draws with no overlay.
+          </span>
+        )}
+      </div>
+    </div>
+  );
+};
