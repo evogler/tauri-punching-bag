@@ -347,7 +347,23 @@ const App = () => {
       }}
     >
       <>
-        <button onClick={resetBeat}>RESET TIME</button>
+        <div style={{ display: "flex", flexDirection: "row", gap: "2px" }}>
+          <button
+            onClick={() => set("paused", !get("paused"))}
+            title="Freeze the beat, the click, the file and the display"
+            style={{
+              flex: 1,
+              fontWeight: "bold",
+              backgroundColor: get("paused") ? "#c44" : undefined,
+              color: get("paused") ? "#fff" : undefined,
+            }}
+          >
+            {get("paused") ? "▶ RESUME" : "⏸ PAUSE"}
+          </button>
+          <button onClick={resetBeat} style={{ flex: 1 }}>
+            RESET TIME
+          </button>
+        </div>
         {/* <button onClick={pickNewMp3("/Users/eric/Music/Logic/Logic_3.wav")}>
 				NEW MP3 1
 			</button>

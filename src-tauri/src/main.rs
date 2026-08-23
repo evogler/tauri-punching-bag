@@ -15,7 +15,7 @@ mod util;
 extern crate coreaudio;
 
 use crate::commands::{get_samples, reset_beat, set_config, set_mp3_buffer};
-use crate::constants::{default_config, SAMPLE_RATE};
+use crate::constants::{default_config, MAX_INPUT_BACKLOG, SAMPLE_RATE};
 use crate::get_loop_buffer_size::get_loop_buffer_size;
 use crate::io_channels::{get_input_output_channels, make_buffers, start_input_audio_unit};
 use crate::read_audio_file::get_samples_from_filename;
@@ -134,6 +134,15 @@ fn main() -> Result<(), coreaudio::Error> {
         let buffer_left = buffers.consumer_left.lock().unwrap();
         let buffer_right = buffers.consumer_right.lock().unwrap();
         let mut buffers = vec![buffer_left, buffer_right];
+
+        // Keeps the shared input queue from growing without bound if this
+        // callback ever falls behind the input one. Also trims the startup gap,
+        // since the input unit is started before this one.
+        for buffer in buffers.iter_mut() {
+            let excess = buffer.len().saturating_sub(MAX_INPUT_BACKLOG);
+            buffer.drain(..excess);
+        }
+
         let config = config1.lock().unwrap();
         let mut loop_buffer = loop_buffer_clone.lock().unwrap();
         let beats_per_sample: f64 = config.bpm / SAMPLE_RATE / 60f64;
@@ -143,6 +152,27 @@ fn main() -> Result<(), coreaudio::Error> {
             beat = 0.0;
             mp3.pos = 0;
             should_reset_beat_arc.store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+
+        // Paused freezes everything that moves -- the beat, the file position, the
+        // loop buffer -- so resuming picks up exactly where it stopped, and no
+        // visual samples are produced so the display holds still.
+        //
+        // The input still has to be drained. make_buffers hands out the same
+        // queue as both producer and consumer, so leaving it alone while the
+        // input unit keeps pushing would grow it without bound and then play
+        // back a pause-length backlog of stale audio on resume.
+        if config.paused {
+            for buffer in buffers.iter_mut() {
+                let drop_count = num_frames.min(buffer.len());
+                buffer.drain(..drop_count);
+            }
+            for i in 0..num_frames {
+                for channel in data.channels_mut() {
+                    channel[i] = 0.0;
+                }
+            }
+            return Ok(());
         }
 
         if let Ok(mut state_vec) = sample_output_buffer_clone.lock() {

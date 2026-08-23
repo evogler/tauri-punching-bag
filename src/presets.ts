@@ -2,6 +2,7 @@ import {
   JsConfig,
   JsConfigKey,
   RustConfig,
+  RustConfigKey,
   defaultJsConfig,
   defaultRustConfig,
   isJsConfigKey,
@@ -13,6 +14,10 @@ const STORAGE_KEY = "tpb.presets.v1";
 // Derived from the window size on every resize, so a preset must not restore
 // stale values over them.
 const TRANSIENT_JS_KEYS: JsConfigKey[] = ["canvasHeight", "canvasWidth"];
+
+// Transport state rather than configuration -- saving a preset while paused
+// shouldn't make loading it later pause the app.
+const TRANSIENT_RUST_KEYS: RustConfigKey[] = ["paused"];
 
 export type Preset = {
   rust: Partial<RustConfig>;
@@ -37,7 +42,11 @@ export const makePreset = (
   rustConfig: RustConfig,
   jsConfig: JsConfig
 ): Preset => ({
-  rust: pickKnownKeys<Partial<RustConfig>>(rustConfig, isRustConfigKey),
+  rust: pickKnownKeys<Partial<RustConfig>>(
+    rustConfig,
+    isRustConfigKey,
+    TRANSIENT_RUST_KEYS
+  ),
   js: pickKnownKeys<Partial<JsConfig>>(jsConfig, isJsConfigKey, TRANSIENT_JS_KEYS),
 });
 
@@ -52,7 +61,8 @@ const sanitizePreset = (preset: unknown): Preset | null => {
       typeof rust === "object" && rust !== null
         ? (rust as Record<string, unknown>)
         : {},
-      isRustConfigKey
+      isRustConfigKey,
+      TRANSIENT_RUST_KEYS
     ),
     js: pickKnownKeys<Partial<JsConfig>>(
       typeof js === "object" && js !== null

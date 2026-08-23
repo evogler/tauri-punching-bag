@@ -53,6 +53,7 @@ pub struct Config {
     pub visual_monitor_on: bool,
     pub audio_monitor_on: bool,
     pub buffer_compensation: usize,
+    pub paused: bool,
     pub audio_subdivisions: ParserRhythm,
     pub test_object: ParserRhythm,
 }

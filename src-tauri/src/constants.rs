@@ -3,6 +3,14 @@ use coreaudio::audio_unit::SampleFormat;
 pub const SAMPLE_RATE: f64 = 44100.0;
 pub const SAMPLE_FORMAT: SampleFormat = SampleFormat::F32;
 
+// make_buffers hands the same unbounded VecDeque to the input callback's
+// push_back and the render callback's pop_front, so anything that stalls the
+// render side -- the bound device going away, or slow clock drift when input
+// and output are separate devices -- would grow it forever. Cap the backlog and
+// drop the oldest excess. A quarter second is well above the few thousand
+// samples it normally holds, so this never fires in normal running.
+pub const MAX_INPUT_BACKLOG: usize = 11_025;
+
 pub fn default_config() -> Config {
     return Config {
         bpm: 91.0,
@@ -17,6 +25,7 @@ pub fn default_config() -> Config {
         visual_monitor_on: true,
         audio_monitor_on: false,
         buffer_compensation: 4330,
+        paused: false,
         audio_subdivisions: ParserRhythm {
             start: 0.0,
             end: 1.0,

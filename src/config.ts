@@ -4,6 +4,7 @@ export const defaultRustConfig = {
   beatsToLoop: 4,
   bpm: 91,
   bufferCompensation: 4330,
+  paused: false,
   clickOn: true,
   clickToggle: false,
   clickVolume: 0.3,
