@@ -86,6 +86,7 @@ export const defaultJsConfig = {
     },
   ] as VisualGrid[],
   subdivisionOffset: 0,
+  refreshAtCycleEnd: false,
   visualGain: 10,
 };
 

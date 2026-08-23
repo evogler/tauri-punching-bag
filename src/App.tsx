@@ -25,6 +25,10 @@ import { Layout, getCanvasPositions } from "./layout";
 // global is injected and we always use real samples.
 const BROWSER_DEBUG_MODE = !("__TAURI_IPC__" in window);
 
+// What the sweep paints over old samples with. The whole-cycle refresh clears to
+// the same thing, so both modes sit on the same background.
+const WAVEFORM_BACKGROUND = "#222222";
+
 // const log = <T,>(label: string, x: T) => {
 //   console.log(label, x);
 //   return x;
@@ -193,6 +197,11 @@ const App = () => {
 
   const canvasPos = useRef(0);
   const samples = useRef<[number, number][]>([]);
+  // Whole-cycle mode: the loudest sample seen in each pixel column so far this
+  // time round, so holding a cycle's worth of audio costs a few thousand
+  // numbers instead of a few hundred thousand samples.
+  const cycleColumns = useRef(new Map<number, number>());
+  const lastCyclePos = useRef(0);
   const getArray = async () => {
     const result: [number, number][] = await invoke("get_samples");
     samples.current.push(...result);
@@ -246,7 +255,7 @@ const App = () => {
     const x = pos[0];
     const row = pos[1];
     const y = row * canvasRowHeight;
-    ctx.strokeStyle = "#222222";
+    ctx.strokeStyle = WAVEFORM_BACKGROUND;
     ctx.lineWidth = 1;
 
     for (let x0 = 0; x0 < 1; x0++) {
@@ -305,9 +314,9 @@ const App = () => {
     ctx.globalAlpha = 1;
   };
 
-  const draw = (ctx: CanvasRenderingContext2D, frameCount: number) => {
-    drawGrids(ctx);
-
+  // The default: each column is erased and redrawn as the cursor reaches it, so
+  // the newest sample always sits right at the sweep.
+  const drawSweep = (ctx: CanvasRenderingContext2D) => {
     const vals = samples.current;
     ctx.lineWidth = 0.5;
     for (let i = 0; i < vals.length; i++) {
@@ -325,6 +334,59 @@ const App = () => {
         maxSample = 0;
         canvasPos.current = sweep;
       }
+    }
+  };
+
+  // Repaints the window from the collected cycle. Clearing first means nothing
+  // of the previous pass can survive underneath.
+  const paintWholeCycle = (ctx: CanvasRenderingContext2D) => {
+    ctx.fillStyle = WAVEFORM_BACKGROUND;
+    ctx.fillRect(0, 0, get("canvasWidth"), get("canvasHeight"));
+    drawGrids(ctx);
+    ctx.lineWidth = 0.5;
+    const gain = get("visualGain");
+    cycleColumns.current.forEach((sample, column) => {
+      // Every beat inside a column lands on the same pixel, so the middle of it
+      // stands in for all of them.
+      const beat = (column + 0.5) / pixelsPerBeat;
+      const peak = Math.min(1, sample * gain);
+      for (const { x, row, isMargin } of getCanvasPositions(layout, beat)) {
+        drawSample(ctx, [x, row], peak, isMargin);
+      }
+    });
+  };
+
+  // The alternative: hold the picture still and repaint the whole window at once
+  // when the beat wraps, so a cycle is only ever shown complete.
+  const drawWholeCycle = (ctx: CanvasRenderingContext2D) => {
+    if (!(beatsPerWindow > 0)) return;
+    const vals = samples.current;
+    for (let i = 0; i < vals.length; i++) {
+      const [beat, val] = vals[i];
+      const b = ((beat % beatsPerWindow) + beatsPerWindow) % beatsPerWindow;
+      // The beat only ever moves backwards by wrapping (or by RESET TIME),
+      // which is exactly when the finished cycle should go up.
+      if (b < lastCyclePos.current) {
+        paintWholeCycle(ctx);
+        cycleColumns.current.clear();
+      }
+      lastCyclePos.current = b;
+      const column = Math.floor(b * pixelsPerBeat);
+      const previous = cycleColumns.current.get(column);
+      // Gain is applied at paint time, so changing it restyles the next repaint
+      // rather than only affecting samples collected after the change.
+      if (previous === undefined || val > previous) {
+        cycleColumns.current.set(column, val);
+      }
+    }
+  };
+
+  const draw = (ctx: CanvasRenderingContext2D, frameCount: number) => {
+    if (get("refreshAtCycleEnd")) {
+      drawWholeCycle(ctx);
+    } else {
+      drawGrids(ctx);
+      drawSweep(ctx);
     }
     samples.current = [];
   };
@@ -440,6 +502,12 @@ const App = () => {
           <Input
             label="bar color mode"
             _key="barColorMode"
+            set={set}
+            get={get}
+          />
+          <Input
+            label="refresh at cycle end"
+            _key="refreshAtCycleEnd"
             set={set}
             get={get}
           />
