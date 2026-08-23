@@ -10,6 +10,7 @@ import {
 } from "./config";
 
 const STORAGE_KEY = "tpb.presets.v1";
+const SESSION_KEY = "tpb.session.v1";
 
 // Derived from the window size on every resize, so a preset must not restore
 // stale values over them.
@@ -102,3 +103,27 @@ export const writePresets = (presets: Presets) => {
 
 export const defaultPreset = (): Preset =>
   makePreset(defaultRustConfig, defaultJsConfig);
+
+// The settings in use when the app last closed, so relaunching picks up where
+// you left off. Stored as a preset and sanitized the same way, so a session left
+// by an older build can't drag dead keys back in. Transient keys are excluded by
+// makePreset, which is why relaunching never comes back paused or with a stale
+// canvas size.
+export const readSession = (): Preset | null => {
+  try {
+    const raw = window.localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    return sanitizePreset(JSON.parse(raw));
+  } catch (e) {
+    console.error("failed to read session", e);
+    return null;
+  }
+};
+
+export const writeSession = (preset: Preset) => {
+  try {
+    window.localStorage.setItem(SESSION_KEY, JSON.stringify(preset));
+  } catch (e) {
+    console.error("failed to write session", e);
+  }
+};

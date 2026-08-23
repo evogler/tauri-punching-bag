@@ -16,7 +16,7 @@ import { appWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { SlidingDivision } from "./SlidingDivision";
 import { PresetBar } from "./PresetBar";
-import { Preset, makePreset } from "./presets";
+import { Preset, makePreset, readSession, writeSession } from "./presets";
 import { GridList } from "./GridList";
 import { Layout, getCanvasPositions } from "./layout";
 
@@ -162,8 +162,16 @@ const App = () => {
     };
   });
 
-  const [rustConfig, setRustConfig] = useState(defaultRustConfig);
-  const [jsConfig, setJsConfig] = useState(defaultJsConfig);
+  // Read once, on the first render only.
+  const [restoredSession] = useState(readSession);
+  const [rustConfig, setRustConfig] = useState<RustConfig>(() => ({
+    ...defaultRustConfig,
+    ...restoredSession?.rust,
+  }));
+  const [jsConfig, setJsConfig] = useState<JsConfig>(() => ({
+    ...defaultJsConfig,
+    ...restoredSession?.js,
+  }));
   const get = <T extends ConfigKey>(k: T) => {
     if (isRustConfigKey(k)) return rustConfig[k] as RustConfig[typeof k];
     else if (isJsConfigKey(k)) return jsConfig[k] as JsConfig[typeof k];
@@ -234,6 +242,21 @@ const App = () => {
     invoke("set_config", { newConfig: newConfigForRust });
     // console.log("called set_config");
   };
+
+  // Rust boots from its own default_config, so a restored session has to be
+  // pushed across once at startup or the two sides silently disagree until the
+  // first time a setting is touched.
+  const sentRestoredConfig = useRef(false);
+  useEffect(() => {
+    if (sentRestoredConfig.current || !restoredSession) return;
+    sentRestoredConfig.current = true;
+    invoke("set_config", { newConfig: snakeCaseKeys(unwrapValues(rustConfig)) });
+  });
+
+  // Remember what's in use, so the next launch comes back to it.
+  useEffect(() => {
+    writeSession(makePreset(rustConfig, jsConfig));
+  }, [rustConfig, jsConfig]);
 
   const getCurrentPreset = () => makePreset(rustConfig, jsConfig);
 
