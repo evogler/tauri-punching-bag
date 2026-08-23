@@ -18,6 +18,7 @@ import { SlidingDivision } from "./SlidingDivision";
 import { PresetBar } from "./PresetBar";
 import { Preset, makePreset } from "./presets";
 import { GridList } from "./GridList";
+import { Layout, getCanvasPositions } from "./layout";
 
 // True only in a plain browser (`yarn start`), where there's no Rust backend to
 // call, so samples are faked. Inside the Tauri app -- dev or release -- the IPC
@@ -172,7 +173,8 @@ const App = () => {
     }
   };
 
-  const maxBeatsInRow = Math.max(...get("beatsPerRow")) + 2 * get("margin");
+  const maxBeatsInRow =
+    Math.max(...get("beatsPerRow")) + get("marginLeft") + get("marginRight");
   const rowBeatsCumulative = get("beatsPerRow").reduce(
     (acc, n) => [...acc, acc.slice(-1)[0] + n],
     [0]
@@ -180,7 +182,15 @@ const App = () => {
   const pixelsPerBeat = get("canvasWidth") / maxBeatsInRow;
   const canvasRowHeight = get("canvasHeight") / get("beatsPerRow").length;
   const beatsPerWindow = get("beatsPerRow").reduce((sum, n) => sum + n);
-  // const marginPixels = get("margin") * pixelsPerBeat;
+  const layout: Layout = {
+    beatsPerRow: get("beatsPerRow"),
+    rowStarts: rowBeatsCumulative,
+    beatsPerWindow,
+    pixelsPerBeat,
+    marginLeft: get("marginLeft"),
+    marginRight: get("marginRight"),
+  };
+
   const canvasPos = useRef(0);
   const samples = useRef<[number, number][]>([]);
   const getArray = async () => {
@@ -225,32 +235,6 @@ const App = () => {
 
   const resetBeat = () => {
     invoke("reset_beat");
-  };
-
-  const getCanvasPos = (beat: number, rowOffset = 0): [number, number] => {
-    const rows = rowBeatsCumulative;
-    const b = beat % beatsPerWindow;
-    let y = 0;
-    for (let i = 1; i < rows.length; i++) {
-      if (b >= rows[i]) {
-        y = i;
-      } else {
-        break;
-      }
-    }
-    y = (y + rowOffset + (rows.length - 1)) % (rows.length - 1);
-    let x = (b - rows[y]) * pixelsPerBeat + get("margin") * pixelsPerBeat;
-    if (x > beatsPerWindow * pixelsPerBeat) {
-      x -= beatsPerWindow * pixelsPerBeat;
-    } else if (x < 0) {
-      x += beatsPerWindow * pixelsPerBeat;
-    }
-
-    return [x, y];
-    // y = (y + rowOffset + rows.length) % rows.length;
-    // let x = (b - rows[y]) * pixelsPerBeat + get("margin") * pixelsPerBeat;
-    // if (x > beatsPerWindow * pixelsPerBeat) x -= beatsPerWindow * pixelsPerBeat;
-    // return [x, y];
   };
 
   const drawSample = (
@@ -307,12 +291,13 @@ const App = () => {
         for (const note of notes) {
           const b = startBeat + note.time;
           if (b >= beatsPerWindow) break;
-          const [x, row] = getCanvasPos(b);
-          const y = row * canvasRowHeight;
-          ctx.beginPath();
-          ctx.moveTo(x, y);
-          ctx.lineTo(x, y + canvasRowHeight);
-          ctx.stroke();
+          for (const { x, row } of getCanvasPositions(layout, b)) {
+            const y = row * canvasRowHeight;
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x, y + canvasRowHeight);
+            ctx.stroke();
+          }
         }
       }
     }
@@ -327,15 +312,18 @@ const App = () => {
     ctx.lineWidth = 0.5;
     for (let i = 0; i < vals.length; i++) {
       const [beat, val] = vals[i];
-      const [x, y] = getCanvasPos(beat);
       maxSample = Math.max(maxSample, val);
-      if (x !== canvasPos.current) {
-        const val = Math.min(1, maxSample * get("visualGain"));
-        drawSample(ctx, [x, y], val);
-        drawSample(ctx, getCanvasPos(beat, 1), val, true);
-        drawSample(ctx, getCanvasPos(beat, -1), val, true);
+      if (!(beatsPerWindow > 0)) continue;
+      // Flush once per step along the loop, exactly as often as before -- the
+      // beat's own progress, not any one copy's position on screen.
+      const sweep = (beat % beatsPerWindow) * pixelsPerBeat;
+      if (sweep !== canvasPos.current) {
+        const peak = Math.min(1, maxSample * get("visualGain"));
+        for (const { x, row, isMargin } of getCanvasPositions(layout, beat)) {
+          drawSample(ctx, [x, row], peak, isMargin);
+        }
         maxSample = 0;
-        canvasPos.current = x;
+        canvasPos.current = sweep;
       }
     }
     samples.current = [];
@@ -431,7 +419,8 @@ const App = () => {
             get={get}
           />
           <Input label="beats per row" _key="beatsPerRow" set={set} get={get} />
-          <Input label="margin" _key="margin" set={set} get={get} />
+          <Input label="left margin" _key="marginLeft" set={set} get={get} />
+          <Input label="right margin" _key="marginRight" set={set} get={get} />
           <Input
             label="bar color mode"
             _key="barColorMode"

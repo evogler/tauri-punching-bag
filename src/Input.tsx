@@ -41,9 +41,50 @@ interface II<T> {
   validate?: (val: T) => boolean;
 }
 
+// A run of identical values can be written "3x2" instead of "3,3". Kept well
+// below anything useful as a row count, so a fat-fingered "3x1000" is rejected
+// rather than building a list big enough to stall the draw loop.
+const MAX_LIST_LENGTH = 128;
+
+const ENTRY = /^(-?(?:\d+\.?\d*|\.\d+))(?:\s*x\s*(\d+))?$/i;
+
+// Throws rather than returning something partial, so text that isn't a valid
+// list yet leaves the last good value in place.
+export const parseNumberList = (text: string): number[] => {
+  const out: number[] = [];
+  for (const part of text.split(",")) {
+    const entry = part.trim();
+    if (!entry) continue;
+    const match = ENTRY.exec(entry);
+    if (!match) throw new Error(`not a number or count: "${entry}"`);
+    const value = parseFloat(match[1]);
+    const count = match[2] === undefined ? 1 : parseInt(match[2], 10);
+    if (out.length + count > MAX_LIST_LENGTH) throw new Error("list too long");
+    for (let i = 0; i < count; i++) out.push(value);
+  }
+  // An empty list would divide by zero downstream, so treat it as unfinished
+  // typing instead of committing it.
+  if (!out.length) throw new Error("empty list");
+  return out;
+};
+
+// Writes runs back out in the "3x2" shorthand, so what you typed survives a
+// round trip through the expanded array.
+export const formatNumberList = (values: number[]): string => {
+  const parts: string[] = [];
+  let i = 0;
+  while (i < values.length) {
+    let run = 1;
+    while (i + run < values.length && values[i + run] === values[i]) run++;
+    parts.push(run > 1 ? `${values[i]}x${run}` : `${values[i]}`);
+    i += run;
+  }
+  return parts.join(",");
+};
+
 const NumberArrayInput = ({ label, _key, get, set }: II<number[]>) => {
   const [props, setFocusedVal] = useFocusedValue(get(_key), {
-    toString: (val) => (val as unknown[]).join(","),
+    toString: (val) => formatNumberList(val as number[]),
   });
   return (
     <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
@@ -54,10 +95,10 @@ const NumberArrayInput = ({ label, _key, get, set }: II<number[]>) => {
           const v = e.target.value;
           setFocusedVal(v);
           try {
-            const g = v.split(",").map(parseFloat);
-            set(_key, g);
+            set(_key, parseNumberList(v));
           } catch (e) {}
         }}
+        title={'comma separated; "1x2, 2, 3x2" means 1 1 2 3 3'}
         style={{ width: "8em" }}
       ></input>
     </div>

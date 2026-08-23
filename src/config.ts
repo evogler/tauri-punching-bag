@@ -71,7 +71,8 @@ export const defaultJsConfig = {
   beatsPerRow: [2, 2],
   canvasHeight: 1000,
   canvasWidth: 2000,
-  margin: 0.11,
+  marginLeft: 0.11,
+  marginRight: 0.11,
   grids: [
     {
       color: GRID_COLORS[0],
