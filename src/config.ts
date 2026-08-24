@@ -1,3 +1,29 @@
+// How a single input channel is drawn.
+export type ChannelStyle = { color: string; alpha: number };
+
+// Channel 0 keeps the old grey so a one-input setup looks exactly as it did.
+export const CHANNEL_COLORS = [
+  "#cccccc",
+  "#ff5533",
+  "#33cc66",
+  "#ffcc00",
+  "#cc66ff",
+  "#00ddcc",
+  "#ff66aa",
+  "#aaff33",
+];
+
+// Styles are stored sparsely -- an untouched channel has no entry and falls back
+// to the palette, so the list doesn't have to be sized to the device up front.
+export const channelStyle = (
+  styles: ChannelStyle[],
+  index: number
+): ChannelStyle =>
+  styles[index] ?? {
+    color: CHANNEL_COLORS[index % CHANNEL_COLORS.length],
+    alpha: 1,
+  };
+
 export const defaultRustConfig = {
 	audioInGain: 1.0,
   audioMonitorOn: false,
@@ -5,6 +31,8 @@ export const defaultRustConfig = {
   bpm: 91,
   bufferCompensation: 4330,
   paused: false,
+  // Which input channels get sent to the display, by device channel index.
+  visibleChannels: [0] as number[],
   clickOn: true,
   clickToggle: false,
   clickVolume: 0.3,
@@ -87,6 +115,11 @@ export const defaultJsConfig = {
   ] as VisualGrid[],
   subdivisionOffset: 0,
   refreshAtCycleEnd: false,
+  channelStyles: [] as ChannelStyle[],
+  // Draw the first visible channel above the centre line and the second below,
+  // instead of overlaying them. With more than two, even slots go up and odd
+  // slots go down.
+  splitChannels: false,
   visualGain: 10,
 };
 

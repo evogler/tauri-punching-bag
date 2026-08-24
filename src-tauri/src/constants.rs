@@ -26,6 +26,7 @@ pub fn default_config() -> Config {
         audio_monitor_on: false,
         buffer_compensation: 4330,
         paused: false,
+        visible_channels: vec![0],
         audio_subdivisions: ParserRhythm {
             start: 0.0,
             end: 1.0,

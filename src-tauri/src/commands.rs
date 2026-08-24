@@ -1,8 +1,8 @@
 use crate::get_loop_buffer_size::get_loop_buffer_size;
 use crate::read_audio_file::get_samples_from_filename;
 use crate::structs::{
-    BeatResetState, Config, ConfigState, LogState, LoopBufferState, Mp3BufferState, Payload,
-    SampleOutputBuffer,
+    BeatResetState, Config, ConfigState, InputChannelCount, LogState, LoopBufferState,
+    Mp3BufferState, Payload, SampleOutputBuffer, VisualSamples,
 };
 use tauri::{Manager, State};
 
@@ -26,14 +26,23 @@ pub fn set_mp3_buffer(app_handle: tauri::AppHandle, filename: String) {
 }
 
 #[tauri::command]
-pub fn get_samples(state: State<SampleOutputBuffer>) -> Result<Vec<(f64, f32)>, String> {
+pub fn get_samples(state: State<SampleOutputBuffer>) -> Result<VisualSamples, String> {
     if let Ok(mut samples) = state.buffer.lock() {
-        let res = samples.to_vec();
-        samples.clear();
-        return Ok(res);
+        // Hand over the collected vectors and leave empty ones behind, so the
+        // audio callback isn't blocked copying them.
+        return Ok(VisualSamples {
+            channels: samples.channels,
+            beats: std::mem::take(&mut samples.beats),
+            values: std::mem::take(&mut samples.values),
+        });
     } else {
         return Err("get_samples failed.".into());
     }
+}
+
+#[tauri::command]
+pub fn get_input_channel_count(state: State<InputChannelCount>) -> usize {
+    state.0
 }
 
 #[tauri::command]

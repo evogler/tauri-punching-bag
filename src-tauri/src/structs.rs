@@ -13,13 +13,27 @@ pub struct Mp3Buffer {
 
 pub struct Mp3BufferState(pub Arc<Mutex<Mp3Buffer>>);
 
-pub struct SampleOutputBuffer {
-    // The beat is f64, not f32: it counts up from launch and never wraps, so at
-    // f32 precision the gap between representable values outgrows a screen pixel
-    // after a while and the display stops being redrawn densely enough to paint
-    // over the previous pass.
-    pub buffer: Arc<Mutex<Vec<(f64, f32)>>>,
+// The visual stream, flattened rather than a Vec of per-frame Vecs so the audio
+// callback never allocates per frame.
+//
+// The beat is f64, not f32: it counts up from launch and never wraps, so at f32
+// precision the gap between representable values outgrows a screen pixel after a
+// while and the display stops being redrawn densely enough to paint over the
+// previous pass.
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+pub struct VisualSamples {
+    /// How many values in `values` belong to each entry in `beats`.
+    pub channels: usize,
+    pub beats: Vec<f64>,
+    pub values: Vec<f32>,
 }
+
+pub struct SampleOutputBuffer {
+    pub buffer: Arc<Mutex<VisualSamples>>,
+}
+
+/// How many input channels the capture device actually gave us.
+pub struct InputChannelCount(pub usize);
 
 pub struct LoopBuffer {
     pub buffer: Vec<f32>,
@@ -58,6 +72,9 @@ pub struct Config {
     pub audio_monitor_on: bool,
     pub buffer_compensation: usize,
     pub paused: bool,
+    /// Which input channels get sent to the display. Only these are pushed, so
+    /// a 16-input interface doesn't cost 16 channels of JSON to watch two.
+    pub visible_channels: Vec<usize>,
     pub audio_subdivisions: ParserRhythm,
     pub test_object: ParserRhythm,
 }
@@ -73,9 +90,9 @@ pub struct SoundingSample {
     pub pos: usize,
 }
 
+// One queue per input channel. Producers and consumers are clones of the same
+// Arcs -- see MAX_INPUT_BACKLOG for why that matters.
 pub struct Buffers {
-    pub producer_left: Arc<Mutex<VecDeque<f32>>>,
-    pub consumer_left: Arc<Mutex<VecDeque<f32>>>,
-    pub producer_right: Arc<Mutex<VecDeque<f32>>>,
-    pub consumer_right: Arc<Mutex<VecDeque<f32>>>,
+    pub producers: Vec<Arc<Mutex<VecDeque<f32>>>>,
+    pub consumers: Vec<Arc<Mutex<VecDeque<f32>>>>,
 }

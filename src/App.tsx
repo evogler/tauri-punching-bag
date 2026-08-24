@@ -10,6 +10,8 @@ import {
   isJsConfigKey,
   ConfigKey,
   gridAlpha,
+  ChannelStyle,
+  channelStyle,
 } from "./config";
 import { Input } from "./Input";
 import { appWindow } from "@tauri-apps/api/window";
@@ -19,6 +21,7 @@ import { PresetBar } from "./PresetBar";
 import { Preset, makePreset, readSession, writeSession } from "./presets";
 import { GridList } from "./GridList";
 import { Layout, getCanvasPositions } from "./layout";
+import { ChannelList } from "./ChannelList";
 
 // True only in a plain browser (`yarn start`), where there's no Rust backend to
 // call, so samples are faked. Inside the Tauri app -- dev or release -- the IPC
@@ -204,32 +207,65 @@ const App = () => {
   };
 
   const canvasPos = useRef(0);
-  const samples = useRef<[number, number][]>([]);
+  // The visual stream as Rust sends it: one beat per frame, `channels` values
+  // per beat, flattened so neither side allocates per frame.
+  type VisualSamples = { channels: number; beats: number[]; values: number[] };
+  const samples = useRef<VisualSamples>({ channels: 1, beats: [], values: [] });
+  const appendSamples = (batch: VisualSamples) => {
+    const held = samples.current;
+    // A change of channel count changes the row width, so anything collected
+    // under the old one can't be read alongside the new.
+    if (held.channels !== batch.channels) {
+      samples.current = batch;
+      return;
+    }
+    // Appended one at a time: a spread of a long backlog can blow the stack.
+    for (let i = 0; i < batch.beats.length; i++) held.beats.push(batch.beats[i]);
+    for (let i = 0; i < batch.values.length; i++)
+      held.values.push(batch.values[i]);
+  };
   // Whole-cycle mode: the loudest sample seen in each pixel column so far this
   // time round, so holding a cycle's worth of audio costs a few thousand
   // numbers instead of a few hundred thousand samples.
-  const cycleColumns = useRef(new Map<number, number>());
+  const cycleColumns = useRef(new Map<number, number[]>());
   const lastCyclePos = useRef(0);
   const getArray = async () => {
-    const result: [number, number][] = await invoke("get_samples");
-    samples.current.push(...result);
+    appendSamples(await invoke("get_samples"));
   };
 
   const mockGetArrayPos = useRef(0);
   const beatsPerSample = 91 / 60 / 44100;
   const mockGetArray = async () => {
-    for (let i = 0; i < 441; i++) {
-      samples.current.push([
-        mockGetArrayPos.current,
+    const channels = Math.max(1, get("visibleChannels").length);
+    const batch: VisualSamples = { channels, beats: [], values: [] };
+    const noise = () =>
+      Math.abs(
         (Math.random() * 2 - 1) *
           (Math.random() * 2 - 1) *
           (Math.random() * 2 - 1) *
           (Math.random() * 2 - 1) *
-          (Math.random() * 2 - 1),
-      ]);
+          (Math.random() * 2 - 1)
+      );
+    for (let i = 0; i < 441; i++) {
+      batch.beats.push(mockGetArrayPos.current);
+      for (let c = 0; c < channels; c++) batch.values.push(noise());
       mockGetArrayPos.current += beatsPerSample;
     }
+    appendSamples(batch);
   };
+
+  // How many channels the capture device gave us, which is what the channel
+  // list is sized from.
+  const [inputChannelCount, setInputChannelCount] = useState(1);
+  useEffect(() => {
+    if (BROWSER_DEBUG_MODE) {
+      setInputChannelCount(2);
+      return;
+    }
+    invoke<number>("get_input_channel_count")
+      .then((n) => setInputChannelCount(Math.max(1, n)))
+      .catch(() => {});
+  }, []);
 
   const updateRustConfig = (args: Partial<RustConfig>) => {
     // console.log("calling set_config");
@@ -269,43 +305,90 @@ const App = () => {
     invoke("reset_beat");
   };
 
-  const drawSample = (
-    ctx: CanvasRenderingContext2D,
-    pos: [number, number],
-    value: number,
-    isMarginColor = false
-  ) => {
-    const x = pos[0];
-    const row = pos[1];
+  // The eraser: one dark column covering the row, painted before the channels so
+  // the previous pass through this spot is gone.
+  const eraseColumn = (ctx: CanvasRenderingContext2D, x: number, row: number) => {
     const y = row * canvasRowHeight;
+    ctx.globalAlpha = 1;
     ctx.strokeStyle = WAVEFORM_BACKGROUND;
     ctx.lineWidth = 1;
-
-    for (let x0 = 0; x0 < 1; x0++) {
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x, y + (canvasRowHeight - 1));
-      ctx.stroke();
-    }
-
-    ctx.strokeStyle = "#999999";
-    const color = Math.floor(Math.abs(Math.min(1, Math.max(value, 0))) * 255);
-    const colorHex = color.toString(16).padStart(2, "0");
     ctx.beginPath();
-    if (get("barColorMode")) {
-      ctx.strokeStyle = `#${colorHex}${colorHex}${colorHex}`;
-      ctx.moveTo(x, y);
-      ctx.lineTo(x, y + (canvasRowHeight - 1));
-    } else {
-      ctx.strokeStyle = isMarginColor ? "#888" : "#CCC";
-      const ch = canvasRowHeight - 1;
-      ctx.moveTo(x, y + (0.5 - 0.5 * value) * ch);
-      ctx.lineTo(x, y + (0.5 + 0.5 * value) * ch);
-    }
+    ctx.moveTo(x, y);
+    ctx.lineTo(x, y + (canvasRowHeight - 1));
     ctx.stroke();
   };
 
-  let maxSample = 0;
+  // `half` splits the waveform about the row's centre line: "up" draws only the
+  // top, "down" only the bottom, so two channels can share a row without either
+  // losing vertical space.
+  const drawChannel = (
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    row: number,
+    value: number,
+    style: ChannelStyle,
+    isMargin: boolean,
+    half: "both" | "up" | "down"
+  ) => {
+    const y = row * canvasRowHeight;
+    const height = canvasRowHeight - 1;
+    const v = Math.min(1, Math.max(value, 0));
+    ctx.lineWidth = 1;
+    // Margin copies are repeats of another part of the loop, so they're dimmed
+    // the way the single-channel version used a darker grey for them.
+    ctx.globalAlpha = style.alpha * (isMargin ? 0.55 : 1);
+    ctx.beginPath();
+    if (get("barColorMode")) {
+      const shade = Math.floor(v * 255)
+        .toString(16)
+        .padStart(2, "0");
+      ctx.strokeStyle = `#${shade}${shade}${shade}`;
+      ctx.moveTo(x, y);
+      ctx.lineTo(x, y + height);
+    } else {
+      ctx.strokeStyle = style.color;
+      const top = half === "down" ? 0.5 : 0.5 - 0.5 * v;
+      const bottom = half === "up" ? 0.5 : 0.5 + 0.5 * v;
+      ctx.moveTo(x, y + top * height);
+      ctx.lineTo(x, y + bottom * height);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  };
+
+  // Resolved once per frame: the style for each *visible* channel, in the order
+  // Rust packs them into the stream.
+  const visibleStyles = get("visibleChannels").map((channel) =>
+    channelStyle(get("channelStyles"), channel)
+  );
+  const halfFor = (slot: number): "both" | "up" | "down" =>
+    !get("splitChannels") ? "both" : slot % 2 === 0 ? "up" : "down";
+
+  const drawChannelsAt = (
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    row: number,
+    isMargin: boolean,
+    peaks: number[],
+    gain: number
+  ) => {
+    for (let slot = 0; slot < peaks.length; slot++) {
+      const style = visibleStyles[slot];
+      if (!style) continue;
+      drawChannel(
+        ctx,
+        x,
+        row,
+        Math.min(1, peaks[slot] * gain),
+        style,
+        isMargin,
+        halfFor(slot)
+      );
+    }
+  };
+
+  // Peak per visible channel since the last column was drawn.
+  let channelPeaks: number[] = [];
 
   // Tiles each grid's rhythm across the window. Drawn last-to-first so the top
   // of the list ends up on top of the stack.
@@ -340,41 +423,46 @@ const App = () => {
   // The default: each column is erased and redrawn as the cursor reaches it, so
   // the newest sample always sits right at the sweep.
   const drawSweep = (ctx: CanvasRenderingContext2D) => {
-    const vals = samples.current;
-    ctx.lineWidth = 0.5;
-    for (let i = 0; i < vals.length; i++) {
-      const [beat, val] = vals[i];
-      maxSample = Math.max(maxSample, val);
-      if (!(beatsPerWindow > 0)) continue;
-      // Flush once per step along the loop, exactly as often as before -- the
-      // beat's own progress, not any one copy's position on screen.
+    const { channels, beats, values } = samples.current;
+    if (!(beatsPerWindow > 0) || channels < 1) return;
+    const gain = get("visualGain");
+    for (let i = 0; i < beats.length; i++) {
+      for (let c = 0; c < channels; c++) {
+        const value = values[i * channels + c];
+        if (channelPeaks[c] === undefined || value > channelPeaks[c]) {
+          channelPeaks[c] = value;
+        }
+      }
+      const beat = beats[i];
+      // Flush once per step along the loop -- the beat's own progress, not any
+      // one copy's position on screen.
       const sweep = (beat % beatsPerWindow) * pixelsPerBeat;
       if (sweep !== canvasPos.current) {
-        const peak = Math.min(1, maxSample * get("visualGain"));
         for (const { x, row, isMargin } of getCanvasPositions(layout, beat)) {
-          drawSample(ctx, [x, row], peak, isMargin);
+          eraseColumn(ctx, x, row);
+          drawChannelsAt(ctx, x, row, isMargin, channelPeaks, gain);
         }
-        maxSample = 0;
+        channelPeaks.length = 0;
         canvasPos.current = sweep;
       }
     }
   };
 
   // Repaints the window from the collected cycle. Clearing first means nothing
-  // of the previous pass can survive underneath.
+  // of the previous pass can survive underneath -- and unlike the sweep, there's
+  // no per-column erase, so grid lines stay visible behind quiet passages.
   const paintWholeCycle = (ctx: CanvasRenderingContext2D) => {
+    ctx.globalAlpha = 1;
     ctx.fillStyle = WAVEFORM_BACKGROUND;
     ctx.fillRect(0, 0, get("canvasWidth"), get("canvasHeight"));
     drawGrids(ctx);
-    ctx.lineWidth = 0.5;
     const gain = get("visualGain");
-    cycleColumns.current.forEach((sample, column) => {
+    cycleColumns.current.forEach((peaks, column) => {
       // Every beat inside a column lands on the same pixel, so the middle of it
       // stands in for all of them.
       const beat = (column + 0.5) / pixelsPerBeat;
-      const peak = Math.min(1, sample * gain);
       for (const { x, row, isMargin } of getCanvasPositions(layout, beat)) {
-        drawSample(ctx, [x, row], peak, isMargin);
+        drawChannelsAt(ctx, x, row, isMargin, peaks, gain);
       }
     });
   };
@@ -382,10 +470,10 @@ const App = () => {
   // The alternative: hold the picture still and repaint the whole window at once
   // when the beat wraps, so a cycle is only ever shown complete.
   const drawWholeCycle = (ctx: CanvasRenderingContext2D) => {
-    if (!(beatsPerWindow > 0)) return;
-    const vals = samples.current;
-    for (let i = 0; i < vals.length; i++) {
-      const [beat, val] = vals[i];
+    const { channels, beats, values } = samples.current;
+    if (!(beatsPerWindow > 0) || channels < 1) return;
+    for (let i = 0; i < beats.length; i++) {
+      const beat = beats[i];
       const b = ((beat % beatsPerWindow) + beatsPerWindow) % beatsPerWindow;
       // The beat only ever moves backwards by wrapping (or by RESET TIME),
       // which is exactly when the finished cycle should go up.
@@ -395,11 +483,16 @@ const App = () => {
       }
       lastCyclePos.current = b;
       const column = Math.floor(b * pixelsPerBeat);
-      const previous = cycleColumns.current.get(column);
+      let peaks = cycleColumns.current.get(column);
+      if (!peaks || peaks.length !== channels) {
+        peaks = new Array(channels).fill(0);
+        cycleColumns.current.set(column, peaks);
+      }
       // Gain is applied at paint time, so changing it restyles the next repaint
       // rather than only affecting samples collected after the change.
-      if (previous === undefined || val > previous) {
-        cycleColumns.current.set(column, val);
+      for (let c = 0; c < channels; c++) {
+        const value = values[i * channels + c];
+        if (value > peaks[c]) peaks[c] = value;
       }
     }
   };
@@ -411,7 +504,7 @@ const App = () => {
       drawGrids(ctx);
       drawSweep(ctx);
     }
-    samples.current = [];
+    samples.current = { channels: samples.current.channels, beats: [], values: [] };
   };
 
   // const Input = ({ label, _key }: { label: string; _key: string }) => (
@@ -531,6 +624,22 @@ const App = () => {
           <Input
             label="refresh at cycle end"
             _key="refreshAtCycleEnd"
+            set={set}
+            get={get}
+          />
+        </Section>
+
+        <Section label="input channels">
+          <ChannelList
+            count={inputChannelCount}
+            visible={get("visibleChannels")}
+            styles={get("channelStyles")}
+            setVisible={(next) => set("visibleChannels", next)}
+            setStyles={(next) => set("channelStyles", next)}
+          />
+          <Input
+            label="split up/down"
+            _key="splitChannels"
             set={set}
             get={get}
           />

@@ -14,14 +14,16 @@ mod util;
 
 extern crate coreaudio;
 
-use crate::commands::{get_samples, reset_beat, set_config, set_mp3_buffer};
+use crate::commands::{
+    get_input_channel_count, get_samples, reset_beat, set_config, set_mp3_buffer,
+};
 use crate::constants::{default_config, MAX_INPUT_BACKLOG, SAMPLE_RATE};
 use crate::get_loop_buffer_size::get_loop_buffer_size;
 use crate::io_channels::{get_input_output_channels, make_buffers, start_input_audio_unit};
 use crate::read_audio_file::get_samples_from_filename;
 use crate::structs::{
-    BeatResetState, ConfigState, LogState, LoopBuffer, LoopBufferState, Mp3Buffer, Mp3BufferState,
-    SampleOutputBuffer, SoundingSample,
+    BeatResetState, ConfigState, InputChannelCount, LogState, LoopBuffer, LoopBufferState,
+    Mp3Buffer, Mp3BufferState, SampleOutputBuffer, SoundingSample,
 };
 use crate::types::{Args, S};
 use crate::util::{beat_bisect, mod_add};
@@ -80,9 +82,12 @@ fn main() -> Result<(), coreaudio::Error> {
     });
 
     // setup audio
-    let (mut input_audio_unit, mut output_audio_unit, io_log) =
+    let (mut input_audio_unit, mut output_audio_unit, input_channels, io_log) =
         get_input_output_channels().unwrap();
-    let buffers = make_buffers();
+    let buffers = make_buffers(input_channels);
+    let consumers = buffers.consumers.clone();
+    // Reused every frame so the audio callback never allocates.
+    let mut input_frame = vec![0f32; input_channels];
 
     let mut click_sound_counter: i32 = 0;
     let mut rng = rand::thread_rng();
@@ -118,12 +123,7 @@ fn main() -> Result<(), coreaudio::Error> {
     let mut beat: f64 = 0.0;
     let mut last_beat: isize = 0;
 
-    start_input_audio_unit(
-        &mut input_audio_unit,
-        buffers.producer_left,
-        buffers.producer_right,
-    )
-    .unwrap();
+    start_input_audio_unit(&mut input_audio_unit, buffers.producers).unwrap();
 
     output_audio_unit.set_render_callback(move |args: Args| {
         let Args {
@@ -131,9 +131,7 @@ fn main() -> Result<(), coreaudio::Error> {
             mut data,
             ..
         } = args;
-        let buffer_left = buffers.consumer_left.lock().unwrap();
-        let buffer_right = buffers.consumer_right.lock().unwrap();
-        let mut buffers = vec![buffer_left, buffer_right];
+        let mut buffers: Vec<_> = consumers.iter().map(|c| c.lock().unwrap()).collect();
 
         // Keeps the shared input queue from growing without bound if this
         // callback ever falls behind the input one. Also trims the startup gap,
@@ -176,19 +174,48 @@ fn main() -> Result<(), coreaudio::Error> {
         }
 
         if let Ok(mut state_vec) = sample_output_buffer_clone.lock() {
+            // Changing which channels are shown changes the row width of the
+            // flattened stream, so anything collected under the old width has to
+            // go rather than be misread as the new one.
+            if state_vec.channels != config.visible_channels.len() {
+                state_vec.channels = config.visible_channels.len();
+                state_vec.beats.clear();
+                state_vec.values.clear();
+            }
+
             for i in 0..num_frames {
-                // Default other channels to copy value from first channel as a fallback
-                let zero: S = 0 as S;
-                let f: S = *buffers[0].front().unwrap_or(&zero);
+                // One sample per input channel, then a mono sum of them for
+                // everything downstream that still works on a single signal --
+                // the monitor and the looper. For one channel this is exactly
+                // what the old code did.
+                let mut mix: S = 0.0;
+                for ch in 0..input_frame.len() {
+                    let sample = buffers[ch].pop_front().unwrap_or(0.0) * config.audio_in_gain;
+                    input_frame[ch] = sample;
+                    mix += sample;
+                }
+
+                let visual_beat =
+                    beat - (config.buffer_compensation as f64) * beats_per_sample;
+                let loop_visual = if config.looping_on {
+                    loop_buffer.buffer[loop_buffer.pos]
+                } else {
+                    0.0
+                };
+                state_vec.beats.push(visual_beat);
+                for &ch in config.visible_channels.iter() {
+                    let mut visual_out = loop_visual;
+                    if config.visual_monitor_on {
+                        visual_out += input_frame.get(ch).copied().unwrap_or(0.0);
+                    }
+                    state_vec.values.push(visual_out.abs());
+                }
+
                 for (ch, channel) in data.channels_mut().enumerate() {
-                    let sample: S = buffers[ch].pop_front().unwrap_or(f) * config.audio_in_gain;
+                    let sample: S = mix;
                     let mut audio_out = 0.0;
-                    let mut visual_out = 0.0;
                     if config.audio_monitor_on {
                         audio_out += sample;
-                    }
-                    if config.visual_monitor_on {
-                        visual_out += sample;
                     }
 
                     let p = loop_buffer.pos;
@@ -201,7 +228,6 @@ fn main() -> Result<(), coreaudio::Error> {
 
                     if config.looping_on {
                         audio_out += loop_buffer.buffer[compensated_loop_buffer_pos];
-                        visual_out += loop_buffer.buffer[loop_buffer.pos];
                         loop_buffer.buffer[p] = sample;
                     } else {
                         loop_buffer.buffer[p] = 0.0;
@@ -236,10 +262,6 @@ fn main() -> Result<(), coreaudio::Error> {
                             sounding_samples.remove(j);
                         }
                     }
-
-                    let visual_beat =
-                        beat - (config.buffer_compensation as f64) * beats_per_sample;
-                    state_vec.push((visual_beat, visual_out.abs()));
 
                     // let adjusted_beat = beat_bisect(&config.audio_subdivisions, beat);
                     let mut audio_times = config
@@ -294,11 +316,13 @@ fn main() -> Result<(), coreaudio::Error> {
         .manage(mp3_state)
         .manage(should_reset_beat_state)
         .manage(log_state)
+        .manage(InputChannelCount(input_channels))
         .invoke_handler(tauri::generate_handler![
             get_samples,
             set_config,
             reset_beat,
             set_mp3_buffer,
+            get_input_channel_count,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
