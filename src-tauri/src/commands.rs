@@ -1,9 +1,10 @@
 use crate::get_loop_buffer_size::get_loop_buffer_size;
 use crate::read_audio_file::get_samples_from_filename;
 use crate::structs::{
-    BeatResetState, Config, ConfigState, InputChannelCount, LogState, LoopBufferState,
+    BeatResetState, Config, ConfigState, DrumSamples, InputChannelCount, LogState, LoopBufferState,
     Mp3BufferState, Payload, SampleOutputBuffer, VisualSamples,
 };
+use std::sync::Arc;
 use tauri::{Manager, State};
 
 #[tauri::command]
@@ -43,6 +44,18 @@ pub fn get_samples(state: State<SampleOutputBuffer>) -> Result<VisualSamples, St
 #[tauri::command]
 pub fn get_input_channel_count(state: State<InputChannelCount>) -> usize {
     state.0
+}
+
+/// Decodes a file and files it under its own path, which is how a drum voice
+/// refers to it. Decoding here rather than in the audio thread means the render
+/// callback only ever does a map lookup.
+#[tauri::command]
+pub fn load_drum_sample(state: State<DrumSamples>, path: String) -> Result<usize, String> {
+    let samples = get_samples_from_filename(&path)?;
+    let len = samples.len();
+    let mut map = state.0.lock().map_err(|_| "sample map poisoned".to_string())?;
+    map.insert(path, Arc::new(samples));
+    Ok(len)
 }
 
 #[tauri::command]

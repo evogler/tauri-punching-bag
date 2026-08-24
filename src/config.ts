@@ -24,6 +24,23 @@ export const channelStyle = (
     alpha: 1,
   };
 
+// A drum sound with its own rhythm. `path` is either a built-in name or the
+// absolute path the file was loaded from -- the same key Rust files it under.
+export type DrumVoice = {
+  path: string;
+  on: boolean;
+  volume: number;
+  /// Milliseconds to start the sample early, so its transient lands on the beat
+  /// however far into the file the attack actually sits.
+  offset: number;
+  rhythm: Rhythm;
+};
+
+export const BUILT_IN_DRUMS = ["ride"];
+
+export const drumLabel = (path: string) =>
+  BUILT_IN_DRUMS.includes(path) ? path : path.split("/").pop() || path;
+
 export const defaultRustConfig = {
 	audioInGain: 1.0,
   audioMonitorOn: false,
@@ -49,6 +66,19 @@ export const defaultRustConfig = {
     type: "parser2",
   },
   visualMonitorOn: true,
+  drums: [
+    {
+      path: "ride",
+      on: true,
+      volume: 1,
+      offset: 0,
+      rhythm: {
+        inputText: "2:1",
+        val: { notes: [{ time: 0 }, { time: 0.5 }], start: 0, end: 1 },
+        type: "parser2",
+      },
+    },
+  ] as DrumVoice[],
   testObject: {
     notes: [{ time: 0, sounds: ["h"] }, { time: 0.5 }],
     start: 0,

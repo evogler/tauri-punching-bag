@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     collections::VecDeque,
     sync::atomic::AtomicBool,
     sync::{Arc, Mutex},
@@ -76,6 +77,7 @@ pub struct Config {
     /// a 16-input interface doesn't cost 16 channels of JSON to watch two.
     pub visible_channels: Vec<usize>,
     pub audio_subdivisions: ParserRhythm,
+    pub drums: Vec<DrumVoice>,
     pub test_object: ParserRhythm,
 }
 pub struct ConfigState(pub Arc<Mutex<Config>>);
@@ -88,6 +90,23 @@ pub struct Payload {
 pub struct SoundingSample {
     pub sample: Arc<Vec<f32>>,
     pub pos: usize,
+    pub volume: f32,
+}
+
+/// Decoded drum samples, keyed the same way a voice names them: either a
+/// built-in name like "ride" or the absolute path it was loaded from.
+pub struct DrumSamples(pub Arc<Mutex<HashMap<String, Arc<Vec<f32>>>>>);
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DrumVoice {
+    pub path: String,
+    pub on: bool,
+    pub volume: f64,
+    /// Milliseconds to start the sample *early*. A file with leading silence, or
+    /// a sound whose attack builds slowly, still lands its transient on the beat
+    /// if it starts that far ahead of it. Negative starts it late.
+    pub offset: f64,
+    pub rhythm: ParserRhythm,
 }
 
 // One queue per input channel. Producers and consumers are clones of the same

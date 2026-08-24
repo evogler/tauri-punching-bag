@@ -15,15 +15,15 @@ mod util;
 extern crate coreaudio;
 
 use crate::commands::{
-    get_input_channel_count, get_samples, reset_beat, set_config, set_mp3_buffer,
+    get_input_channel_count, get_samples, load_drum_sample, reset_beat, set_config, set_mp3_buffer,
 };
 use crate::constants::{default_config, MAX_INPUT_BACKLOG, SAMPLE_RATE};
 use crate::get_loop_buffer_size::get_loop_buffer_size;
 use crate::io_channels::{get_input_output_channels, make_buffers, start_input_audio_unit};
 use crate::read_audio_file::get_samples_from_filename;
 use crate::structs::{
-    BeatResetState, ConfigState, InputChannelCount, LogState, LoopBuffer, LoopBufferState,
-    Mp3Buffer, Mp3BufferState, SampleOutputBuffer, SoundingSample,
+    BeatResetState, ConfigState, DrumSamples, InputChannelCount, LogState, LoopBuffer,
+    LoopBufferState, Mp3Buffer, Mp3BufferState, SampleOutputBuffer, SoundingSample,
 };
 use crate::types::{Args, S};
 use crate::util::{beat_bisect, mod_add};
@@ -69,17 +69,22 @@ fn main() -> Result<(), coreaudio::Error> {
     let mp3_state = Mp3BufferState(mp3_arc.clone());
 
     // load samples
-    let mut sample_buffers = HashMap::new();
+    let mut sample_buffers: HashMap<String, Arc<Vec<f32>>> = HashMap::new();
     let ride_path = &format!("{}/{}", resource_dir, "samples/ride_cropped.wav");
+    // Bundled samples are filed under a plain name so a voice can refer to one
+    // without knowing where the app was installed.
     sample_buffers.insert(
         "ride".to_string(),
         Arc::new(get_samples_from_filename(ride_path).unwrap()),
     );
-    let mut sounding_samples = vec![];
-    sounding_samples.push(SoundingSample {
-        sample: sample_buffers.get("ride").unwrap().clone(),
-        pos: 0,
-    });
+    let drum_samples_arc = Arc::new(Mutex::new(sample_buffers));
+    let drum_samples_state = DrumSamples(drum_samples_arc.clone());
+    let drum_samples = drum_samples_arc.clone();
+    let mut sounding_samples: Vec<SoundingSample> = vec![];
+    // One entry per drum voice: the subdivision it last fired on, so a hit
+    // happens on the crossing rather than every frame. isize::MIN means "not
+    // primed yet", which stops a newly added voice firing immediately.
+    let mut drum_last_beats: Vec<isize> = vec![];
 
     // setup audio
     let (mut input_audio_unit, mut output_audio_unit, input_channels, io_log) =
@@ -173,6 +178,32 @@ fn main() -> Result<(), coreaudio::Error> {
             return Ok(());
         }
 
+        // Resolved once per callback. Building these per frame -- as the click
+        // rhythm used to be -- meant tens of thousands of allocations a second
+        // on the audio thread.
+        let mut click_times: Vec<f64> = config
+            .audio_subdivisions
+            .notes
+            .iter()
+            .map(|n| n.time)
+            .collect();
+        click_times.push(config.audio_subdivisions.end);
+
+        let mut voice_times: Vec<Vec<f64>> = Vec::with_capacity(config.drums.len());
+        let mut voice_samples: Vec<Option<Arc<Vec<f32>>>> = Vec::with_capacity(config.drums.len());
+        {
+            let map = drum_samples.lock().unwrap();
+            for voice in config.drums.iter() {
+                let mut times: Vec<f64> = voice.rhythm.notes.iter().map(|n| n.time).collect();
+                times.push(voice.rhythm.end);
+                voice_times.push(times);
+                voice_samples.push(map.get(&voice.path).cloned());
+            }
+        }
+        // Growing keeps the existing voices primed, so adding one doesn't
+        // retrigger the others.
+        drum_last_beats.resize(config.drums.len(), isize::MIN);
+
         if let Ok(mut state_vec) = sample_output_buffer_clone.lock() {
             // Changing which channels are shown changes the row width of the
             // flattened stream, so anything collected under the old width has to
@@ -197,19 +228,53 @@ fn main() -> Result<(), coreaudio::Error> {
 
                 let visual_beat =
                     beat - (config.buffer_compensation as f64) * beats_per_sample;
+                // Read before the channel loop advances the write head.
                 let loop_visual = if config.looping_on {
                     loop_buffer.buffer[loop_buffer.pos]
                 } else {
                     0.0
                 };
-                state_vec.beats.push(visual_beat);
-                for &ch in config.visible_channels.iter() {
-                    let mut visual_out = loop_visual;
-                    if config.visual_monitor_on {
-                        visual_out += input_frame.get(ch).copied().unwrap_or(0.0);
-                    }
-                    state_vec.values.push(visual_out.abs());
+
+                // Triggers, once per frame rather than once per output channel.
+                let click_beat = beat_bisect(&click_times, beat);
+                if click_beat != last_beat {
+                    click_sound_counter = if config.audio_subdivisions.notes.len() < 2
+                        || (click_beat % (config.audio_subdivisions.notes.len() as isize) == 0)
+                    {
+                        400
+                    } else {
+                        100
+                    };
+                    last_beat = click_beat;
                 }
+
+                for v in 0..config.drums.len() {
+                    let voice = &config.drums[v];
+                    if !voice.on {
+                        continue;
+                    }
+                    if let Some(sample) = &voice_samples[v] {
+                        // Looking ahead by the offset is what starts the sample
+                        // early: its transient then lands on the beat instead of
+                        // however far into the file it happens to sit.
+                        let offset_beats = voice.offset / 1000.0 * config.bpm / 60.0;
+                        let hit = beat_bisect(&voice_times[v], beat + offset_beats);
+                        if drum_last_beats[v] == isize::MIN {
+                            drum_last_beats[v] = hit;
+                        } else if hit != drum_last_beats[v] {
+                            sounding_samples.push(SoundingSample {
+                                sample: sample.clone(),
+                                pos: 0,
+                                volume: voice.volume as f32,
+                            });
+                            drum_last_beats[v] = hit;
+                        }
+                    }
+                }
+
+                // What the drums put out this frame, kept so the display can
+                // show them as their own channel for calibrating offsets.
+                let mut drum_frame: S = 0.0;
 
                 for (ch, channel) in data.channels_mut().enumerate() {
                     let sample: S = mix;
@@ -252,42 +317,23 @@ fn main() -> Result<(), coreaudio::Error> {
                         loop_buffer.pos = 0;
                     }
 
+                    let mut drums: S = 0.0;
                     for j in (0..sounding_samples.len()).rev() {
                         if sounding_samples[j].pos < sounding_samples[j].sample.len() {
-                            if config.drum_on {
-                                channel[i] += sounding_samples[j].sample[sounding_samples[j].pos];
-                            }
+                            drums += sounding_samples[j].sample[sounding_samples[j].pos]
+                                * sounding_samples[j].volume;
                             sounding_samples[j].pos += 1;
                         } else {
                             sounding_samples.remove(j);
                         }
                     }
-
-                    // let adjusted_beat = beat_bisect(&config.audio_subdivisions, beat);
-                    let mut audio_times = config
-                        .audio_subdivisions
-                        .notes
-                        .iter()
-                        .map(|n| n.time)
-                        .collect::<Vec<f64>>();
-                    audio_times.push(config.audio_subdivisions.end);
-
-                    let adjusted_beat = beat_bisect(&audio_times, beat);
-                    if adjusted_beat != last_beat {
-                        sounding_samples.push(SoundingSample {
-                            sample: sample_buffers.get("ride").unwrap().clone(),
-                            pos: 0,
-                        });
-                        if config.audio_subdivisions.notes.len() < 2
-                            || (adjusted_beat % ((config.audio_subdivisions.notes.len()) as isize)
-                                == 0)
-                        {
-                            click_sound_counter = 400;
-                        } else {
-                            click_sound_counter = 100;
-                        }
-                        last_beat = adjusted_beat;
+                    if config.drum_on {
+                        channel[i] += drums;
                     }
+                    if ch == 0 {
+                        drum_frame = drums;
+                    }
+
                     if click_sound_counter > 0 {
                         click_sound_counter -= 1;
                         let in_loop = beat % (config.beats_to_loop * 2.0) < config.beats_to_loop;
@@ -302,6 +348,23 @@ fn main() -> Result<(), coreaudio::Error> {
                         }
                     }
                 }
+
+                state_vec.beats.push(visual_beat);
+                for &ch in config.visible_channels.iter() {
+                    // Channels past the input count are the drum bus, which is
+                    // how the drums get their own row in the display.
+                    let value = if ch < input_frame.len() {
+                        let mut v = loop_visual;
+                        if config.visual_monitor_on {
+                            v += input_frame[ch];
+                        }
+                        v
+                    } else {
+                        drum_frame
+                    };
+                    state_vec.values.push(value.abs());
+                }
+
                 beat += beats_per_sample;
             }
         }
@@ -317,12 +380,14 @@ fn main() -> Result<(), coreaudio::Error> {
         .manage(should_reset_beat_state)
         .manage(log_state)
         .manage(InputChannelCount(input_channels))
+        .manage(drum_samples_state)
         .invoke_handler(tauri::generate_handler![
             get_samples,
             set_config,
             reset_beat,
             set_mp3_buffer,
             get_input_channel_count,
+            load_drum_sample,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

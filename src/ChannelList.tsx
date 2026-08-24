@@ -22,12 +22,14 @@ const withStyleAt = (
 
 const ChannelRow = ({
   index,
+  label,
   shown,
   style,
   onToggle,
   onStyle,
 }: {
   index: number;
+  label: string;
   shown: boolean;
   style: ChannelStyle;
   onToggle: () => void;
@@ -38,14 +40,14 @@ const ChannelRow = ({
       type="checkbox"
       checked={shown}
       onChange={onToggle}
-      title={shown ? `Hide input ${index + 1}` : `Show input ${index + 1}`}
+      title={shown ? `Hide ${label}` : `Show ${label}`}
     />
-    <label style={{ width: "3.5em" }}>ch {index + 1}</label>
+    <label style={{ width: "3.5em" }}>{label}</label>
     <input
       type="color"
       value={style.color}
       onChange={(e) => onStyle({ ...style, color: e.target.value })}
-      title={`Colour for input ${index + 1}`}
+      title={`Colour for ${label}`}
       style={{
         width: "2em",
         height: "1.6em",
@@ -61,20 +63,22 @@ const ChannelRow = ({
       step={0.05}
       value={style.alpha}
       onChange={(e) => onStyle({ ...style, alpha: parseFloat(e.target.value) })}
-      title={`Opacity ${Math.round(style.alpha * 100)}%`}
+      title={`${label} opacity ${Math.round(style.alpha * 100)}%`}
       style={{ flex: 1, minWidth: 0 }}
     />
   </div>
 );
 
 export const ChannelList = ({
-  count,
+  labels,
   visible,
   styles,
   setVisible,
   setStyles,
 }: {
-  count: number;
+  // One per selectable channel, in stream order. Anything past the device's
+  // input channels is a synthetic bus -- the drums.
+  labels: string[];
   visible: number[];
   styles: ChannelStyle[];
   setVisible: (next: number[]) => void;
@@ -91,21 +95,18 @@ export const ChannelList = ({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-      {Array.from({ length: count }, (_, index) => (
+      {labels.map((label, index) => (
         <ChannelRow
           key={index}
           index={index}
+          label={label}
           shown={visible.includes(index)}
           style={channelStyle(styles, index)}
           onToggle={() => toggle(index)}
           onStyle={(next) => setStyles(withStyleAt(styles, index, next))}
         />
       ))}
-      {count <= 1 && (
-        <div style={{ color: "#aaa", fontSize: "0.8em" }}>
-          The input device only offers one channel.
-        </div>
-      )}
+
     </div>
   );
 };

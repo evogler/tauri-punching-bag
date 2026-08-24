@@ -12,6 +12,7 @@ import {
   gridAlpha,
   ChannelStyle,
   channelStyle,
+  BUILT_IN_DRUMS,
 } from "./config";
 import { Input } from "./Input";
 import { appWindow } from "@tauri-apps/api/window";
@@ -22,6 +23,8 @@ import { Preset, makePreset, readSession, writeSession } from "./presets";
 import { GridList } from "./GridList";
 import { Layout, getCanvasPositions } from "./layout";
 import { ChannelList } from "./ChannelList";
+import { DrumList, SampleStatus, makeDrumVoice } from "./DrumList";
+import { open as openFileDialog } from "@tauri-apps/api/dialog";
 
 // True only in a plain browser (`yarn start`), where there's no Rust backend to
 // call, so samples are faked. Inside the Tauri app -- dev or release -- the IPC
@@ -48,13 +51,19 @@ const mapFuncOnObjectKeys = <T,>(
   return newObj;
 };
 
-const unwrapValues = (obj: Record<string, any>) =>
-  Object.fromEntries(
-    Object.entries(obj).map(([k, v]) => [
-      k,
-      typeof v === "object" && v !== null && v.val !== undefined ? v.val : v,
-    ])
-  );
+// Rhythms are stored as {inputText, val, type} so the fields can keep what was
+// typed, while Rust only wants the parsed `val`. Recursive because a drum voice
+// carries a rhythm each, nested inside an array.
+const unwrapValues = (value: any): any => {
+  if (Array.isArray(value)) return value.map(unwrapValues);
+  if (value !== null && typeof value === "object") {
+    if (value.val !== undefined) return unwrapValues(value.val);
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, unwrapValues(v)])
+    );
+  }
+  return value;
+};
 
 const camelCaseToSnakeCase = (str: string) =>
   str.replace(/([A-Z])/g, (g) => `_${g[0].toLowerCase()}`);
@@ -254,6 +263,42 @@ const App = () => {
     appendSamples(batch);
   };
 
+  // Decoding happens in Rust and is keyed by path, so the frontend only has to
+  // make sure every referenced file has been loaded once.
+  const [sampleStatus, setSampleStatus] = useState<Record<string, SampleStatus>>(
+    {}
+  );
+  const requestedSamples = useRef(new Set<string>());
+  const loadDrumSample = (path: string) => {
+    if (BUILT_IN_DRUMS.includes(path)) return;
+    if (requestedSamples.current.has(path)) return;
+    requestedSamples.current.add(path);
+    setSampleStatus((s) => ({ ...s, [path]: "loading" }));
+    invoke("load_drum_sample", { path })
+      .then(() => setSampleStatus((s) => ({ ...s, [path]: "ok" })))
+      .catch(() => setSampleStatus((s) => ({ ...s, [path]: "error" })));
+  };
+
+  const addDrumSample = async () => {
+    let path: string | null = null;
+    if (BROWSER_DEBUG_MODE) {
+      path = window.prompt("Path to an audio file");
+    } else {
+      const picked = await openFileDialog({
+        multiple: false,
+        filters: [
+          {
+            name: "Audio",
+            extensions: ["wav", "aif", "aiff", "mp3", "flac", "ogg", "m4a"],
+          },
+        ],
+      });
+      path = typeof picked === "string" ? picked : null;
+    }
+    if (!path) return;
+    set("drums", [...get("drums"), makeDrumVoice(path)]);
+  };
+
   // How many channels the capture device gave us, which is what the channel
   // list is sized from.
   const [inputChannelCount, setInputChannelCount] = useState(1);
@@ -266,6 +311,13 @@ const App = () => {
       .then((n) => setInputChannelCount(Math.max(1, n)))
       .catch(() => {});
   }, []);
+
+  // The drum bus rides along after the real inputs, so it can be shown, coloured
+  // and split against them like any other channel.
+  const channelLabels = [
+    ...Array.from({ length: inputChannelCount }, (_, i) => `ch ${i + 1}`),
+    "drums",
+  ];
 
   const updateRustConfig = (args: Partial<RustConfig>) => {
     // console.log("calling set_config");
@@ -293,6 +345,13 @@ const App = () => {
   useEffect(() => {
     writeSession(makePreset(rustConfig, jsConfig));
   }, [rustConfig, jsConfig]);
+
+  // Covers both adding a sample and coming back to one a restored session
+  // referred to.
+  useEffect(() => {
+    if (BROWSER_DEBUG_MODE) return;
+    for (const voice of rustConfig.drums) loadDrumSample(voice.path);
+  }, [rustConfig.drums]);
 
   const getCurrentPreset = () => makePreset(rustConfig, jsConfig);
 
@@ -575,8 +634,14 @@ const App = () => {
           <Input label="click volume" _key="clickVolume" set={set} get={get} />
         </Section>
 
-        <Section label="drum">
-          <Input label="drum on" _key="drumOn" set={set} get={get} />
+        <Section label="drums">
+          <Input label="drums on" _key="drumOn" set={set} get={get} />
+          <DrumList
+            drums={get("drums")}
+            setDrums={(next) => set("drums", next)}
+            onAdd={addDrumSample}
+            status={sampleStatus}
+          />
         </Section>
 
         <Section label="gain">
@@ -631,7 +696,7 @@ const App = () => {
 
         <Section label="input channels">
           <ChannelList
-            count={inputChannelCount}
+            labels={channelLabels}
             visible={get("visibleChannels")}
             styles={get("channelStyles")}
             setVisible={(next) => set("visibleChannels", next)}

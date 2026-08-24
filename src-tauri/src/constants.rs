@@ -1,4 +1,4 @@
-use crate::structs::{Config, Note, ParserRhythm};
+use crate::structs::{Config, DrumVoice, Note, ParserRhythm};
 use coreaudio::audio_unit::SampleFormat;
 pub const SAMPLE_RATE: f64 = 44100.0;
 pub const SAMPLE_FORMAT: SampleFormat = SampleFormat::F32;
@@ -32,6 +32,17 @@ pub fn default_config() -> Config {
             end: 1.0,
             notes: vec![Note { time: 0.0 }, Note { time: 0.5 }],
         },
+        drums: vec![DrumVoice {
+            path: "ride".to_string(),
+            on: true,
+            volume: 1.0,
+            offset: 0.0,
+            rhythm: ParserRhythm {
+                start: 0.0,
+                end: 1.0,
+                notes: vec![Note { time: 0.0 }, Note { time: 0.5 }],
+            },
+        }],
         test_object: ParserRhythm {
             start: 0.0,
             end: 0.0,
