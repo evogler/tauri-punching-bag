@@ -702,10 +702,13 @@ const App = () => {
         <Section label="input channels">
           <ChannelList
             labels={channelLabels}
+            inputCount={inputChannelCount}
             visible={get("visibleChannels")}
             styles={get("channelStyles")}
+            pans={get("channelPans")}
             setVisible={(next) => set("visibleChannels", next)}
             setStyles={(next) => set("channelStyles", next)}
+            setPans={(next) => set("channelPans", next)}
           />
           <Input
             label="split up/down"

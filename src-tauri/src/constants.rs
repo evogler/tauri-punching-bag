@@ -27,6 +27,7 @@ pub fn default_config() -> Config {
         buffer_compensation: 4330,
         paused: false,
         visible_channels: vec![0],
+        channel_pans: vec![],
         audio_subdivisions: ParserRhythm {
             start: 0.0,
             end: 1.0,

@@ -38,6 +38,8 @@ export type DrumVoice = {
 
 export const BUILT_IN_DRUMS = ["ride"];
 
+export const channelPan = (pans: number[], index: number) => pans[index] ?? 0;
+
 export const drumLabel = (path: string) =>
   BUILT_IN_DRUMS.includes(path) ? path : path.split("/").pop() || path;
 
@@ -50,6 +52,9 @@ export const defaultRustConfig = {
   paused: false,
   // Which input channels get sent to the display, by device channel index.
   visibleChannels: [0] as number[],
+  // Stereo position per input channel, -1 hard left to 1 hard right. Sparse:
+  // a channel with no entry sits centred.
+  channelPans: [] as number[],
   clickOn: true,
   clickToggle: false,
   clickVolume: 0.3,

@@ -1,4 +1,4 @@
-import { ChannelStyle, channelStyle } from "./config";
+import { ChannelStyle, channelPan, channelStyle } from "./config";
 
 const rowStyle: React.CSSProperties = {
   display: "flex",
@@ -20,20 +20,37 @@ const withStyleAt = (
   return out;
 };
 
+const panLabel = (pan: number) =>
+  pan === 0 ? "centre" : `${Math.round(Math.abs(pan) * 100)}% ${pan < 0 ? "left" : "right"}`;
+
+// Same padding rule as the styles: setting a later channel must not leave holes
+// an index lookup would read as undefined.
+const withPanAt = (pans: number[], index: number, next: number) => {
+  const out = pans.slice();
+  while (out.length <= index) out.push(0);
+  out[index] = next;
+  return out;
+};
+
 const ChannelRow = ({
   index,
   label,
   shown,
   style,
+  pan,
   onToggle,
   onStyle,
+  onPan,
 }: {
   index: number;
   label: string;
   shown: boolean;
   style: ChannelStyle;
+  // Absent for anything that isn't a real input -- the drum bus isn't routed.
+  pan?: number;
   onToggle: () => void;
   onStyle: (next: ChannelStyle) => void;
+  onPan: (next: number) => void;
 }) => (
   <div style={{ ...rowStyle, opacity: shown ? 1 : 0.45 }}>
     <input
@@ -66,16 +83,38 @@ const ChannelRow = ({
       title={`${label} opacity ${Math.round(style.alpha * 100)}%`}
       style={{ flex: 1, minWidth: 0 }}
     />
+    {pan === undefined ? (
+      <span style={{ width: "5em" }} />
+    ) : (
+      <input
+        type="range"
+        min={-1}
+        max={1}
+        step={0.05}
+        value={pan}
+        onChange={(e) => onPan(parseFloat(e.target.value))}
+        onDoubleClick={() => onPan(0)}
+        title={`${label} pan: ${panLabel(pan)} (double-click to centre)`}
+        style={{ width: "5em" }}
+      />
+    )}
   </div>
 );
 
 export const ChannelList = ({
   labels,
+  inputCount,
   visible,
   styles,
+  pans,
   setVisible,
   setStyles,
+  setPans,
 }: {
+  // How many of `labels` are real inputs. Only those can be panned.
+  inputCount: number;
+  pans: number[];
+  setPans: (next: number[]) => void;
   // One per selectable channel, in stream order. Anything past the device's
   // input channels is a synthetic bus -- the drums.
   labels: string[];
@@ -102,8 +141,10 @@ export const ChannelList = ({
           label={label}
           shown={visible.includes(index)}
           style={channelStyle(styles, index)}
+          pan={index < inputCount ? channelPan(pans, index) : undefined}
           onToggle={() => toggle(index)}
           onStyle={(next) => setStyles(withStyleAt(styles, index, next))}
+          onPan={(next) => setPans(withPanAt(pans, index, next))}
         />
       ))}
 

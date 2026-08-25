@@ -78,6 +78,9 @@ pub struct Config {
     /// Which input channels get sent to the display. Only these are pushed, so
     /// a 16-input interface doesn't cost 16 channels of JSON to watch two.
     pub visible_channels: Vec<usize>,
+    /// Stereo position per input channel, -1 hard left to 1 hard right. Sparse:
+    /// a channel with no entry sits centred.
+    pub channel_pans: Vec<f64>,
     pub audio_subdivisions: ParserRhythm,
     pub drums: Vec<DrumVoice>,
     pub test_object: ParserRhythm,

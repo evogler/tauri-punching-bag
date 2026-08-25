@@ -190,6 +190,17 @@ fn main() -> Result<(), coreaudio::Error> {
             .collect();
         click_times.push(config.audio_subdivisions.end);
 
+        // Centre stays (1, 1) rather than the usual constant-power (0.707,
+        // 0.707), so turning panning on doesn't quietly drop every existing
+        // setup by 3dB. Panning attenuates the far side instead of boosting the
+        // near one.
+        let pan_gains: Vec<(S, S)> = (0..input_frame.len())
+            .map(|ch| {
+                let pan = config.channel_pans.get(ch).copied().unwrap_or(0.0) as S;
+                ((1.0 - pan).clamp(0.0, 1.0), (1.0 + pan).clamp(0.0, 1.0))
+            })
+            .collect();
+
         let mut voice_times: Vec<Vec<f64>> = Vec::with_capacity(config.drums.len());
         let mut voice_samples: Vec<Option<Arc<Vec<f32>>>> = Vec::with_capacity(config.drums.len());
         {
@@ -220,11 +231,15 @@ fn main() -> Result<(), coreaudio::Error> {
                 // everything downstream that still works on a single signal --
                 // the monitor and the looper. For one channel this is exactly
                 // what the old code did.
-                let mut mix: S = 0.0;
+                // Summed per output side rather than into one mono value, which
+                // is what lets a channel sit anywhere in the stereo field.
+                let mut monitor_out: [S; 2] = [0.0, 0.0];
                 for ch in 0..input_frame.len() {
                     let sample = buffers[ch].pop_front().unwrap_or(0.0) * config.audio_in_gain;
                     input_frame[ch] = sample;
-                    mix += sample;
+                    let (left, right) = pan_gains[ch];
+                    monitor_out[0] += sample * left;
+                    monitor_out[1] += sample * right;
                 }
 
                 let visual_beat =
@@ -233,9 +248,9 @@ fn main() -> Result<(), coreaudio::Error> {
                 // not inside the output loop, which would advance the position
                 // once per *output* channel and mix every input into one track.
                 //
-                // `loop_playback` is the summed monitor feed; `loop_visual` is
-                // kept per channel so each one shows only its own take.
-                let mut loop_playback: S = 0.0;
+                // `loop_out` is the panned stereo feed; `loop_visual` is kept
+                // per channel so each one shows only its own take.
+                let mut loop_out: [S; 2] = [0.0, 0.0];
                 let loop_len = loop_buffer.channels.first().map_or(0, |c| c.len());
                 if loop_len > 0 {
                     let p = loop_buffer.pos;
@@ -245,7 +260,10 @@ fn main() -> Result<(), coreaudio::Error> {
                             // Read this position before overwriting it: that's
                             // the previous time round.
                             loop_visual[ch] = loop_buffer.channels[ch][p];
-                            loop_playback += loop_buffer.channels[ch][compensated];
+                            let played = loop_buffer.channels[ch][compensated];
+                            let (left, right) = pan_gains[ch];
+                            loop_out[0] += played * left;
+                            loop_out[1] += played * right;
                             loop_buffer.channels[ch][p] =
                                 input_frame.get(ch).copied().unwrap_or(0.0);
                         } else {
@@ -298,14 +316,15 @@ fn main() -> Result<(), coreaudio::Error> {
                 let mut drum_frame: S = 0.0;
 
                 for (ch, channel) in data.channels_mut().enumerate() {
-                    let sample: S = mix;
+                    // Output is stereo; anything beyond that takes the right side.
+                    let side = ch.min(1);
                     let mut audio_out = 0.0;
                     if config.audio_monitor_on {
-                        audio_out += sample;
+                        audio_out += monitor_out[side];
                     }
 
                     if config.looping_on {
-                        audio_out += loop_playback;
+                        audio_out += loop_out[side];
                     }
 
                     channel[i] = audio_out * 12.0;
