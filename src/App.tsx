@@ -312,11 +312,13 @@ const App = () => {
       .catch(() => {});
   }, []);
 
-  // The drum bus rides along after the real inputs, so it can be shown, coloured
-  // and split against them like any other channel.
+  // The synthetic buses ride along after the real inputs, so each can be shown,
+  // coloured and split against them like any other channel. Order has to match
+  // how Rust fills them.
   const channelLabels = [
     ...Array.from({ length: inputChannelCount }, (_, i) => `ch ${i + 1}`),
     "drums",
+    "click",
   ];
 
   const updateRustConfig = (args: Partial<RustConfig>) => {

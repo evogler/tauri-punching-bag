@@ -120,3 +120,49 @@ pub struct Buffers {
     pub producers: Vec<Arc<Mutex<VecDeque<f32>>>>,
     pub consumers: Vec<Arc<Mutex<VecDeque<f32>>>>,
 }
+
+/// A short delay line for the synthetic display buses.
+///
+/// The sample stream is stamped with a beat shifted back by
+/// `buffer_compensation`, so input captured that long ago is drawn where it was
+/// actually played. The drums and the click aren't captured -- they're generated
+/// in the callback and heard now -- so that same shift would draw them early by
+/// the full compensation. Holding them back by it puts each one back on its own
+/// beat without moving anything else.
+pub struct BusDelay {
+    slots: Vec<[f32; 2]>,
+    pos: usize,
+}
+
+impl BusDelay {
+    pub fn new() -> Self {
+        BusDelay {
+            slots: Vec::new(),
+            pos: 0,
+        }
+    }
+
+    /// Called once per callback, not per frame: this is the only place it
+    /// allocates, and only when the compensation actually changed.
+    pub fn resize(&mut self, frames: usize) {
+        if self.slots.len() == frames {
+            return;
+        }
+        self.slots.clear();
+        self.slots.resize(frames, [0.0, 0.0]);
+        self.pos = 0;
+    }
+
+    /// Takes this frame's buses and returns the pair from `frames` ago. With no
+    /// compensation set there's nothing to line up, so it passes straight
+    /// through.
+    pub fn push(&mut self, frame: [f32; 2]) -> [f32; 2] {
+        if self.slots.is_empty() {
+            return frame;
+        }
+        let out = self.slots[self.pos];
+        self.slots[self.pos] = frame;
+        self.pos = (self.pos + 1) % self.slots.len();
+        out
+    }
+}

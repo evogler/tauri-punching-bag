@@ -22,7 +22,7 @@ use crate::get_loop_buffer_size::get_loop_buffer_size;
 use crate::io_channels::{get_input_output_channels, make_buffers, start_input_audio_unit};
 use crate::read_audio_file::get_samples_from_filename;
 use crate::structs::{
-    BeatResetState, ConfigState, DrumSamples, InputChannelCount, LogState, LoopBuffer,
+    BeatResetState, BusDelay, ConfigState, DrumSamples, InputChannelCount, LogState, LoopBuffer,
     LoopBufferState, Mp3Buffer, Mp3BufferState, SampleOutputBuffer, SoundingSample,
 };
 use crate::types::{Args, S};
@@ -94,6 +94,9 @@ fn main() -> Result<(), coreaudio::Error> {
     // Reused every frame so the audio callback never allocates.
     let mut input_frame = vec![0f32; input_channels];
     let mut loop_visual = vec![0f32; input_channels];
+    // The drums and the click are generated here rather than captured, so they
+    // have to be held back to land on the same visual beat as the input.
+    let mut bus_delay = BusDelay::new();
 
     let mut click_sound_counter: i32 = 0;
     let mut rng = rand::thread_rng();
@@ -215,6 +218,7 @@ fn main() -> Result<(), coreaudio::Error> {
         // Growing keeps the existing voices primed, so adding one doesn't
         // retrigger the others.
         drum_last_beats.resize(config.drums.len(), isize::MIN);
+        bus_delay.resize(config.buffer_compensation);
 
         if let Ok(mut state_vec) = sample_output_buffer_clone.lock() {
             // Changing which channels are shown changes the row width of the
@@ -311,9 +315,12 @@ fn main() -> Result<(), coreaudio::Error> {
                     }
                 }
 
-                // What the drums put out this frame, kept so the display can
-                // show them as their own channel for calibrating offsets.
+                // What the drums and the click put out this frame, kept so the
+                // display can show them as their own channels -- which is how
+                // you line a sample's offset up against the grid by eye. Both
+                // follow the audio: muted means nothing to show.
                 let mut drum_frame: S = 0.0;
+                let mut click_frame: S = 0.0;
 
                 for (ch, channel) in data.channels_mut().enumerate() {
                     // Output is stereo; anything beyond that takes the right side.
@@ -353,9 +360,9 @@ fn main() -> Result<(), coreaudio::Error> {
                     }
                     if config.drum_on {
                         channel[i] += drums;
-                    }
-                    if ch == 0 {
-                        drum_frame = drums;
+                        if ch == 0 {
+                            drum_frame = drums;
+                        }
                     }
 
                     if click_sound_counter > 0 {
@@ -368,23 +375,32 @@ fn main() -> Result<(), coreaudio::Error> {
                                     r = 1.0;
                                 }
                                 channel[i] += r;
+                                if ch == 0 {
+                                    click_frame = r;
+                                }
                             }
                         }
                     }
                 }
 
+                // Delayed by the compensation so they sit on the beat they
+                // sounded on, not the one the input stamp is shifted to.
+                let [drum_visual, click_visual] = bus_delay.push([drum_frame, click_frame]);
+
                 state_vec.beats.push(visual_beat);
                 for &ch in config.visible_channels.iter() {
-                    // Channels past the input count are the drum bus, which is
-                    // how the drums get their own row in the display.
+                    // Channels past the input count are the synthetic buses, in
+                    // the order the frontend labels them: drums, then click.
                     let value = if ch < input_frame.len() {
                         let mut v = loop_visual[ch];
                         if config.visual_monitor_on {
                             v += input_frame[ch];
                         }
                         v
+                    } else if ch == input_frame.len() {
+                        drum_visual
                     } else {
-                        drum_frame
+                        click_visual
                     };
                     state_vec.values.push(value.abs());
                 }
