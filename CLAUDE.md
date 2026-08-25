@@ -145,6 +145,16 @@ drawn over it. Two draw modes:
   window, then `fillRect` + repaint everything when the beat wraps. No per-column
   erase here (the fill already cleared), so grids stay visible behind quiet parts.
 
+### The visual latency offset
+
+The sample stream is stamped with `visual_beat = beat - buffer_compensation *
+beats_per_sample`, i.e. in *input* time, so audio you played is drawn where you
+played it. The drums and click aren't captured — they're synthesised in the
+callback — so that shift would draw them ~98 ms early. `BusDelay` in `structs.rs`
+holds both bus values for `buffer_compensation` frames so they meet the stamp on
+their own beat. It only allocates on resize, which happens once per callback next
+to `drum_last_beats.resize`. Audio is untouched by this; it is display-only.
+
 ### Channels
 
 `visibleChannels` holds *device channel indices*, and indices past the input count
@@ -165,11 +175,21 @@ rather than a Vec-of-Vecs so the audio callback never allocates per frame.
 
 ### Drums
 
-Each `DrumVoice` has a path, its own rhythm, a volume, and an offset in ms.
+Each `DrumVoice` has a path, its own rhythm, a volume, an offset in ms, and a
+`shift` in beats. The two offsets are different things: `shift` is *musical*
+placement (which beat the part starts on, tempo-independent) and is subtracted
+from the beat before bisecting; `offset` is *mechanical* alignment for the file's
+attack and is added. A shift of a whole cycle length is a no-op, since the rhythm
+repeats.
 **The offset is a look-ahead, not a seek**: triggering evaluates
 `beat_bisect(times, beat + offset_beats)` so the sample starts *early* and its
 transient lands on the beat. Seeking into the file would chop the front off a
 slow attack. `offset_beats = offset_ms / 1000 * bpm / 60`.
+
+`shift` carries `#[serde(default)]` because `presets.ts` only merges top-level
+keys — a session saved before it existed has drum voices without the field. The
+TS side mirrors this with an optional `shift?` read through `drumShift()`, the
+same pattern as `VisualGrid.alpha`.
 
 Files are decoded in Rust by `load_drum_sample` and keyed by path; the callback
 only does a map lookup. Built-ins are keyed by plain name (`"ride"`) so a voice

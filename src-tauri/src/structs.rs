@@ -111,6 +111,12 @@ pub struct DrumVoice {
     /// a sound whose attack builds slowly, still lands its transient on the beat
     /// if it starts that far ahead of it. Negative starts it late.
     pub offset: f64,
+    /// Beats to push this part later in the cycle, so every voice doesn't start
+    /// on one. Unlike `offset` this is musical placement, so it's in beats and
+    /// doesn't move when the tempo does. Defaulted: voices saved before it
+    /// existed deserialize without it.
+    #[serde(default)]
+    pub shift: f64,
     pub rhythm: ParserRhythm,
 }
 

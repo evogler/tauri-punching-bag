@@ -301,7 +301,11 @@ fn main() -> Result<(), coreaudio::Error> {
                         // early: its transient then lands on the beat instead of
                         // however far into the file it happens to sit.
                         let offset_beats = voice.offset / 1000.0 * config.bpm / 60.0;
-                        let hit = beat_bisect(&voice_times[v], beat + offset_beats);
+                        // Subtracting the shift reads the rhythm from earlier in
+                        // the cycle, which is what puts the part later. Negative
+                        // beats are fine -- beat_bisect floors into the cycle.
+                        let hit =
+                            beat_bisect(&voice_times[v], beat + offset_beats - voice.shift);
                         if drum_last_beats[v] == isize::MIN {
                             drum_last_beats[v] = hit;
                         } else if hit != drum_last_beats[v] {

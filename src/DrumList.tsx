@@ -1,4 +1,4 @@
-import { DrumVoice, drumLabel } from "./config";
+import { DrumVoice, drumLabel, drumShift } from "./config";
 import { useFocusedValue } from "./Input";
 import parser1 from "./parser1";
 import parser2 from "./parser2";
@@ -12,6 +12,7 @@ export const makeDrumVoice = (path: string): DrumVoice => ({
   on: true,
   volume: 1,
   offset: 0,
+  shift: 0,
   rhythm: {
     inputText: DEFAULT_RHYTHM,
     val: parser2.parse(DEFAULT_RHYTHM),
@@ -41,6 +42,7 @@ const DrumRow = ({
     toString: (x) => x as string,
   });
   const [offsetProps, setOffsetText] = useFocusedValue(voice.offset);
+  const [shiftProps, setShiftText] = useFocusedValue(drumShift(voice));
   const parser = voice.rhythm.type === "parser1" ? parser1 : parser2;
   const failed = status === "error";
 
@@ -83,6 +85,17 @@ const DrumRow = ({
         }}
         title="Rhythm for this sound"
         style={{ flex: 1, minWidth: 0 }}
+      />
+      <input
+        {...shiftProps}
+        onChange={(e) => {
+          setShiftText(e.target.value);
+          const beats = parseFloat(e.target.value);
+          if (isNaN(beats)) return;
+          onChange({ ...voice, shift: beats });
+        }}
+        title="Push this part this many beats later in the cycle, so it doesn't start on one"
+        style={{ width: "3.5em" }}
       />
       <input
         {...offsetProps}
@@ -129,6 +142,7 @@ export const DrumList = ({
     <div style={{ ...rowStyle, color: "#aaa", fontSize: "0.8em" }}>
       <span style={{ width: "8.5em" }}>sound</span>
       <span style={{ flex: 1, minWidth: 0 }}>rhythm</span>
+      <span style={{ width: "3.5em" }}>beats</span>
       <span style={{ width: "3.5em" }}>ms</span>
       <span style={{ width: "4em" }}>vol</span>
     </div>

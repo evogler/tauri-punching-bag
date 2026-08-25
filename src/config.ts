@@ -33,8 +33,15 @@ export type DrumVoice = {
   /// Milliseconds to start the sample early, so its transient lands on the beat
   /// however far into the file the attack actually sits.
   offset: number;
+  /// Beats to push this part later in the cycle, so parts don't all land on
+  /// one. Optional because voices saved before it existed don't carry it -- read
+  /// it through drumShift rather than directly.
+  shift?: number;
   rhythm: Rhythm;
 };
+
+export const drumShift = (voice: DrumVoice) =>
+  typeof voice.shift === "number" ? voice.shift : 0;
 
 export const BUILT_IN_DRUMS = ["ride"];
 
@@ -77,6 +84,7 @@ export const defaultRustConfig = {
       on: true,
       volume: 1,
       offset: 0,
+      shift: 0,
       rhythm: {
         inputText: "2:1",
         val: { notes: [{ time: 0 }, { time: 0.5 }], start: 0, end: 1 },

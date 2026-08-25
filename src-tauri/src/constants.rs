@@ -38,6 +38,7 @@ pub fn default_config() -> Config {
             on: true,
             volume: 1.0,
             offset: 0.0,
+            shift: 0.0,
             rhythm: ParserRhythm {
                 start: 0.0,
                 end: 1.0,
