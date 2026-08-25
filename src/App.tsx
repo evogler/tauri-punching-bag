@@ -578,9 +578,14 @@ const App = () => {
         flexDirection: "column",
         padding: "1px",
         gap: "2px",
-        // overflow: "scroll",
         width: "600px",
+        // Fixed width against the canvas next to it, and its own scrollbar --
+        // the sections outgrew the window a while ago.
+        flexShrink: 0,
         height: "100%",
+        boxSizing: "border-box",
+        overflowY: "auto",
+        overflowX: "hidden",
       }}
     >
       <>
