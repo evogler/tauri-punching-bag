@@ -92,8 +92,9 @@ pub fn set_config(app_handle: tauri::AppHandle, new_config: Config) {
         let new_buffer_size = get_loop_buffer_size(&c);
         let loop_buffer_state: tauri::State<LoopBufferState> = app_handle.state();
         let mut loop_buffer = loop_buffer_state.0.lock().unwrap();
-        // loop_buffer.buffer.clear();
-        loop_buffer.buffer.resize(new_buffer_size, 0.0);
+        for channel in loop_buffer.channels.iter_mut() {
+            channel.resize(new_buffer_size, 0.0);
+        }
         loop_buffer.pos = 0;
         println!("new_buffer_size: {}", new_buffer_size);
     }

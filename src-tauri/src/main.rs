@@ -93,6 +93,7 @@ fn main() -> Result<(), coreaudio::Error> {
     let consumers = buffers.consumers.clone();
     // Reused every frame so the audio callback never allocates.
     let mut input_frame = vec![0f32; input_channels];
+    let mut loop_visual = vec![0f32; input_channels];
 
     let mut click_sound_counter: i32 = 0;
     let mut rng = rand::thread_rng();
@@ -114,7 +115,7 @@ fn main() -> Result<(), coreaudio::Error> {
         loop_buffer_size = get_loop_buffer_size(&c);
     }
     let loop_buffer = LoopBuffer {
-        buffer: vec![0f32; loop_buffer_size],
+        channels: vec![vec![0f32; loop_buffer_size]; input_channels],
         pos: 0,
     };
     let loop_buffer_mutex_arc = Arc::new(Mutex::new(loop_buffer));
@@ -228,12 +229,32 @@ fn main() -> Result<(), coreaudio::Error> {
 
                 let visual_beat =
                     beat - (config.buffer_compensation as f64) * beats_per_sample;
-                // Read before the channel loop advances the write head.
-                let loop_visual = if config.looping_on {
-                    loop_buffer.buffer[loop_buffer.pos]
-                } else {
-                    0.0
-                };
+                // The loop is read and written once per frame, per channel --
+                // not inside the output loop, which would advance the position
+                // once per *output* channel and mix every input into one track.
+                //
+                // `loop_playback` is the summed monitor feed; `loop_visual` is
+                // kept per channel so each one shows only its own take.
+                let mut loop_playback: S = 0.0;
+                let loop_len = loop_buffer.channels.first().map_or(0, |c| c.len());
+                if loop_len > 0 {
+                    let p = loop_buffer.pos;
+                    let compensated = mod_add(p, config.buffer_compensation, loop_len);
+                    for ch in 0..loop_buffer.channels.len() {
+                        if config.looping_on {
+                            // Read this position before overwriting it: that's
+                            // the previous time round.
+                            loop_visual[ch] = loop_buffer.channels[ch][p];
+                            loop_playback += loop_buffer.channels[ch][compensated];
+                            loop_buffer.channels[ch][p] =
+                                input_frame.get(ch).copied().unwrap_or(0.0);
+                        } else {
+                            loop_visual[ch] = 0.0;
+                            loop_buffer.channels[ch][p] = 0.0;
+                        }
+                    }
+                    loop_buffer.pos = (p + 1) % loop_len;
+                }
 
                 // Triggers, once per frame rather than once per output channel.
                 let click_beat = beat_bisect(&click_times, beat);
@@ -283,19 +304,8 @@ fn main() -> Result<(), coreaudio::Error> {
                         audio_out += sample;
                     }
 
-                    let p = loop_buffer.pos;
-
-                    let compensated_loop_buffer_pos = mod_add(
-                        loop_buffer.pos,
-                        config.buffer_compensation * 2,
-                        loop_buffer.buffer.len(),
-                    );
-
                     if config.looping_on {
-                        audio_out += loop_buffer.buffer[compensated_loop_buffer_pos];
-                        loop_buffer.buffer[p] = sample;
-                    } else {
-                        loop_buffer.buffer[p] = 0.0;
+                        audio_out += loop_playback;
                     }
 
                     channel[i] = audio_out * 12.0;
@@ -310,11 +320,6 @@ fn main() -> Result<(), coreaudio::Error> {
                     }
                     if mp3.pos >= mp3.buffer.len() {
                         mp3.pos = 0;
-                    }
-
-                    loop_buffer.pos += 1;
-                    if loop_buffer.pos >= loop_buffer.buffer.len() {
-                        loop_buffer.pos = 0;
                     }
 
                     let mut drums: S = 0.0;
@@ -354,7 +359,7 @@ fn main() -> Result<(), coreaudio::Error> {
                     // Channels past the input count are the drum bus, which is
                     // how the drums get their own row in the display.
                     let value = if ch < input_frame.len() {
-                        let mut v = loop_visual;
+                        let mut v = loop_visual[ch];
                         if config.visual_monitor_on {
                             v += input_frame[ch];
                         }

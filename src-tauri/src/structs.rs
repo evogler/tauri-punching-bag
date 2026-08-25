@@ -36,8 +36,10 @@ pub struct SampleOutputBuffer {
 /// How many input channels the capture device actually gave us.
 pub struct InputChannelCount(pub usize);
 
+// One recording per input channel, all sharing a position. Per channel rather
+// than a mono sum so a looped take plays back on the channel it was played on.
 pub struct LoopBuffer {
-    pub buffer: Vec<f32>,
+    pub channels: Vec<Vec<f32>>,
     pub pos: usize,
 }
 
