@@ -181,15 +181,21 @@ placement (which beat the part starts on, tempo-independent) and is subtracted
 from the beat before bisecting; `offset` is *mechanical* alignment for the file's
 attack and is added. A shift of a whole cycle length is a no-op, since the rhythm
 repeats.
+
+`gains` is a list of per-hit multipliers on top of `volume`, using the same
+`parseNumberList` "1,0.5x3" syntax as `beatsPerRow`. It is indexed by *hit count*
+(`hit.rem_euclid(gains.len())`), not by position in the bar, so a list whose
+length doesn't divide the rhythm's deliberately drifts in and out of phase rather
+than resetting each cycle. Empty means no modulation.
 **The offset is a look-ahead, not a seek**: triggering evaluates
 `beat_bisect(times, beat + offset_beats)` so the sample starts *early* and its
 transient lands on the beat. Seeking into the file would chop the front off a
 slow attack. `offset_beats = offset_ms / 1000 * bpm / 60`.
 
-`shift` carries `#[serde(default)]` because `presets.ts` only merges top-level
+`shift` and `gains` carry `#[serde(default)]` because `presets.ts` only merges top-level
 keys — a session saved before it existed has drum voices without the field. The
-TS side mirrors this with an optional `shift?` read through `drumShift()`, the
-same pattern as `VisualGrid.alpha`.
+TS side mirrors this with optional `shift?` / `gains?` read through `drumShift()`
+and `drumGains()`, the same pattern as `VisualGrid.alpha`.
 
 Files are decoded in Rust by `load_drum_sample` and keyed by path; the callback
 only does a map lookup. Built-ins are keyed by plain name (`"ride"`) so a voice

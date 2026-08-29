@@ -309,10 +309,20 @@ fn main() -> Result<(), coreaudio::Error> {
                         if drum_last_beats[v] == isize::MIN {
                             drum_last_beats[v] = hit;
                         } else if hit != drum_last_beats[v] {
+                            // Indexed by hit rather than by position in the
+                            // cycle, so a list that doesn't divide evenly into
+                            // the rhythm keeps drifting instead of resetting
+                            // every bar. rem_euclid because a shift ahead of the
+                            // launch beat makes `hit` negative for a moment.
+                            let gain = if voice.gains.is_empty() {
+                                1.0
+                            } else {
+                                voice.gains[hit.rem_euclid(voice.gains.len() as isize) as usize]
+                            };
                             sounding_samples.push(SoundingSample {
                                 sample: sample.clone(),
                                 pos: 0,
-                                volume: voice.volume as f32,
+                                volume: (voice.volume * gain) as f32,
                             });
                             drum_last_beats[v] = hit;
                         }

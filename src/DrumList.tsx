@@ -1,5 +1,5 @@
-import { DrumVoice, drumLabel, drumShift } from "./config";
-import { useFocusedValue } from "./Input";
+import { DrumVoice, drumGains, drumLabel, drumShift } from "./config";
+import { formatNumberList, parseNumberList, useFocusedValue } from "./Input";
 import parser1 from "./parser1";
 import parser2 from "./parser2";
 
@@ -13,6 +13,7 @@ export const makeDrumVoice = (path: string): DrumVoice => ({
   volume: 1,
   offset: 0,
   shift: 0,
+  gains: [1],
   rhythm: {
     inputText: DEFAULT_RHYTHM,
     val: parser2.parse(DEFAULT_RHYTHM),
@@ -43,6 +44,9 @@ const DrumRow = ({
   });
   const [offsetProps, setOffsetText] = useFocusedValue(voice.offset);
   const [shiftProps, setShiftText] = useFocusedValue(drumShift(voice));
+  const [gainsProps, setGainsText] = useFocusedValue(drumGains(voice), {
+    toString: (val) => formatNumberList(val as number[]),
+  });
   const parser = voice.rhythm.type === "parser1" ? parser1 : parser2;
   const failed = status === "error";
 
@@ -84,6 +88,20 @@ const DrumRow = ({
           } catch (e) {}
         }}
         title="Rhythm for this sound"
+        style={{ flex: 1, minWidth: 0 }}
+      />
+      <input
+        {...gainsProps}
+        onChange={(e) => {
+          const text = e.target.value;
+          setGainsText(text);
+          // Same contract as the rhythm field: half-typed text just doesn't
+          // commit, rather than clearing what's playing.
+          try {
+            onChange({ ...voice, gains: parseNumberList(text) });
+          } catch (e) {}
+        }}
+        title="Gain per hit, cycled -- e.g. 1,0.5 or 1,0.6x3. Multiplies the volume slider"
         style={{ flex: 1, minWidth: 0 }}
       />
       <input
@@ -142,6 +160,7 @@ export const DrumList = ({
     <div style={{ ...rowStyle, color: "#aaa", fontSize: "0.8em" }}>
       <span style={{ width: "8.5em" }}>sound</span>
       <span style={{ flex: 1, minWidth: 0 }}>rhythm</span>
+      <span style={{ flex: 1, minWidth: 0 }}>gain</span>
       <span style={{ width: "3.5em" }}>beats</span>
       <span style={{ width: "3.5em" }}>ms</span>
       <span style={{ width: "4em" }}>vol</span>

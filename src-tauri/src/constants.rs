@@ -39,6 +39,7 @@ pub fn default_config() -> Config {
             volume: 1.0,
             offset: 0.0,
             shift: 0.0,
+            gains: vec![1.0],
             rhythm: ParserRhythm {
                 start: 0.0,
                 end: 1.0,

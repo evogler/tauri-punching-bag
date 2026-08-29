@@ -37,11 +37,19 @@ export type DrumVoice = {
   /// one. Optional because voices saved before it existed don't carry it -- read
   /// it through drumShift rather than directly.
   shift?: number;
+  /// Gain multipliers applied per hit, cycled by hit index and multiplied with
+  /// `volume`. Length is independent of the rhythm's, so a list that doesn't
+  /// divide evenly drifts in and out of phase with it. Optional for the same
+  /// reason as `shift` -- read it through drumGains.
+  gains?: number[];
   rhythm: Rhythm;
 };
 
 export const drumShift = (voice: DrumVoice) =>
   typeof voice.shift === "number" ? voice.shift : 0;
+
+export const drumGains = (voice: DrumVoice) =>
+  voice.gains && voice.gains.length ? voice.gains : [1];
 
 export const BUILT_IN_DRUMS = ["ride"];
 
@@ -85,6 +93,7 @@ export const defaultRustConfig = {
       volume: 1,
       offset: 0,
       shift: 0,
+      gains: [1],
       rhythm: {
         inputText: "2:1",
         val: { notes: [{ time: 0 }, { time: 0.5 }], start: 0, end: 1 },

@@ -117,6 +117,12 @@ pub struct DrumVoice {
     /// existed deserialize without it.
     #[serde(default)]
     pub shift: f64,
+    /// Gain multipliers applied per hit and cycled by hit index, on top of
+    /// `volume`. Deliberately not tied to the rhythm's length: a list that
+    /// doesn't divide evenly into it drifts, which is the point. Empty means no
+    /// modulation. Defaulted for voices saved before it existed.
+    #[serde(default)]
+    pub gains: Vec<f64>,
     pub rhythm: ParserRhythm,
 }
 
