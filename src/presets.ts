@@ -3,8 +3,12 @@ import {
   JsConfigKey,
   RustConfig,
   RustConfigKey,
+  ViewConfig,
+  MAX_VIEW_SIDE,
+  copyView,
   defaultJsConfig,
   defaultRustConfig,
+  defaultViewConfig,
   isJsConfigKey,
   isRustConfigKey,
 } from "./config";
@@ -26,6 +30,63 @@ export type Preset = {
 };
 
 export type Presets = Record<string, Preset>;
+
+// The settings that are now per-view used to sit at the top level of the js
+// config, back when there was only one pane. `pickKnownKeys` drops keys it
+// doesn't recognise, so without this an upgrade would silently reset someone's
+// rows, margins and grids to the defaults.
+const LEGACY_VIEW_KEYS: (keyof ViewConfig)[] = [
+  "beatsPerRow",
+  "marginLeft",
+  "marginRight",
+  "grids",
+  "visualGain",
+  "barColorMode",
+  "refreshAtCycleEnd",
+  "splitChannels",
+];
+
+const clampSide = (n: unknown) =>
+  typeof n === "number" && Number.isFinite(n)
+    ? Math.min(MAX_VIEW_SIDE, Math.max(1, Math.floor(n)))
+    : 1;
+
+// Merging over the defaults is what lets a view saved by an older build pick up
+// keys added since, the same way the top-level config already worked.
+const normalizeView = (view: unknown): ViewConfig =>
+  typeof view === "object" && view !== null
+    ? { ...defaultViewConfig(), ...(view as Partial<ViewConfig>) }
+    : defaultViewConfig();
+
+// Folds a pre-views js config into one view, then squares the list up with the
+// arrangement so `views.length === viewCols * viewRows` always holds.
+const migrateViews = (js: Record<string, unknown>): Record<string, unknown> => {
+  const out = { ...js };
+
+  if (!Array.isArray(out.views)) {
+    const legacy: Partial<ViewConfig> = {};
+    for (const key of LEGACY_VIEW_KEYS) {
+      if (key in out) (legacy as Record<string, unknown>)[key] = out[key];
+    }
+    out.views = [{ ...defaultViewConfig(), ...legacy }];
+    out.viewCols = 1;
+    out.viewRows = 1;
+  }
+
+  const views = (out.views as unknown[]).map(normalizeView);
+  const cols = clampSide(out.viewCols);
+  const rows = clampSide(out.viewRows);
+  const wanted = cols * rows;
+  // A new pane starts from the first one rather than the defaults -- adding a
+  // column is nearly always "show me this again, but against another grid".
+  while (views.length < wanted) views.push(copyView(views[0] ?? defaultViewConfig()));
+  views.length = wanted;
+
+  out.views = views;
+  out.viewCols = cols;
+  out.viewRows = rows;
+  return out;
+};
 
 const pickKnownKeys = <T,>(
   obj: Record<string, unknown>,
@@ -66,9 +127,11 @@ const sanitizePreset = (preset: unknown): Preset | null => {
       TRANSIENT_RUST_KEYS
     ),
     js: pickKnownKeys<Partial<JsConfig>>(
-      typeof js === "object" && js !== null
-        ? (js as Record<string, unknown>)
-        : {},
+      migrateViews(
+        typeof js === "object" && js !== null
+          ? (js as Record<string, unknown>)
+          : {}
+      ),
       isJsConfigKey,
       TRANSIENT_JS_KEYS
     ),

@@ -1,6 +1,5 @@
 import { useEffect, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api";
-import Canvas from "./Canvas";
 import {
   defaultRustConfig,
   RustConfig,
@@ -13,6 +12,11 @@ import {
   ChannelStyle,
   channelStyle,
   BUILT_IN_DRUMS,
+  ViewConfig,
+  defaultViewConfig,
+  isViewConfigKey,
+  copyView,
+  MAX_VIEW_SIDE,
 } from "./config";
 import { Input } from "./Input";
 import { appWindow } from "@tauri-apps/api/window";
@@ -34,6 +38,37 @@ const BROWSER_DEBUG_MODE = !("__TAURI_IPC__" in window);
 // What the sweep paints over old samples with. The whole-cycle refresh clears to
 // the same thing, so both modes sit on the same background.
 const WAVEFORM_BACKGROUND = "#222222";
+
+// The pane arrangements the panel offers, as [across, down].
+const ARRANGEMENTS: [number, number][] = [
+  [1, 1],
+  [2, 1],
+  [1, 2],
+  [3, 1],
+  [2, 2],
+];
+
+// Per-pane mutable draw state. Every pane needs its own: the sweep flush
+// boundary falls where a pixel column ends, and panes disagree about that
+// because they each have their own pixelsPerBeat.
+type ViewDrawState = {
+  // Where the sweep last flushed, in pixels along the loop.
+  canvasPos: number;
+  // Whole-cycle mode: the loudest sample seen in each pixel column so far this
+  // time round, so holding a cycle's worth of audio costs a few thousand
+  // numbers instead of a few hundred thousand samples.
+  cycleColumns: Map<number, number[]>;
+  lastCyclePos: number;
+  // Peak per visible channel since this pane last flushed a column.
+  channelPeaks: number[];
+};
+
+const freshViewState = (): ViewDrawState => ({
+  canvasPos: 0,
+  cycleColumns: new Map(),
+  lastCyclePos: 0,
+  channelPeaks: [],
+});
 
 // const log = <T,>(label: string, x: T) => {
 //   console.log(label, x);
@@ -197,25 +232,104 @@ const App = () => {
     }
   };
 
-  const maxBeatsInRow =
-    Math.max(...get("beatsPerRow")) + get("marginLeft") + get("marginRight");
-  const rowBeatsCumulative = get("beatsPerRow").reduce(
-    (acc, n) => [...acc, acc.slice(-1)[0] + n],
-    [0]
-  );
-  const pixelsPerBeat = get("canvasWidth") / maxBeatsInRow;
-  const canvasRowHeight = get("canvasHeight") / get("beatsPerRow").length;
-  const beatsPerWindow = get("beatsPerRow").reduce((sum, n) => sum + n);
-  const layout: Layout = {
-    beatsPerRow: get("beatsPerRow"),
-    rowStarts: rowBeatsCumulative,
-    beatsPerWindow,
-    pixelsPerBeat,
-    marginLeft: get("marginLeft"),
-    marginRight: get("marginRight"),
+  // Everything one pane needs to draw itself, resolved once per render. The
+  // geometry is layout.ts's; `rowHeight` and the pixel size are the pane's own,
+  // since panes divide the canvas area between them.
+  type ViewCtx = {
+    index: number;
+    cfg: ViewConfig;
+    layout: Layout;
+    rowHeight: number;
+    width: number;
+    height: number;
+    state: ViewDrawState;
   };
 
-  const canvasPos = useRef(0);
+  // Mutated by the draw loop every frame, so a ref rather than state -- none of
+  // it should cause a render. This is also where `channelPeaks` now lives; it
+  // used to be a plain `let` in the component body, which quietly threw away
+  // the accumulated peaks every time React re-rendered.
+  const viewStates = useRef<ViewDrawState[]>([]);
+  const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([]);
+  const [selectedView, setSelectedView] = useState(0);
+
+  const viewCols = get("viewCols");
+  const viewRows = get("viewRows");
+  // Floored once here rather than at the canvas element, so the backing store
+  // and the pixelsPerBeat derived from it can't disagree by a fraction.
+  const cellWidth = Math.max(1, Math.floor(get("canvasWidth") / viewCols));
+  const cellHeight = Math.max(1, Math.floor(get("canvasHeight") / viewRows));
+
+  const viewCtxs: ViewCtx[] = get("views").map((cfg, index) => {
+    const maxBeatsInRow =
+      Math.max(...cfg.beatsPerRow) + cfg.marginLeft + cfg.marginRight;
+    const rowStarts = cfg.beatsPerRow.reduce(
+      (acc, n) => [...acc, acc.slice(-1)[0] + n],
+      [0]
+    );
+    while (viewStates.current.length <= index)
+      viewStates.current.push(freshViewState());
+    return {
+      index,
+      cfg,
+      layout: {
+        beatsPerRow: cfg.beatsPerRow,
+        rowStarts,
+        beatsPerWindow: cfg.beatsPerRow.reduce((sum, n) => sum + n, 0),
+        pixelsPerBeat: cellWidth / maxBeatsInRow,
+        marginLeft: cfg.marginLeft,
+        marginRight: cfg.marginRight,
+      },
+      rowHeight: cellHeight / cfg.beatsPerRow.length,
+      width: cellWidth,
+      height: cellHeight,
+      state: viewStates.current[index],
+    };
+  });
+  // Panes removed by a smaller arrangement shouldn't leave their state behind.
+  viewStates.current.length = viewCtxs.length;
+
+  // Clamped rather than trusted: shrinking the arrangement can leave the
+  // selection pointing past the end until the next render settles.
+  const activeView = Math.min(selectedView, viewCtxs.length - 1);
+
+  // Per-view keys live in `views[i]` rather than in either default object, so
+  // the plain get/set can't route them (a key in the wrong object silently does
+  // nothing -- see CLAUDE.md). Anything else falls through unchanged, so the
+  // panel can mix view and global inputs without caring which is which.
+  const viewSetGet = (index: number) => ({
+    get: (k: string): any =>
+      isViewConfigKey(k)
+        ? (get("views")[index] as Record<string, any>)?.[k]
+        : (get as any)(k),
+    set: (k: string, val: any) => {
+      if (!isViewConfigKey(k)) return (set as any)(k, val);
+      setJsConfig((js) => ({
+        ...js,
+        views: js.views.map((v, i) => (i === index ? { ...v, [k]: val } : v)),
+      }));
+    },
+  });
+
+  // The arrangement is what decides how many panes there are, so it resizes the
+  // list itself -- a separate add/remove control would only be one more thing
+  // to keep in agreement with it. A new pane starts as a copy of the first,
+  // since adding one is nearly always "show me this again, against another grid".
+  const setArrangement = (cols: number, rows: number) => {
+    const c = Math.max(1, Math.min(MAX_VIEW_SIDE, cols));
+    const r = Math.max(1, Math.min(MAX_VIEW_SIDE, rows));
+    const wanted = c * r;
+    setJsConfig((js) => {
+      const views = js.views.slice(0, wanted);
+      while (views.length < wanted)
+        views.push(copyView(views[0] ?? defaultViewConfig()));
+      return { ...js, viewCols: c, viewRows: r, views };
+    });
+    setSelectedView((i) => Math.min(i, wanted - 1));
+  };
+
+  // The pane the panel is currently editing.
+  const viewIO = viewSetGet(activeView);
   // The visual stream as Rust sends it: one beat per frame, `channels` values
   // per beat, flattened so neither side allocates per frame.
   type VisualSamples = { channels: number; beats: number[]; values: number[] };
@@ -233,11 +347,6 @@ const App = () => {
     for (let i = 0; i < batch.values.length; i++)
       held.values.push(batch.values[i]);
   };
-  // Whole-cycle mode: the loudest sample seen in each pixel column so far this
-  // time round, so holding a cycle's worth of audio costs a few thousand
-  // numbers instead of a few hundred thousand samples.
-  const cycleColumns = useRef(new Map<number, number[]>());
-  const lastCyclePos = useRef(0);
   const getArray = async () => {
     appendSamples(await invoke("get_samples"));
   };
@@ -368,14 +477,19 @@ const App = () => {
 
   // The eraser: one dark column covering the row, painted before the channels so
   // the previous pass through this spot is gone.
-  const eraseColumn = (ctx: CanvasRenderingContext2D, x: number, row: number) => {
-    const y = row * canvasRowHeight;
+  const eraseColumn = (
+    ctx: CanvasRenderingContext2D,
+    v: ViewCtx,
+    x: number,
+    row: number
+  ) => {
+    const y = row * v.rowHeight;
     ctx.globalAlpha = 1;
     ctx.strokeStyle = WAVEFORM_BACKGROUND;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.lineTo(x, y + (canvasRowHeight - 1));
+    ctx.lineTo(x, y + (v.rowHeight - 1));
     ctx.stroke();
   };
 
@@ -384,6 +498,7 @@ const App = () => {
   // losing vertical space.
   const drawChannel = (
     ctx: CanvasRenderingContext2D,
+    v: ViewCtx,
     x: number,
     row: number,
     value: number,
@@ -391,16 +506,16 @@ const App = () => {
     isMargin: boolean,
     half: "both" | "up" | "down"
   ) => {
-    const y = row * canvasRowHeight;
-    const height = canvasRowHeight - 1;
-    const v = Math.min(1, Math.max(value, 0));
+    const y = row * v.rowHeight;
+    const height = v.rowHeight - 1;
+    const val = Math.min(1, Math.max(value, 0));
     ctx.lineWidth = 1;
     // Margin copies are repeats of another part of the loop, so they're dimmed
     // the way the single-channel version used a darker grey for them.
     ctx.globalAlpha = style.alpha * (isMargin ? 0.55 : 1);
     ctx.beginPath();
-    if (get("barColorMode")) {
-      const shade = Math.floor(v * 255)
+    if (v.cfg.barColorMode) {
+      const shade = Math.floor(val * 255)
         .toString(16)
         .padStart(2, "0");
       ctx.strokeStyle = `#${shade}${shade}${shade}`;
@@ -408,8 +523,8 @@ const App = () => {
       ctx.lineTo(x, y + height);
     } else {
       ctx.strokeStyle = style.color;
-      const top = half === "down" ? 0.5 : 0.5 - 0.5 * v;
-      const bottom = half === "up" ? 0.5 : 0.5 + 0.5 * v;
+      const top = half === "down" ? 0.5 : 0.5 - 0.5 * val;
+      const bottom = half === "up" ? 0.5 : 0.5 + 0.5 * val;
       ctx.moveTo(x, y + top * height);
       ctx.lineTo(x, y + bottom * height);
     }
@@ -417,44 +532,45 @@ const App = () => {
     ctx.globalAlpha = 1;
   };
 
-  // Resolved once per frame: the style for each *visible* channel, in the order
-  // Rust packs them into the stream.
+  // Resolved once per render: the style for each *visible* channel, in the order
+  // Rust packs them into the stream. Shared by every pane, so a channel keeps
+  // its colour wherever you happen to be looking at it.
   const visibleStyles = get("visibleChannels").map((channel) =>
     channelStyle(get("channelStyles"), channel)
   );
-  const halfFor = (slot: number): "both" | "up" | "down" =>
-    !get("splitChannels") ? "both" : slot % 2 === 0 ? "up" : "down";
+
+  const halfFor = (v: ViewCtx, slot: number): "both" | "up" | "down" =>
+    !v.cfg.splitChannels ? "both" : slot % 2 === 0 ? "up" : "down";
 
   const drawChannelsAt = (
     ctx: CanvasRenderingContext2D,
+    v: ViewCtx,
     x: number,
     row: number,
     isMargin: boolean,
-    peaks: number[],
-    gain: number
+    peaks: number[]
   ) => {
     for (let slot = 0; slot < peaks.length; slot++) {
       const style = visibleStyles[slot];
       if (!style) continue;
       drawChannel(
         ctx,
+        v,
         x,
         row,
-        Math.min(1, peaks[slot] * gain),
+        Math.min(1, peaks[slot] * v.cfg.visualGain),
         style,
         isMargin,
-        halfFor(slot)
+        halfFor(v, slot)
       );
     }
   };
 
-  // Peak per visible channel since the last column was drawn.
-  let channelPeaks: number[] = [];
-
-  // Tiles each grid's rhythm across the window. Drawn last-to-first so the top
-  // of the list ends up on top of the stack.
-  const drawGrids = (ctx: CanvasRenderingContext2D) => {
-    const grids = get("grids");
+  // Tiles each grid's rhythm across the pane. Drawn last-to-first so the top of
+  // the list ends up on top of the stack.
+  const drawGrids = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
+    const grids = v.cfg.grids;
+    const { beatsPerWindow } = v.layout;
     for (let i = grids.length - 1; i >= 0; i--) {
       const grid = grids[i];
       const { notes, end } = grid.subdivisions.val;
@@ -467,11 +583,11 @@ const App = () => {
         for (const note of notes) {
           const b = startBeat + note.time;
           if (b >= beatsPerWindow) break;
-          for (const { x, row } of getCanvasPositions(layout, b)) {
-            const y = row * canvasRowHeight;
+          for (const { x, row } of getCanvasPositions(v.layout, b)) {
+            const y = row * v.rowHeight;
             ctx.beginPath();
             ctx.moveTo(x, y);
-            ctx.lineTo(x, y + canvasRowHeight);
+            ctx.lineTo(x, y + v.rowHeight);
             ctx.stroke();
           }
         }
@@ -483,71 +599,70 @@ const App = () => {
 
   // The default: each column is erased and redrawn as the cursor reaches it, so
   // the newest sample always sits right at the sweep.
-  const drawSweep = (ctx: CanvasRenderingContext2D) => {
+  const drawSweep = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
     const { channels, beats, values } = samples.current;
+    const { beatsPerWindow, pixelsPerBeat } = v.layout;
     if (!(beatsPerWindow > 0) || channels < 1) return;
-    const gain = get("visualGain");
+    const peaks = v.state.channelPeaks;
     for (let i = 0; i < beats.length; i++) {
       for (let c = 0; c < channels; c++) {
         const value = values[i * channels + c];
-        if (channelPeaks[c] === undefined || value > channelPeaks[c]) {
-          channelPeaks[c] = value;
-        }
+        if (peaks[c] === undefined || value > peaks[c]) peaks[c] = value;
       }
       const beat = beats[i];
       // Flush once per step along the loop -- the beat's own progress, not any
       // one copy's position on screen.
       const sweep = (beat % beatsPerWindow) * pixelsPerBeat;
-      if (sweep !== canvasPos.current) {
-        for (const { x, row, isMargin } of getCanvasPositions(layout, beat)) {
-          eraseColumn(ctx, x, row);
-          drawChannelsAt(ctx, x, row, isMargin, channelPeaks, gain);
+      if (sweep !== v.state.canvasPos) {
+        for (const { x, row, isMargin } of getCanvasPositions(v.layout, beat)) {
+          eraseColumn(ctx, v, x, row);
+          drawChannelsAt(ctx, v, x, row, isMargin, peaks);
         }
-        channelPeaks.length = 0;
-        canvasPos.current = sweep;
+        peaks.length = 0;
+        v.state.canvasPos = sweep;
       }
     }
   };
 
-  // Repaints the window from the collected cycle. Clearing first means nothing
-  // of the previous pass can survive underneath -- and unlike the sweep, there's
-  // no per-column erase, so grid lines stay visible behind quiet passages.
-  const paintWholeCycle = (ctx: CanvasRenderingContext2D) => {
+  // Repaints the pane from the collected cycle. Clearing first means nothing of
+  // the previous pass can survive underneath -- and unlike the sweep, there's no
+  // per-column erase, so grid lines stay visible behind quiet passages.
+  const paintWholeCycle = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
     ctx.globalAlpha = 1;
     ctx.fillStyle = WAVEFORM_BACKGROUND;
-    ctx.fillRect(0, 0, get("canvasWidth"), get("canvasHeight"));
-    drawGrids(ctx);
-    const gain = get("visualGain");
-    cycleColumns.current.forEach((peaks, column) => {
+    ctx.fillRect(0, 0, v.width, v.height);
+    drawGrids(ctx, v);
+    v.state.cycleColumns.forEach((peaks, column) => {
       // Every beat inside a column lands on the same pixel, so the middle of it
       // stands in for all of them.
-      const beat = (column + 0.5) / pixelsPerBeat;
-      for (const { x, row, isMargin } of getCanvasPositions(layout, beat)) {
-        drawChannelsAt(ctx, x, row, isMargin, peaks, gain);
+      const beat = (column + 0.5) / v.layout.pixelsPerBeat;
+      for (const { x, row, isMargin } of getCanvasPositions(v.layout, beat)) {
+        drawChannelsAt(ctx, v, x, row, isMargin, peaks);
       }
     });
   };
 
-  // The alternative: hold the picture still and repaint the whole window at once
+  // The alternative: hold the picture still and repaint the whole pane at once
   // when the beat wraps, so a cycle is only ever shown complete.
-  const drawWholeCycle = (ctx: CanvasRenderingContext2D) => {
+  const drawWholeCycle = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
     const { channels, beats, values } = samples.current;
+    const { beatsPerWindow, pixelsPerBeat } = v.layout;
     if (!(beatsPerWindow > 0) || channels < 1) return;
     for (let i = 0; i < beats.length; i++) {
       const beat = beats[i];
       const b = ((beat % beatsPerWindow) + beatsPerWindow) % beatsPerWindow;
-      // The beat only ever moves backwards by wrapping (or by RESET TIME),
-      // which is exactly when the finished cycle should go up.
-      if (b < lastCyclePos.current) {
-        paintWholeCycle(ctx);
-        cycleColumns.current.clear();
+      // The modulo only ever goes backwards when the beat has wrapped past the
+      // end of the window, which is exactly when the finished cycle should go up.
+      if (b < v.state.lastCyclePos) {
+        paintWholeCycle(ctx, v);
+        v.state.cycleColumns.clear();
       }
-      lastCyclePos.current = b;
+      v.state.lastCyclePos = b;
       const column = Math.floor(b * pixelsPerBeat);
-      let peaks = cycleColumns.current.get(column);
+      let peaks = v.state.cycleColumns.get(column);
       if (!peaks || peaks.length !== channels) {
         peaks = new Array(channels).fill(0);
-        cycleColumns.current.set(column, peaks);
+        v.state.cycleColumns.set(column, peaks);
       }
       // Gain is applied at paint time, so changing it restyles the next repaint
       // rather than only affecting samples collected after the change.
@@ -558,15 +673,45 @@ const App = () => {
     }
   };
 
-  const draw = (ctx: CanvasRenderingContext2D, frameCount: number) => {
-    if (get("refreshAtCycleEnd")) {
-      drawWholeCycle(ctx);
+  const drawView = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
+    if (v.cfg.refreshAtCycleEnd) {
+      drawWholeCycle(ctx, v);
     } else {
-      drawGrids(ctx);
-      drawSweep(ctx);
+      drawGrids(ctx, v);
+      drawSweep(ctx, v);
     }
-    samples.current = { channels: samples.current.channels, beats: [], values: [] };
   };
+
+  // One loop driving every pane, so the batch is drained once, after all of them
+  // have read it. Each pane used to be a Canvas that ran its own
+  // requestAnimationFrame and cleared the buffer itself; with more than one
+  // that races, and whichever drew first would eat the samples.
+  const drawAll = () => {
+    for (const v of viewCtxs) {
+      const ctx = canvasRefs.current[v.index]?.getContext("2d");
+      if (ctx) drawView(ctx, v);
+    }
+    samples.current = {
+      channels: samples.current.channels,
+      beats: [],
+      values: [],
+    };
+  };
+
+  // The loop reaches the newest drawAll through a ref instead of depending on
+  // it: the old `[draw]` dependency tore the animation loop down and rebuilt it
+  // on every render, since that closure was new each time.
+  const drawAllRef = useRef(drawAll);
+  drawAllRef.current = drawAll;
+  useEffect(() => {
+    let id: number;
+    const render = () => {
+      drawAllRef.current();
+      id = window.requestAnimationFrame(render);
+    };
+    render();
+    return () => window.cancelAnimationFrame(id);
+  }, []);
 
   // const Input = ({ label, _key }: { label: string; _key: string }) => (
   // <RealInput label={label} _key={_key} set={set} get={get} />
@@ -653,7 +798,6 @@ const App = () => {
 
         <Section label="gain">
           <Input label="input gain" _key="audioInGain" set={set} get={get} />
-          <Input label="visual gain" _key="visualGain" set={set} get={get} />
         </Section>
 
         <Section label="looping">
@@ -684,20 +828,64 @@ const App = () => {
             set={set}
             get={get}
           />
-          <Input label="beats per row" _key="beatsPerRow" set={set} get={get} />
-          <Input label="left margin" _key="marginLeft" set={set} get={get} />
-          <Input label="right margin" _key="marginRight" set={set} get={get} />
-          <Input
-            label="bar color mode"
-            _key="barColorMode"
-            set={set}
-            get={get}
-          />
+        </Section>
+
+        <Section label="views">
+          <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
+            <label>arrangement</label>
+            <select
+              value={`${viewCols}x${viewRows}`}
+              onChange={(e) => {
+                const [cols, rows] = e.target.value.split("x").map(Number);
+                setArrangement(cols, rows);
+              }}
+            >
+              {ARRANGEMENTS.map(([cols, rows]) => (
+                <option key={`${cols}x${rows}`} value={`${cols}x${rows}`}>
+                  {cols} across x {rows} down
+                </option>
+              ))}
+            </select>
+          </div>
+          {viewCtxs.length > 1 && (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "row",
+                flexWrap: "wrap",
+                gap: "2px",
+                margin: "4px 0",
+              }}
+            >
+              {viewCtxs.map((v) => (
+                <button
+                  key={v.index}
+                  onClick={() => setSelectedView(v.index)}
+                  style={{
+                    flex: 1,
+                    fontWeight: v.index === activeView ? "bold" : "normal",
+                    backgroundColor: v.index === activeView ? "#666" : undefined,
+                  }}
+                >
+                  view {v.index + 1}
+                </button>
+              ))}
+            </div>
+          )}
+          <Input label="beats per row" _key="beatsPerRow" {...viewIO} />
+          <Input label="left margin" _key="marginLeft" {...viewIO} />
+          <Input label="right margin" _key="marginRight" {...viewIO} />
+          <Input label="visual gain" _key="visualGain" {...viewIO} />
+          <Input label="split up/down" _key="splitChannels" {...viewIO} />
+          <Input label="bar color mode" _key="barColorMode" {...viewIO} />
           <Input
             label="refresh at cycle end"
             _key="refreshAtCycleEnd"
-            set={set}
-            get={get}
+            {...viewIO}
+          />
+          <GridList
+            grids={viewCtxs[activeView]?.cfg.grids ?? []}
+            setGrids={(grids) => viewIO.set("grids", grids)}
           />
         </Section>
 
@@ -711,19 +899,6 @@ const App = () => {
             setVisible={(next) => set("visibleChannels", next)}
             setStyles={(next) => set("channelStyles", next)}
             setPans={(next) => set("channelPans", next)}
-          />
-          <Input
-            label="split up/down"
-            _key="splitChannels"
-            set={set}
-            get={get}
-          />
-        </Section>
-
-        <Section label="grids">
-          <GridList
-            grids={get("grids")}
-            setGrids={(grids) => set("grids", grids)}
           />
         </Section>
 
@@ -743,22 +918,30 @@ const App = () => {
   );
 
   const waveform = (
-    <div style={{ width: "100%", height: "100%" }}>
-      <Canvas
-        // @ts-expect-error TODO figure out canvas draw type
-        draw={draw}
-        onClick={() => setHideConfig(!hideConfig)}
-        style={{
-          // border: "1px solid black",
-          // height: get("canvasHeight") / 2 + "px",
-          height: "100%",
-          margin: "1px",
-          // width: get("canvasWidth") / 2 + "px",
-          width: "100%",
-        }}
-        width={get("canvasWidth")}
-        height={get("canvasHeight")}
-      />
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        display: "grid",
+        gridTemplateColumns: `repeat(${viewCols}, 1fr)`,
+        gridTemplateRows: `repeat(${viewRows}, 1fr)`,
+        gap: "2px",
+      }}
+    >
+      {viewCtxs.map((v) => (
+        <canvas
+          key={v.index}
+          ref={(el) => {
+            canvasRefs.current[v.index] = el;
+          }}
+          onClick={() => setHideConfig(!hideConfig)}
+          // Setting either attribute blanks the canvas, which is what you want
+          // anyway on the resize or rearrangement that changes them.
+          width={v.width}
+          height={v.height}
+          style={{ width: "100%", height: "100%", display: "block" }}
+        />
+      ))}
     </div>
   );
 

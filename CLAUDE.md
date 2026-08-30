@@ -62,9 +62,10 @@ position, looper) derives from it.
 
 ## The config system — sharp edges
 
-Config is split in two by *where it's needed*: `defaultRustConfig` (audio) and
-`defaultJsConfig` (display). `get(key)` / `set(key, value)` route by which object
-the key lives in. Adding a key to the wrong one silently does nothing.
+Config is split three ways by *where it's needed*: `defaultRustConfig` (audio),
+`defaultJsConfig` (display, global), and `defaultViewConfig` (display, per-pane).
+`get(key)` / `set(key, value)` route by which of the first two the key lives in.
+Adding a key to the wrong one silently does nothing.
 
 Rules that will bite you:
 
@@ -77,6 +78,12 @@ Rules that will bite you:
 - **The `react-hooks` eslint plugin is not loaded.** An
   `// eslint-disable-next-line react-hooks/exhaustive-deps` comment is itself a
   *build error* ("Definition for rule … was not found"). Don't add one.
+- **View keys are unreachable from the plain `get`/`set`.** They live in
+  `views[i]`, in neither default object, so `isRustConfigKey` and `isJsConfigKey`
+  both miss and `set` does nothing. `Config` includes `ViewConfig` only so
+  `Input` can be typed against those keys; the panel reaches them through the
+  view-scoped pair `viewSetGet(i)` returns, which falls through to the global
+  `get`/`set` for everything else.
 - **Transient keys.** `presets.ts` excludes `canvasWidth`/`canvasHeight`
   (derived from window size) and `paused` (transport state) from both presets
   and the saved session.
@@ -128,6 +135,37 @@ every channel. Loop length and compensation timing are unchanged by that
 rewrite — verified arithmetically.
 
 ## Display pipeline
+
+### Views
+
+The canvas area is divided into panes, one `<canvas>` each, on a CSS grid of
+`viewCols` x `viewRows`. The point is to watch one performance against two
+rulings at once -- `0.25x16` on the left, `0.3333x12` on the right -- so rows,
+margins, grids, visual gain, split, bar-colour mode and refresh mode are all
+per-pane, held in `views: ViewConfig[]`.
+
+- **`views.length === viewCols * viewRows` is an invariant.** The arrangement is
+  the only control over how many panes exist; `setArrangement` resizes the list,
+  and `migrateViews` re-squares it on load. Growing copies pane 0 (adding one is
+  nearly always "the same thing, against another grid"), shrinking truncates.
+- **A view's arrays must never be shared between panes.** `copyView` deep-copies
+  for exactly this reason -- two panes pointing at one `grids` array means
+  editing either edits both.
+- **Sessions from before views** carried these keys at the top level of the js
+  config. `migrateViews` folds them into `views[0]` *before* `pickKnownKeys`
+  runs, since that drops keys it doesn't recognise -- without it an upgrade
+  would silently reset someone's rows and grids.
+- **One `requestAnimationFrame` loop, in `App`.** It draws every pane and then
+  drains the sample batch **once**, after all of them have read it. `Canvas.tsx`
+  used to own the loop and clear the buffer itself; with more than one pane that
+  races, and whichever drew first would eat the samples. The loop reads the
+  current draw closure through a ref rather than depending on it -- the old
+  `[draw]` dependency rebuilt the loop on every render.
+- **Draw state is per-pane** (`ViewDrawState`): sweep position, cycle columns,
+  and channel peaks. Panes disagree about where a pixel column ends, because
+  `pixelsPerBeat` is derived from each pane's own cell width.
+- Only `channelStyles` and the channel selection stay global, so a channel keeps
+  its colour in every pane.
 
 `getCanvasPositions(layout, beat)` in `layout.ts` returns **every** place a beat
 appears on screen. Each row draws its own beats plus `marginLeft` beats of lead-in
@@ -220,7 +258,7 @@ can refer to one without knowing the install path.
 - A zero-length `beatsToLoop` used to panic; guarded now, but similar bare
   indexing exists elsewhere.
 
-## State as of 2026-08-24
+## State as of 2026-08-29
 
 Verified by the owner in the real app: single-channel input, 2-channel input with
 up/down split, per-channel looping, the scrollable settings panel.
@@ -230,8 +268,12 @@ drums/click display buses. The click's timbre was preserved *by construction*
 (its counter and per-channel RNG were deliberately left untouched) rather than by
 listening.
 
-Uncommitted at time of writing: the click display bus, and gating the drum bus on
-`drumOn` so both buses show only what's audible.
+Multiple views are new and **not yet verified on screen** -- the build passes and
+the session migration is covered by a temp test that was run and deleted, but
+nobody has looked at two panes side by side yet. Worth checking first: that the
+two panes sweep independently, that a restored pre-views session comes back with
+its old rows and grids intact, and that switching arrangement doesn't leave stale
+pixels in a pane.
 
 ## Discussed but not built
 
@@ -251,6 +293,18 @@ Uncommitted at time of writing: the click display bus, and gating the drum bus o
   (a new note on one string while another sustains needs frequency-domain work),
   and the amplitude envelope is genuinely informative for sustain and volume.
 - Per-channel loop buffers exist now, but per-channel *input gain* does not.
+- **Per-view channel selection.** The one item from the views work that isn't
+  frontend-only. `visibleChannels` is a *Rust* key -- it decides what the
+  callback packs into the flattened stream -- and `visibleStyles[slot]` assumes
+  stream slot order equals `visibleChannels` order. Doing it per-pane means Rust
+  sending the union and the frontend carrying a slot -> device-channel map so
+  each pane can pick its subset.
+- **High-passing the display signal.** Transients are HF-rich and steady tone is
+  LF-dominant, so a high-pass before the `.abs()` in `main.rs` would lift attacks
+  out of the picture; at the zoom levels in use (~3.6 samples per pixel column at
+  `0.25x16` and 140bpm) the waveform is drawn nearly raw, so the slow humps are
+  cycles of the fundamental rather than note envelopes. Deferred with onset
+  detection, whose first stage this is -- not throwaway work when it happens.
 
 ## Conventions
 

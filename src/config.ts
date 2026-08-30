@@ -147,11 +147,28 @@ export const GRID_COLORS = [
   "#aaff33",
 ];
 
-export const defaultJsConfig = {
-  barColorMode: false,
+// One pane of the waveform display. Everything here is per-view, so two panes
+// can show the same audio against different grids and row lengths -- looking
+// back and forth between 16ths and triplets is the whole point of having more
+// than one.
+export type ViewConfig = {
+  beatsPerRow: number[];
+  marginLeft: number;
+  marginRight: number;
+  grids: VisualGrid[];
+  visualGain: number;
+  barColorMode: boolean;
+  refreshAtCycleEnd: boolean;
+  // Draw the first visible channel above the centre line and the second below,
+  // instead of overlaying them. With more than two, even slots go up and odd
+  // slots go down.
+  splitChannels: boolean;
+};
+
+// A factory rather than a constant: each view needs grid and row arrays of its
+// own, or editing one pane's would edit every pane's.
+export const defaultViewConfig = (): ViewConfig => ({
   beatsPerRow: [2, 2],
-  canvasHeight: 1000,
-  canvasWidth: 2000,
   marginLeft: 0.11,
   marginRight: 0.11,
   grids: [
@@ -164,15 +181,32 @@ export const defaultJsConfig = {
         type: "parser2",
       },
     },
-  ] as VisualGrid[],
-  subdivisionOffset: 0,
-  refreshAtCycleEnd: false,
-  channelStyles: [] as ChannelStyle[],
-  // Draw the first visible channel above the centre line and the second below,
-  // instead of overlaying them. With more than two, even slots go up and odd
-  // slots go down.
-  splitChannels: false,
+  ],
   visualGain: 10,
+  barColorMode: false,
+  refreshAtCycleEnd: false,
+  splitChannels: false,
+});
+
+// A pane grid past this is unreadable long before it's slow, and it keeps a
+// stored 40x40 from building 1600 canvases on load.
+export const MAX_VIEW_SIDE = 4;
+
+// Views are copied rather than shared so two panes never end up pointing at one
+// grid array, where editing either would edit both.
+export const copyView = (view: ViewConfig): ViewConfig =>
+  JSON.parse(JSON.stringify(view));
+
+export const defaultJsConfig = {
+  canvasHeight: 1000,
+  canvasWidth: 2000,
+  subdivisionOffset: 0,
+  channelStyles: [] as ChannelStyle[],
+  views: [defaultViewConfig()] as ViewConfig[],
+  // The pane arrangement. `views.length` is held equal to viewCols * viewRows,
+  // so changing either resizes the list rather than letting the two disagree.
+  viewCols: 1,
+  viewRows: 1,
 };
 
 export type RustConfig = typeof defaultRustConfig;
@@ -189,6 +223,17 @@ export type JsConfigKey = keyof JsConfig;
 export const isJsConfigKey = (k: string): k is JsConfigKey =>
   k in defaultJsConfig;
 
-export type Config = RustConfig & JsConfig;
+export type ViewConfigKey = keyof ViewConfig;
+
+// Checked against a throwaway instance because defaultViewConfig is a factory.
+const VIEW_CONFIG_TEMPLATE = defaultViewConfig();
+
+export const isViewConfigKey = (k: string): k is ViewConfigKey =>
+  k in VIEW_CONFIG_TEMPLATE;
+
+// View keys are in here so `Input` can be typed against them, but they live in
+// neither default object -- the plain get/set can't reach them, only the
+// view-scoped pair App hands to the per-view panel.
+export type Config = RustConfig & JsConfig & ViewConfig;
 
 export type ConfigKey = keyof Config;
