@@ -3,6 +3,7 @@
     windows_subsystem = "windows"
 )]
 
+mod analysis;
 mod commands;
 mod constants;
 mod get_loop_buffer_size;
@@ -14,16 +15,19 @@ mod util;
 
 extern crate coreaudio;
 
+use crate::analysis::{Analyzer, BINS, MAX_ANALYSIS_CHANNELS, WINDOW};
 use crate::commands::{
-    get_input_channel_count, get_samples, load_drum_sample, reset_beat, set_config, set_mp3_buffer,
+    get_analysis, get_input_channel_count, get_samples, load_drum_sample, reset_beat, set_config,
+    set_mp3_buffer,
 };
 use crate::constants::{default_config, MAX_INPUT_BACKLOG, SAMPLE_RATE};
 use crate::get_loop_buffer_size::{get_loop_buffer_size, get_loop_spacing, loop_echo_count};
 use crate::io_channels::{get_input_output_channels, make_buffers, start_input_audio_unit};
 use crate::read_audio_file::get_samples_from_filename;
 use crate::structs::{
-    BeatResetState, BusDelay, ConfigState, DrumSamples, InputChannelCount, LogState, LoopBuffer,
-    LoopBufferState, Mp3Buffer, Mp3BufferState, SampleOutputBuffer, SoundingSample,
+    AnalysisOutputBuffer, BeatResetState, BusDelay, ConfigState, DrumSamples, InputChannelCount,
+    LogState, LoopBuffer, LoopBufferState, Mp3Buffer, Mp3BufferState, SampleOutputBuffer,
+    SoundingSample,
 };
 use crate::types::{Args, S};
 use crate::util::{beat_bisect, mod_add};
@@ -100,6 +104,9 @@ fn main() -> Result<(), coreaudio::Error> {
     // The drums and the click are generated here rather than captured, so they
     // have to be held back to land on the same visual beat as the input.
     let mut bus_delay = BusDelay::new();
+    // The FFT planner and its scratch space are built here, once, so the
+    // callback only ever runs the transform.
+    let mut analyzer = Analyzer::new(SAMPLE_RATE);
 
     let mut click_sound_counter: i32 = 0;
     let mut rng = rand::thread_rng();
@@ -114,6 +121,11 @@ fn main() -> Result<(), coreaudio::Error> {
         buffer: Default::default(),
     };
     let sample_output_buffer_clone = sample_output_buffer.buffer.clone();
+
+    let analysis_output_buffer = AnalysisOutputBuffer {
+        buffer: Default::default(),
+    };
+    let analysis_output_buffer_clone = analysis_output_buffer.buffer.clone();
 
     let loop_buffer_size: usize;
     {
@@ -161,6 +173,9 @@ fn main() -> Result<(), coreaudio::Error> {
         if should_reset_beat.load(std::sync::atomic::Ordering::Relaxed) {
             beat = 0.0;
             mp3.pos = 0;
+            // A window stitched across the jump is a spectral edge nobody
+            // played, and it would read as a phantom transient.
+            analyzer.reset();
             should_reset_beat_arc.store(false, std::sync::atomic::Ordering::Relaxed);
         }
 
@@ -173,6 +188,9 @@ fn main() -> Result<(), coreaudio::Error> {
         // input unit keeps pushing would grow it without bound and then play
         // back a pause-length backlog of stale audio on resume.
         if config.paused {
+            // Same reason as the beat reset: the frames either side of a pause
+            // aren't adjacent, so the history can't carry across it.
+            analyzer.reset();
             for buffer in buffers.iter_mut() {
                 let drop_count = num_frames.min(buffer.len());
                 buffer.drain(..drop_count);
@@ -222,6 +240,15 @@ fn main() -> Result<(), coreaudio::Error> {
         // retrigger the others.
         drum_last_beats.resize(config.drums.len(), isize::MIN);
         bus_delay.resize(config.buffer_compensation);
+        // Capped because a 16-input interface would otherwise cost 16 FFTs a
+        // hop to look at one channel. Zero when analysis is off, which drops
+        // the ring and stops any work happening at all.
+        let analysis_channels = if config.analysis_on {
+            input_frame.len().min(MAX_ANALYSIS_CHANNELS)
+        } else {
+            0
+        };
+        analyzer.resize(analysis_channels);
 
         let loop_spacing = get_loop_spacing(&config);
         tap_gains.resize(loop_echo_count(&config), 0.0);
@@ -231,6 +258,24 @@ fn main() -> Result<(), coreaudio::Error> {
             for tap in tap_gains.iter_mut() {
                 *tap = gain;
                 gain *= feedback;
+            }
+        }
+
+        // Locked once per callback alongside the sample buffer, so the frame
+        // loop only ever pushes into it.
+        let mut analysis_out = if analysis_channels > 0 {
+            analysis_output_buffer_clone.lock().ok()
+        } else {
+            None
+        };
+        if let Some(frames) = analysis_out.as_deref_mut() {
+            // The channel count is the row width of the flattened mags, so
+            // anything collected under the old one can't be read as the new.
+            if frames.channels != analysis_channels || frames.bins != BINS {
+                frames.channels = analysis_channels;
+                frames.bins = BINS;
+                frames.beats.clear();
+                frames.mags.clear();
             }
         }
 
@@ -262,6 +307,25 @@ fn main() -> Result<(), coreaudio::Error> {
 
                 let visual_beat =
                     beat - (config.buffer_compensation as f64) * beats_per_sample;
+
+                // Per frame, not per output channel -- this advances the ring.
+                if let Some(frames) = analysis_out.as_deref_mut() {
+                    if analyzer.push(&input_frame) {
+                        // The hop that just completed describes the window
+                        // centred half a window behind this frame, so its stamp
+                        // is this frame's visual beat less that half window.
+                        // Stamping it here instead would draw every column
+                        // ~12ms late -- about 30 pixels at 0.25x16 and 140bpm,
+                        // which reads as the FFT being wrong rather than the
+                        // stamp.
+                        frames.beats.push(
+                            visual_beat - (WINDOW as f64 / 2.0) * beats_per_sample,
+                        );
+                        for ch in 0..analyzer.channels() {
+                            analyzer.analyze_into(ch, &mut frames.mags);
+                        }
+                    }
+                }
                 // The loop is read and written once per frame, per channel --
                 // not inside the output loop, which would advance the position
                 // once per *output* channel and mix every input into one track.
@@ -465,6 +529,7 @@ fn main() -> Result<(), coreaudio::Error> {
 
     tauri::Builder::default()
         .manage(sample_output_buffer)
+        .manage(analysis_output_buffer)
         .manage(config_state)
         .manage(loop_buffer_state)
         .manage(mp3_state)
@@ -474,6 +539,7 @@ fn main() -> Result<(), coreaudio::Error> {
         .manage(drum_samples_state)
         .invoke_handler(tauri::generate_handler![
             get_samples,
+            get_analysis,
             set_config,
             reset_beat,
             set_mp3_buffer,

@@ -33,6 +33,7 @@ pub fn default_config() -> Config {
         audio_monitor_on: false,
         buffer_compensation: 4330,
         paused: false,
+        analysis_on: true,
         visible_channels: vec![0],
         channel_pans: vec![],
         audio_subdivisions: ParserRhythm {

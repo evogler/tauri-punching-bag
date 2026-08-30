@@ -24,6 +24,10 @@ import {
   resolveJsConfig,
   resolveRustConfig,
   viewRowBeats,
+  ANALYSIS_BINS,
+  MAX_ANALYSIS_CHANNELS,
+  VIEW_KINDS,
+  ViewKind,
 } from "./config";
 import { Input } from "./Input";
 import { appWindow } from "@tauri-apps/api/window";
@@ -33,6 +37,7 @@ import { PresetBar } from "./PresetBar";
 import { Preset, makePreset, readSession, writeSession } from "./presets";
 import { GridList } from "./GridList";
 import { RowColorList } from "./RowColorList";
+import { SpectrogramControls } from "./SpectrogramControls";
 import { ParameterList } from "./ParameterList";
 import { Layout, getCanvasPositions } from "./layout";
 import { ChannelList } from "./ChannelList";
@@ -70,6 +75,12 @@ type ViewDrawState = {
   lastCyclePos: number;
   // Peak per visible channel since this pane last flushed a column.
   channelPeaks: number[];
+  // Spectrogram: peak per frequency bin since the last flush, and the beat of
+  // the hop that flush painted. The gap between the two is how wide the next
+  // column has to be -- at 172 hops/sec a hop can be dozens of pixels apart, so
+  // a one-pixel line per hop would draw a picket fence rather than a picture.
+  binPeaks: number[];
+  lastHopBeat: number;
 };
 
 const freshViewState = (): ViewDrawState => ({
@@ -77,6 +88,8 @@ const freshViewState = (): ViewDrawState => ({
   cycleColumns: new Map(),
   lastCyclePos: 0,
   channelPeaks: [],
+  binPeaks: [],
+  lastHopBeat: NaN,
 });
 
 // const log = <T,>(label: string, x: T) => {
@@ -380,11 +393,41 @@ const App = () => {
     for (let i = 0; i < batch.values.length; i++)
       held.values.push(batch.values[i]);
   };
+  // The spectrogram stream: one entry in `beats` per hop, `channels * bins`
+  // bytes after it. Separate from the sample stream because it arrives 256
+  // times more slowly -- see AnalysisFrames in structs.rs.
+  type AnalysisFrames = {
+    channels: number;
+    bins: number;
+    beats: number[];
+    mags: number[];
+  };
+  const analysis = useRef<AnalysisFrames>({
+    channels: 0,
+    bins: 0,
+    beats: [],
+    mags: [],
+  });
+  const appendAnalysis = (batch: AnalysisFrames) => {
+    const held = analysis.current;
+    // Either number changes the row width of the flattened mags, so what was
+    // collected under the old shape can't be read as the new one.
+    if (held.channels !== batch.channels || held.bins !== batch.bins) {
+      analysis.current = batch;
+      return;
+    }
+    // One at a time, for the same reason as appendSamples: a spread of a long
+    // backlog can blow the stack.
+    for (let i = 0; i < batch.beats.length; i++) held.beats.push(batch.beats[i]);
+    for (let i = 0; i < batch.mags.length; i++) held.mags.push(batch.mags[i]);
+  };
   const getArray = async () => {
     appendSamples(await invoke("get_samples"));
+    appendAnalysis(await invoke("get_analysis"));
   };
 
   const mockGetArrayPos = useRef(0);
+  const mockHopBeat = useRef(0);
   const beatsPerSample = 91 / 60 / 44100;
   const mockGetArray = async () => {
     const channels = Math.max(1, get("visibleChannels").length);
@@ -403,6 +446,28 @@ const App = () => {
       mockGetArrayPos.current += beatsPerSample;
     }
     appendSamples(batch);
+    // A hop every 256 frames, matching HOP in analysis.rs, so the spectrogram
+    // path can be looked at in the browser too. A drifting band, not noise --
+    // a picture that's obviously wrong is easier to spot than static.
+    const frames: AnalysisFrames = {
+      channels: 2,
+      bins: ANALYSIS_BINS,
+      beats: [],
+      mags: [],
+    };
+    while (mockHopBeat.current < mockGetArrayPos.current) {
+      const beat = mockHopBeat.current;
+      mockHopBeat.current += 256 * beatsPerSample;
+      frames.beats.push(beat);
+      for (let c = 0; c < frames.channels; c++) {
+        const centre = ANALYSIS_BINS * (0.5 + 0.4 * Math.sin(beat * 2 + c));
+        for (let b = 0; b < ANALYSIS_BINS; b++)
+          frames.mags.push(
+            Math.round(255 * Math.exp(-Math.abs(b - centre) / 4))
+          );
+      }
+    }
+    appendAnalysis(frames);
   };
 
   // Decoding happens in Rust and is keyed by path, so the frontend only has to
@@ -663,6 +728,106 @@ const App = () => {
     }
   };
 
+  // One hop's worth of spectrum, painted as a stack of rects filling the row:
+  // bin 0 (the low end) at the bottom, so the picture reads the way a
+  // spectrogram is expected to. `width` covers the span the accumulated hops
+  // describe, which at high zoom is far more than a pixel.
+  const drawSpectrumColumn = (
+    ctx: CanvasRenderingContext2D,
+    v: ViewCtx,
+    x: number,
+    width: number,
+    row: number,
+    peaks: number[],
+    style: ChannelStyle,
+    isMargin: boolean
+  ) => {
+    const y = row * v.rowHeight;
+    const height = v.rowHeight - 1;
+    // The column is drawn backwards from `x`: the hops in it cover the span
+    // ending at this beat, so anchoring them forward would put every one of
+    // them a whole hop late.
+    const left = x - width;
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = WAVEFORM_BACKGROUND;
+    ctx.fillRect(left, y, width, height);
+    ctx.fillStyle = style.color;
+    const floor = v.cfg.spectrogramFloor;
+    const span = Math.max(1e-6, 1 - floor);
+    const bins = peaks.length;
+    for (let b = 0; b < bins; b++) {
+      const level = ((peaks[b] / 255 - floor) / span) * v.cfg.spectrogramGain;
+      if (!(level > 0)) continue;
+      const top = y + height * (1 - (b + 1) / bins);
+      const bottom = y + height * (1 - b / bins);
+      // Ceil rather than round: fractional bin heights would otherwise leave
+      // background-coloured seams between the rects.
+      ctx.globalAlpha =
+        Math.min(1, level) * style.alpha * (isMargin ? 0.55 : 1);
+      ctx.fillRect(left, top, width, Math.ceil(bottom - top));
+    }
+    ctx.globalAlpha = 1;
+  };
+
+  // The spectrogram sweep. Same shape as drawSweep -- accumulate, flush when
+  // the column moves on -- but the accumulator is one value per frequency bin
+  // and the flush boundary is a whole pixel: hops arrive 172 times a second, so
+  // at low zoom several land in one column and the loudest has to win rather
+  // than the last one overwriting the rest.
+  const drawSpectrogram = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
+    const { channels, bins, beats, mags } = analysis.current;
+    const { beatsPerWindow, pixelsPerBeat } = v.layout;
+    if (!(beatsPerWindow > 0) || channels < 1 || bins < 1) return;
+    // A device channel past what Rust analysed -- a synthetic bus, or beyond
+    // the cap. Nothing to show rather than a misread of another channel.
+    const channel = v.cfg.spectrogramChannel;
+    if (channel < 0 || channel >= channels) return;
+    const style = channelStyle(get("channelStyles"), channel);
+    const peaks = v.state.binPeaks;
+    if (peaks.length !== bins) peaks.length = 0;
+    for (let i = 0; i < beats.length; i++) {
+      const base = (i * channels + channel) * bins;
+      for (let b = 0; b < bins; b++) {
+        const value = mags[base + b];
+        if (peaks[b] === undefined || value > peaks[b]) peaks[b] = value;
+      }
+      const beat = beats[i];
+      const column = Math.floor((beat % beatsPerWindow) * pixelsPerBeat);
+      if (column !== v.state.canvasPos) {
+        // How much of the loop this column stands for. NaN on the first hop
+        // after a reset, and negative where the beat wrapped past the end of
+        // the window -- both mean "just this pixel".
+        const spanBeats = beat - v.state.lastHopBeat;
+        const width = Math.min(
+          v.width,
+          Math.max(1, Math.ceil(spanBeats * pixelsPerBeat) || 1)
+        );
+        const positions = getCanvasPositions(v.layout, beat);
+        for (const { x, row, isMargin } of positions) {
+          drawSpectrumColumn(ctx, v, x, width, row, peaks, style, isMargin);
+        }
+        // Grids over the spectrum rather than under it -- a column fills the
+        // whole row height, so anything beneath it is gone, and seeing the
+        // grid across the picture is most of the point. Clipped to the columns
+        // just painted so each line is composited exactly once: repainting the
+        // whole pane's grids every frame would drive any alpha below 1 to
+        // opaque within a few frames.
+        if (positions.length) {
+          ctx.save();
+          ctx.beginPath();
+          for (const { x, row } of positions)
+            ctx.rect(x - width, row * v.rowHeight, width, v.rowHeight);
+          ctx.clip();
+          drawGrids(ctx, v);
+          ctx.restore();
+        }
+        peaks.length = 0;
+        v.state.canvasPos = column;
+        v.state.lastHopBeat = beat;
+      }
+    }
+  };
+
   // Repaints the pane from the collected cycle. Clearing first means nothing of
   // the previous pass can survive underneath -- and unlike the sweep, there's no
   // per-column erase, so grid lines stay visible behind quiet passages.
@@ -713,7 +878,11 @@ const App = () => {
   };
 
   const drawView = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
-    if (v.cfg.refreshAtCycleEnd) {
+    if (v.cfg.kind === "spectrogram") {
+      // Draws its own grids, per column and on top -- see drawSpectrogram.
+      // `refreshAtCycleEnd` is a waveform mode and is ignored here.
+      drawSpectrogram(ctx, v);
+    } else if (v.cfg.refreshAtCycleEnd) {
       drawWholeCycle(ctx, v);
     } else {
       drawGrids(ctx, v);
@@ -734,6 +903,12 @@ const App = () => {
       channels: samples.current.channels,
       beats: [],
       values: [],
+    };
+    analysis.current = {
+      channels: analysis.current.channels,
+      bins: analysis.current.bins,
+      beats: [],
+      mags: [],
     };
   };
 
@@ -887,6 +1062,12 @@ const App = () => {
             set={set}
             get={get}
           />
+          <Input
+            label="spectrum analysis"
+            _key="analysisOn"
+            set={set}
+            get={get}
+          />
         </Section>
 
         <Section label="parameters">
@@ -937,6 +1118,30 @@ const App = () => {
                 </button>
               ))}
             </div>
+          )}
+          <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
+            <label>kind</label>
+            <select
+              value={viewCtxs[activeView]?.cfg.kind ?? "waveform"}
+              onChange={(e) => viewIO.set("kind", e.target.value as ViewKind)}
+              title="What the pane's vertical axis means"
+            >
+              {VIEW_KINDS.map((kind) => (
+                <option key={kind} value={kind}>
+                  {kind}
+                </option>
+              ))}
+            </select>
+          </div>
+          {viewCtxs[activeView]?.cfg.kind === "spectrogram" && (
+            <SpectrogramControls
+              cfg={viewCtxs[activeView].cfg}
+              labels={channelLabels}
+              // Only the real inputs are analysed, and only the first few of
+              // them -- the buses aren't captured and have no spectrum.
+              count={Math.min(inputChannelCount, MAX_ANALYSIS_CHANNELS)}
+              set={viewIO.set}
+            />
           )}
           <Input
             label="beats per row"

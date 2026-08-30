@@ -123,6 +123,11 @@ export const defaultRustConfig = {
   loopEchoGain: numExpr(1),
   bpm: numExpr(91),
   bufferCompensation: numExpr(4330),
+  // Whether Rust runs the spectrogram FFTs at all. Off costs nothing on the
+  // audio thread and sends nothing, so a session with no spectrogram pane can
+  // switch it off. Not derived from the panes: that would mean writing rust
+  // config from a render, which is a loop waiting to happen.
+  analysisOn: true,
   paused: false,
   // Which input channels get sent to the display, by device channel index.
   visibleChannels: [0] as number[],
@@ -228,6 +233,19 @@ export const ROW_COLORS = [
 // back and forth between 16ths and triplets is the whole point of having more
 // than one.
 export type ViewConfig = {
+  // What the y axis of the pane means: amplitude, or frequency. Everything
+  // else -- rows, margins, grids, the sweep -- is shared between the two.
+  kind: ViewKind;
+  // Which *device* input channel the spectrogram shows. The analysis stream
+  // carries the input channels in device order (up to Rust's cap), not the
+  // `visibleChannels` subset, so this indexes it directly.
+  spectrogramChannel: number;
+  // Multiplies the normalised u8 magnitude, after the floor is subtracted.
+  spectrogramGain: number;
+  // 0..1 on the u8 scale: everything at or below it draws as background. The
+  // dB range Rust sends is deliberately wide, so this is where the noise floor
+  // actually gets chosen -- and changing it never pushes config across.
+  spectrogramFloor: number;
   beatsPerRow: NumberListExpr;
   marginLeft: NumberExpr;
   marginRight: NumberExpr;
@@ -279,7 +297,24 @@ export const viewRowBeats = (view: ViewConfig): number[] => {
   return rows.length ? rows : [1];
 };
 
+export type ViewKind = "waveform" | "spectrogram";
+
+export const VIEW_KINDS: ViewKind[] = ["waveform", "spectrogram"];
+
+// Must match MAX_ANALYSIS_CHANNELS in src-tauri/src/analysis.rs. Duplicated
+// rather than plumbed across because it only bounds the channel picker here.
+export const MAX_ANALYSIS_CHANNELS = 4;
+
+// How many bins Rust groups the spectrum into. Duplicated rather than plumbed
+// across because the stream says its own `bins` -- this is only the fallback
+// the draw code sizes a fresh accumulator from.
+export const ANALYSIS_BINS = 64;
+
 export const defaultViewConfig = (): ViewConfig => ({
+  kind: "waveform",
+  spectrogramChannel: 0,
+  spectrogramGain: 1,
+  spectrogramFloor: 0.15,
   beatsPerRow: { inputText: "2x2", val: [2, 2] },
   marginLeft: { inputText: "0.11", val: 0.11 },
   marginRight: { inputText: "0.11", val: 0.11 },

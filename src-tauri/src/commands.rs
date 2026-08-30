@@ -1,8 +1,9 @@
 use crate::get_loop_buffer_size::get_loop_buffer_size;
 use crate::read_audio_file::get_samples_from_filename;
 use crate::structs::{
-    BeatResetState, Config, ConfigState, DrumSamples, InputChannelCount, LogState, LoopBufferState,
-    Mp3BufferState, Payload, SampleOutputBuffer, VisualSamples,
+    AnalysisFrames, AnalysisOutputBuffer, BeatResetState, Config, ConfigState, DrumSamples,
+    InputChannelCount, LogState, LoopBufferState, Mp3BufferState, Payload, SampleOutputBuffer,
+    VisualSamples,
 };
 use std::sync::Arc;
 use tauri::{Manager, State};
@@ -38,6 +39,24 @@ pub fn get_samples(state: State<SampleOutputBuffer>) -> Result<VisualSamples, St
         });
     } else {
         return Err("get_samples failed.".into());
+    }
+}
+
+/// The spectrogram stream, drained exactly the way `get_samples` is: hand the
+/// vectors over and leave empty ones behind, so the audio callback never waits
+/// on a copy. Separate from `get_samples` so the per-frame path is untouched by
+/// anything analysis does.
+#[tauri::command]
+pub fn get_analysis(state: State<AnalysisOutputBuffer>) -> Result<AnalysisFrames, String> {
+    if let Ok(mut frames) = state.buffer.lock() {
+        return Ok(AnalysisFrames {
+            channels: frames.channels,
+            bins: frames.bins,
+            beats: std::mem::take(&mut frames.beats),
+            mags: std::mem::take(&mut frames.mags),
+        });
+    } else {
+        return Err("get_analysis failed.".into());
     }
 }
 

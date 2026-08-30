@@ -47,6 +47,7 @@ position, looper) derives from it.
 | `commands.rs` | Tauri commands (`set_config`, `get_samples`, `load_drum_sample`, …). |
 | `constants.rs` | `SAMPLE_RATE`, `MAX_INPUT_BACKLOG`, `default_config()`. |
 | `util.rs` | `beat_bisect` (which subdivision a beat falls in), `mod_add`. |
+| `analysis.rs` | The short-time FFT behind the spectrogram (see below). |
 
 ### Layout of the frontend
 
@@ -60,6 +61,7 @@ position, looper) derives from it.
 | `ParameterList.tsx` | The named-number UI. |
 | `GridList.tsx` / `ChannelList.tsx` / `DrumList.tsx` | The three list UIs. |
 | `RowColorList.tsx` | The per-view row color swatches. |
+| `SpectrogramControls.tsx` | The per-view spectrogram channel/gain/floor controls. |
 | `presets.ts` | Named presets *and* the auto-restored session. |
 | `parser1.js` / `parser2.js` | Generated PEG parsers for rhythm syntax (see Rhythm syntax). Don't hand-edit. |
 
@@ -443,6 +445,49 @@ Files are decoded in Rust by `load_drum_sample` and keyed by path; the callback
 only does a map lookup. Built-ins are keyed by plain name (`"ride"`) so a voice
 can refer to one without knowing the install path.
 
+### The analysis stream and the spectrogram view kind
+
+A second stream, deliberately separate from `VisualSamples` so the per-frame path
+is untouched: `analysis.rs` runs a 1024-point Hann FFT every 256 frames per input
+channel (exactly 8 hops per 2048-frame callback), groups the 513 magnitudes into
+64 bins and sends them as `u8` decibels. `views[i].kind = "spectrogram"` draws
+them instead of the waveform; everything else about the pane -- rows, margins,
+grids, `getCanvasPositions`, the sweep -- is unchanged.
+
+- **All the FFT state is in one `Analyzer`**, built before the render closure so
+  the planner and scratch buffers are allocated once. `resize(channels)` is
+  called once per callback next to `bus_delay.resize`; `push` per frame, next to
+  where `input_frame` is filled -- *not* inside the per-output-channel loop.
+  Reset on beat reset and while paused, so no window is stitched across a gap.
+- **The stamp is the window centre.** A hop completing at frame *i* describes
+  the window centred `WINDOW/2` frames earlier, so it is stamped
+  `visual_beat - (WINDOW/2) * beats_per_sample` -- the sample stream's stamp,
+  less half a window. Attaching it to frame *i* draws every column a whole half
+  window late: ~92 px at `0.25x16` and 140bpm, which reads as the FFT being
+  broken rather than the stamp. (Simulation-checked, along with the flattening
+  index below.)
+- **The `u8` contract is fixed at -100..0 dB.** 0 is silence, 255 is full scale.
+  Deliberately wide, because `spectrogramGain` and `spectrogramFloor` are applied
+  in the frontend: tuning the picture must never push config to the audio thread.
+- **The stream is flattened** the same way and for the same reason as the
+  samples: `mags[(hop * channels + ch) * bins + bin]`, `beats` one per hop.
+  `channels` is the *analysed input* count, capped at `MAX_ANALYSIS_CHANNELS`
+  (4) -- device channel order, not the `visibleChannels` subset, so
+  `spectrogramChannel` indexes it directly. The synthetic buses have no spectrum.
+- **`analysisOn` is the off switch**, default true. Not derived from whether any
+  pane is a spectrogram: that would mean writing rust config from a render.
+- **A column is as wide as the gap since the last one.** Hops arrive 172 times a
+  second, which at high zoom is dozens of pixels apart, so a one-pixel line per
+  hop would draw a picket fence. The column is painted *backwards* from the
+  hop's x -- it covers the span ending at that beat. At low zoom several hops
+  share a pixel and the per-bin max wins, so the flush boundary here is a whole
+  pixel column (`Math.floor`), unlike `drawSweep`'s float compare.
+- **Grids are drawn per column, clipped to it, after the spectrum.** A column
+  fills the row height, so grids have to go on top; repainting the whole pane's
+  grids every frame instead would composite a sub-1 alpha to opaque in a few
+  frames.
+- `refreshAtCycleEnd` is ignored for spectrogram panes. Sweep only.
+
 ## Known issues / latent bugs
 
 - **Mono audio files play at double speed.** `mp3.pos += 1` and
@@ -475,6 +520,11 @@ left untouched) rather than by listening.
 
 Parameters and expressions are committed (`variables`, `arithmetic in more
 places`) and covered by temp tests that were run and deleted.
+
+The analysis stream and the spectrogram pane are new and **nobody has looked at
+the picture**. The arithmetic (hop timing, the window-centre stamp, the
+flattening index, the log bin edges) is simulation- and unit-checked; that it
+draws a legible spectrogram of real playing, aligned to the grid, is not.
 
 Uncommitted: the macOS `Info.plist` and entitlements fix. Both were verified
 against a real build with `plutil` and `codesign`, but **nobody has confirmed

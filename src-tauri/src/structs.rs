@@ -33,6 +33,32 @@ pub struct SampleOutputBuffer {
     pub buffer: Arc<Mutex<VisualSamples>>,
 }
 
+// The spectrogram stream. A second stream and a second command rather than
+// widening `VisualSamples`, so the per-frame path stays exactly as it was: this
+// one carries a hop every 256 frames, not a value every frame.
+//
+// Magnitudes are u8 decibels over a fixed -100..0 dB range -- 64 float bins at
+// 172 hops/sec would roughly double the JSON, and 256 brightness levels is all
+// a display can use. The frontend applies its own gain and floor on top, so
+// tuning the picture never pushes config back across.
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+pub struct AnalysisFrames {
+    /// How many input channels were analysed, and so how many `bins`-long runs
+    /// belong to each entry in `beats`.
+    pub channels: usize,
+    pub bins: usize,
+    /// One per hop, at the *window centre*, in input time -- already shifted by
+    /// the buffer compensation the way the sample stream is.
+    pub beats: Vec<f64>,
+    /// Flattened for the same reason as `VisualSamples::values`. Read as
+    /// `mags[(hop * channels + ch) * bins + bin]`.
+    pub mags: Vec<u8>,
+}
+
+pub struct AnalysisOutputBuffer {
+    pub buffer: Arc<Mutex<AnalysisFrames>>,
+}
+
 /// How many input channels the capture device actually gave us.
 pub struct InputChannelCount(pub usize);
 
@@ -89,6 +115,10 @@ pub struct Config {
     pub audio_monitor_on: bool,
     pub buffer_compensation: usize,
     pub paused: bool,
+    /// Whether the render callback runs the spectrogram FFTs at all. Off skips
+    /// the work and pushes nothing, so a pane that isn't a spectrogram costs
+    /// nothing on the audio thread.
+    pub analysis_on: bool,
     /// Which input channels get sent to the display. Only these are pushed, so
     /// a 16-input interface doesn't cost 16 channels of JSON to watch two.
     pub visible_channels: Vec<usize>,
