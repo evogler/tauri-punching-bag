@@ -88,6 +88,14 @@ Rules that will bite you:
 - **Transient keys.** `presets.ts` excludes `canvasWidth`/`canvasHeight`
   (derived from window size) and `paused` (transport state) from both presets
   and the saved session.
+- **Never reuse a config key name with different semantics or a different
+  default.** Restore merges the saved value *over* the default, so a session
+  written by an older build silently wins. This bit once: `loopFeedback` was a
+  recursive feedback amount defaulting to 0, then became a per-echo gain
+  defaulting to 1 — sessions written by the first build restored the 0 and
+  silenced every echo after the first, which looked like the echo count being
+  ignored. Renaming it to `loopEchoGain` was the fix, because unrecognized keys
+  *are* dropped. Rename rather than redefine.
 - **Session restore** merges over defaults, so new keys keep their default and
   removed keys are dropped. A restored session pushes one `set_config` on mount,
   because Rust boots from its own `default_config()`.
@@ -134,6 +142,41 @@ Sized in frames (`get_loop_buffer_size`, no `*2`). It was previously a single
 interleaved-stereo buffer recording a mono sum, which made every input show up on
 every channel. Loop length and compensation timing are unchanged by that
 rewrite — verified arithmetically.
+
+It is a **multi-tap delay**, not a feedback loop. The buffer is a plain history
+— `buf[p] = live`, nothing mixed back in — and the echoes come from reading it at
+`loop_echoes` taps, each one `beats_to_loop` further back. Recording never stops,
+so overlapping phrases just work.
+
+- `loop_echoes` is how many times a phrase comes back; `loop_echo_gain` is the
+  gain per echo, compounding, so echo *k* plays at `loop_echo_gain^(k-1)`. At 1
+  every echo is full volume and the run simply stops. **3 echoes at gain 1 gives
+  repeats at +4, +8, +12 beats and then silence** — verified by simulating the
+  index arithmetic.
+- **A gain of 0 silences every echo after the first**, which presents as the echo
+  count doing nothing. That's arithmetic, not a bug — but it's why the key is
+  called a gain rather than a feedback amount, and why it was renamed out of the
+  way of stale sessions (see the config rules above).
+- `loop_echoes = 1, loop_echo_gain = 1` reproduces the original looper exactly:
+  one repeat a loop later, then gone. Those are the defaults.
+- **The buffer is `spacing * echoes` frames**, since the oldest tap reads a whole
+  run back. Memory grows with echoes × beatsToLoop × channels — hence
+  `MAX_LOOP_ECHOES = 16` (~30MB across four channels at 4 beats, 91bpm).
+  `get_loop_spacing` is one echo's worth; `get_loop_buffer_size` is the product.
+- Tap offsets are taken `% loop_len` so that the callback or two between a config
+  change and the buffer resize aliases briefly instead of indexing past the end.
+- Tap gains are built once per callback into a reused `tap_gains` vec, next to
+  `drum_last_beats.resize` — not powered per frame and per channel.
+- Nothing is clamped: with finite taps the worst case is `echoes × amplitude`,
+  which is loud but bounded and can't run away. Manage input gain.
+- Two models were tried and rejected before this one. Gating the write on a pass
+  counter turns the looper on and off. Recursive feedback (`buf[p] = buf[p]*f +
+  live`) gives infinite decaying repeats that never quite stop, and can run away.
+  Neither is "a fixed number of full-volume echoes, then gone".
+
+If the echo count appears to do nothing, check `loop_echo_gain` before suspecting
+the taps — the tap arithmetic is simulation-checked, the gain is the part that
+can silently zero the run.
 
 ## Display pipeline
 
@@ -281,7 +324,7 @@ can refer to one without knowing the install path.
 - A zero-length `beatsToLoop` used to panic; guarded now, but similar bare
   indexing exists elsewhere.
 
-## State as of 2026-08-29
+## State as of 2026-08-30
 
 Verified by the owner in the real app: single-channel input, 2-channel input with
 up/down split, per-channel looping, the scrollable settings panel.
@@ -291,14 +334,16 @@ drums/click display buses. The click's timbre was preserved *by construction*
 (its counter and per-channel RNG were deliberately left untouched) rather than by
 listening.
 
-Multiple views are confirmed working by the owner. Row colours are newer and
-**not yet verified on screen** -- the build passes and the pattern logic is
-covered by a temp test that was run and deleted, but nobody has looked at a
-coloured row yet.
+Multiple views and row colours are confirmed working by the owner and committed.
+Still unchecked on that work: that a restored pre-views session comes back with
+its old rows and grids intact, and that switching arrangement doesn't leave stale
+pixels in a pane.
 
-Still unchecked on the views work: that a restored pre-views session comes back
-with its old rows and grids intact, and that switching arrangement doesn't leave
-stale pixels in a pane.
+The multi-tap looper (`loop_echoes` / `loop_feedback`) is uncommitted and **not
+verified by ear**. The tap arithmetic was checked by simulation, so the repeats
+land on the right beats; what nobody has heard yet is whether the sum is too loud
+at high echo counts, and whether the compensation still lines the repeats up
+against live playing once several taps are stacked.
 
 ## Discussed but not built
 

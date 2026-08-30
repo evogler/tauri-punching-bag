@@ -806,6 +806,20 @@ const App = () => {
           <Input label="looping" _key="loopingOn" set={set} get={get} />
           <Input label="beatsToLoop" _key="beatsToLoop" set={set} get={get} />
           <Input
+            label="loop echoes"
+            _key="loopEchoes"
+            set={set}
+            get={get}
+            validate={(n: number) => n >= 1 && n <= 16}
+          />
+          <Input
+            label="loop echo gain"
+            _key="loopEchoGain"
+            set={set}
+            get={get}
+            validate={(n: number) => n >= 0 && n <= 1}
+          />
+          <Input
             label="audio monitor"
             _key="audioMonitorOn"
             set={set}

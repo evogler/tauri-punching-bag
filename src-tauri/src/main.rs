@@ -18,7 +18,7 @@ use crate::commands::{
     get_input_channel_count, get_samples, load_drum_sample, reset_beat, set_config, set_mp3_buffer,
 };
 use crate::constants::{default_config, MAX_INPUT_BACKLOG, SAMPLE_RATE};
-use crate::get_loop_buffer_size::get_loop_buffer_size;
+use crate::get_loop_buffer_size::{get_loop_buffer_size, get_loop_spacing, loop_echo_count};
 use crate::io_channels::{get_input_output_channels, make_buffers, start_input_audio_unit};
 use crate::read_audio_file::get_samples_from_filename;
 use crate::structs::{
@@ -85,6 +85,9 @@ fn main() -> Result<(), coreaudio::Error> {
     // happens on the crossing rather than every frame. isize::MIN means "not
     // primed yet", which stops a newly added voice firing immediately.
     let mut drum_last_beats: Vec<isize> = vec![];
+    // Gain per echo, resolved once per callback so the per-frame tap loop isn't
+    // raising loop_echo_gain to a power for every frame and channel.
+    let mut tap_gains: Vec<f32> = vec![];
 
     // setup audio
     let (mut input_audio_unit, mut output_audio_unit, input_channels, io_log) =
@@ -220,6 +223,17 @@ fn main() -> Result<(), coreaudio::Error> {
         drum_last_beats.resize(config.drums.len(), isize::MIN);
         bus_delay.resize(config.buffer_compensation);
 
+        let loop_spacing = get_loop_spacing(&config);
+        tap_gains.resize(loop_echo_count(&config), 0.0);
+        {
+            let feedback = config.loop_echo_gain.clamp(0.0, 1.0) as f32;
+            let mut gain = 1.0f32;
+            for tap in tap_gains.iter_mut() {
+                *tap = gain;
+                gain *= feedback;
+            }
+        }
+
         if let Ok(mut state_vec) = sample_output_buffer_clone.lock() {
             // Changing which channels are shown changes the row width of the
             // flattened stream, so anything collected under the old width has to
@@ -258,16 +272,39 @@ fn main() -> Result<(), coreaudio::Error> {
                 let loop_len = loop_buffer.channels.first().map_or(0, |c| c.len());
                 if loop_len > 0 {
                     let p = loop_buffer.pos;
-                    let compensated = mod_add(p, config.buffer_compensation, loop_len);
+                    // Where the audio taps are read from: shifted by the
+                    // compensation so a phrase comes back a whole
+                    // `beats_to_loop` after it was *played*, not after it
+                    // reached us. The visual taps read from `p` itself, since
+                    // the sample stream is already stamped in input time.
+                    let audio_from = mod_add(p, config.buffer_compensation, loop_len);
                     for ch in 0..loop_buffer.channels.len() {
                         if config.looping_on {
-                            // Read this position before overwriting it: that's
-                            // the previous time round.
-                            loop_visual[ch] = loop_buffer.channels[ch][p];
-                            let played = loop_buffer.channels[ch][compensated];
+                            // Each echo is one spacing further back down the
+                            // history, at full volume unless loop_echo_gain fades
+                            // the run. The taps are finite, so a phrase is gone
+                            // the moment it falls off the last one -- and
+                            // nothing accumulates the way a recursive feedback
+                            // loop does.
+                            let buf = &loop_buffer.channels[ch];
+                            let mut visual_sum = 0f32;
+                            let mut audio_sum = 0f32;
+                            for (k, gain) in tap_gains.iter().enumerate() {
+                                // Taken mod the buffer for the callback or two
+                                // where config has changed but the buffer hasn't
+                                // been resized yet: the taps alias briefly
+                                // rather than indexing past the end.
+                                let back = ((k + 1) * loop_spacing) % loop_len;
+                                visual_sum += buf[(p + loop_len - back) % loop_len] * gain;
+                                audio_sum +=
+                                    buf[(audio_from + loop_len - back) % loop_len] * gain;
+                            }
+                            loop_visual[ch] = visual_sum;
                             let (left, right) = pan_gains[ch];
-                            loop_out[0] += played * left;
-                            loop_out[1] += played * right;
+                            loop_out[0] += audio_sum * left;
+                            loop_out[1] += audio_sum * right;
+                            // A plain history -- every repeat comes from a tap,
+                            // so nothing is mixed back in here.
                             loop_buffer.channels[ch][p] =
                                 input_frame.get(ch).copied().unwrap_or(0.0);
                         } else {

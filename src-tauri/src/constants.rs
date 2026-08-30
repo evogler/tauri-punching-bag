@@ -11,10 +11,17 @@ pub const SAMPLE_FORMAT: SampleFormat = SampleFormat::F32;
 // samples it normally holds, so this never fires in normal running.
 pub const MAX_INPUT_BACKLOG: usize = 11_025;
 
+// Every echo needs a whole loop of history behind it, so the buffer grows with
+// this. 16 echoes of 4 beats at 91bpm is ~30MB across four channels, which is
+// about as far as it's worth going.
+pub const MAX_LOOP_ECHOES: usize = 16;
+
 pub fn default_config() -> Config {
     return Config {
         bpm: 91.0,
         beats_to_loop: 4.0,
+        loop_echoes: 1.0,
+        loop_echo_gain: 1.0,
         audio_in_gain: 1.0,
         looping_on: false,
         click_on: true,

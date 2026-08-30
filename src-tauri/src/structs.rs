@@ -64,6 +64,20 @@ pub struct ParserRhythm {
 pub struct Config {
     pub bpm: f64,
     pub beats_to_loop: f64,
+    // How many times a phrase comes back, each one `beats_to_loop` after the
+    // last. 1 is the single repeat the looper started as.
+    pub loop_echoes: f64,
+    // Gain per echo, compounding: echo k plays at loop_echo_gain^(k-1). At 1
+    // every echo is full volume and the run just stops; below that it fades out
+    // across the run. Not feedback in the recursive sense -- the taps are
+    // finite, so nothing accumulates and nothing can run away.
+    //
+    // Named "gain" rather than "feedback" because 0 is not "no effect" -- it
+    // silences every echo after the first, which reads as the echo count being
+    // ignored. An earlier build called this loop_feedback and defaulted it to 0;
+    // the rename is what stops a session saved by that build from restoring the
+    // 0 over this default and doing exactly that.
+    pub loop_echo_gain: f64,
     pub audio_in_gain: f32,
     pub looping_on: bool,
     pub click_on: bool,

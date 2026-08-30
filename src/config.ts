@@ -62,6 +62,12 @@ export const defaultRustConfig = {
 	audioInGain: 1.0,
   audioMonitorOn: false,
   beatsToLoop: 4,
+  // How many times a phrase comes back, one `beatsToLoop` apart each time.
+  loopEchoes: 1,
+  // Gain per echo, compounding: 1 keeps them all at full volume, below that the
+  // run fades out. 0 silences everything after the first echo, so it is a gain,
+  // not a "feedback amount" -- see the note in structs.rs on the rename.
+  loopEchoGain: 1,
   bpm: 91,
   bufferCompensation: 4330,
   paused: false,

@@ -83,6 +83,7 @@ pub fn set_config(app_handle: tauri::AppHandle, new_config: Config) {
 
     let should_update_loop_buffer = new_config.bpm != config.bpm
         || new_config.beats_to_loop != config.beats_to_loop
+        || new_config.loop_echoes != config.loop_echoes
         || new_config.buffer_compensation != config.buffer_compensation;
     *config = new_config;
 
