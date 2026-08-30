@@ -61,7 +61,7 @@ position, looper) derives from it.
 | `GridList.tsx` / `ChannelList.tsx` / `DrumList.tsx` | The three list UIs. |
 | `RowColorList.tsx` | The per-view row color swatches. |
 | `presets.ts` | Named presets *and* the auto-restored session. |
-| `parser1.js` / `parser2.js` | Generated PEG parsers for rhythm syntax. Don't hand-edit. |
+| `parser1.js` / `parser2.js` | Generated PEG parsers for rhythm syntax (see Rhythm syntax). Don't hand-edit. |
 
 ## The config system — sharp edges
 
@@ -171,6 +171,72 @@ keeping the last good value. Deliberately not a scripting language.
   there would silently go stale on a parameter change. Add them to
   `resolveRustConfig` first, then make them expression-backed -- not the other
   way round.
+
+## Rhythm syntax
+
+Only ever documented in a comment at the top of the generated `parser2.js`, so
+it's written out here. Everything defaults to **parser2**; nothing creates a
+parser1 rhythm any more and there's no UI to switch, so parser1 is effectively
+legacy (it returns a flat array of times rather than `{notes, start, end}`).
+
+| Written | Means |
+|---|---|
+| `4` | one note, span of 4 beats |
+| `2:1` | 2 evenly spaced notes across 1 beat |
+| `5:1` | 5 across a beat -- 16ths against a 4-beat bar |
+| `1/5` | one note, span of 0.2 -- **the grammars do arithmetic** |
+| `[2:1, 1]:1` | a group; entries share the span given after the `]` |
+| `[k 1, h 1]:1` | sounds: a letter (`h` `k` `r` `s`) then a weight |
+| `[h 1>-.1]:1` | `>` nudges that note's time -- lands at 0.9, not 0 |
+| `[[k 1>-.1, h 1, s 1]:1, 3:1, 1]:1` | groups nest |
+
+- **`+ - * / ( ) [ ]` are all grammar tokens and are evaluated natively.** That
+  is why parameters need no braces in a rhythm field (see Parameters and
+  expressions) -- substituting the name is enough and the grammar does the rest.
+- **Nothing reads `sounds`.** The Rust `Note` struct has the field commented out
+  and the draw code only uses `note.time`, so the letters parse and are then
+  discarded. They're reserved as parameter names anyway, to keep the syntax
+  usable if a sound ever gets wired to a drum voice.
+- The default `audioSubdivisions` has `inputText: "2:1"` but a hand-written
+  `val` carrying `sounds: ["h"]`, which is *not* what that text parses to.
+  Harmless while nothing reads sounds; misleading the moment something does.
+
+## macOS packaging and permissions
+
+**The bundled app and the bare binary do not have the same permissions.**
+Running `target/release/tauri-punching-bag` from a terminal works because
+Terminal is then the responsible process for TCC and the child inherits
+Terminal's microphone grant. The `.app` has to earn its own, and three things
+were stopping it:
+
+- **`NSMicrophoneUsageDescription` was missing entirely.** Without that string
+  macOS never shows the prompt, and CoreAudio returns silence rather than an
+  error -- an input of all zeroes with nothing in any log. Tauri v1 merges
+  `src-tauri/Info.plist` into the generated one; that file exists now solely to
+  carry this key. Verify a build with
+  `plutil -p .../tauri-punching-bag.app/Contents/Info.plist | grep -i usage`.
+- **The hardened runtime is on** (`codesign -dv` reports
+  `flags=0x10002(adhoc,runtime)`), and under it a process cannot open an input
+  device without `com.apple.security.device.audio-input`. It was commented out.
+- **`com.apple.private.tcc.allow-prompting` was the only entitlement applied.**
+  That is an Apple *private* entitlement; third parties can't use it, it did
+  nothing here, and it would make a real Developer ID signature invalid. Removed
+  -- don't put it back.
+
+Still outstanding, and the reason other machines are hard:
+
+- **Signing is ad-hoc** (`signingIdentity: "-"`, `TeamIdentifier=not set`). TCC
+  keys a grant to the code signature, and an ad-hoc signature changes every
+  build, so a granted permission won't survive a rebuild. On another Mac,
+  Gatekeeper blocks an ad-hoc, un-notarized bundle outright.
+- Interim workaround on another Mac: `xattr -dr com.apple.quarantine <app>`,
+  then right-click → Open.
+- Real fix: an Apple Developer Program membership, a Developer ID Application
+  certificate in `signingIdentity`, and `APPLE_ID` / `APPLE_PASSWORD` set so the
+  build stops logging `skipping app notarization`.
+- A stale TCC record survives all of this, keyed by the bundle id. After
+  changing any of the above, `tccutil reset Microphone com.vogler.dev` is what
+  makes the prompt appear again.
 
 ## Audio thread rules
 
@@ -399,23 +465,25 @@ can refer to one without knowing the install path.
 ## State as of 2026-08-30
 
 Verified by the owner in the real app: single-channel input, 2-channel input with
-up/down split, per-channel looping, the scrollable settings panel.
+up/down split, per-channel looping, the scrollable settings panel, multiple
+views, row colours.
 
 Not verified by ear: drum offsets landing where expected, panning, the
-drums/click display buses. The click's timbre was preserved *by construction*
-(its counter and per-channel RNG were deliberately left untouched) rather than by
-listening.
+drums/click display buses, and the multi-tap looper. The click's timbre was
+preserved *by construction* (its counter and per-channel RNG were deliberately
+left untouched) rather than by listening.
 
-Multiple views and row colours are confirmed working by the owner and committed.
-Still unchecked on that work: that a restored pre-views session comes back with
-its old rows and grids intact, and that switching arrangement doesn't leave stale
-pixels in a pane.
+Parameters and expressions are committed (`variables`, `arithmetic in more
+places`) and covered by temp tests that were run and deleted.
 
-The multi-tap looper (`loop_echoes` / `loop_feedback`) is uncommitted and **not
-verified by ear**. The tap arithmetic was checked by simulation, so the repeats
-land on the right beats; what nobody has heard yet is whether the sum is too loud
-at high echo counts, and whether the compensation still lines the repeats up
-against live playing once several taps are stacked.
+Uncommitted: the macOS `Info.plist` and entitlements fix. Both were verified
+against a real build with `plutil` and `codesign`, but **nobody has confirmed
+the microphone prompt actually appears yet** -- that needs
+`tccutil reset Microphone com.vogler.dev` and a launch of the bundled app.
+
+Still unchecked on the views work: that a restored pre-views session comes back
+with its old rows and grids intact, and that switching arrangement doesn't leave
+stale pixels in a pane.
 
 ## Discussed but not built
 

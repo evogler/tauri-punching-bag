@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Without this string macOS never shows the microphone prompt, and
+         CoreAudio hands back silence instead of failing. It is the whole reason
+         the bundled app captured nothing while the bare binary run from a
+         terminal worked: that one inherits Terminal's own grant. -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Tauri Punching Bag records your playing so it can draw the waveform you play against, and loop it back.</string>
+</dict>
+</plist>
