@@ -18,6 +18,11 @@ import {
   isViewConfigKey,
   copyView,
   MAX_VIEW_SIDE,
+  Parameter,
+  exprNumber,
+  parameterValues,
+  resolveJsConfig,
+  viewRowBeats,
 } from "./config";
 import { Input } from "./Input";
 import { appWindow } from "@tauri-apps/api/window";
@@ -27,6 +32,7 @@ import { PresetBar } from "./PresetBar";
 import { Preset, makePreset, readSession, writeSession } from "./presets";
 import { GridList } from "./GridList";
 import { RowColorList } from "./RowColorList";
+import { ParameterList } from "./ParameterList";
 import { Layout, getCanvasPositions } from "./layout";
 import { ChannelList } from "./ChannelList";
 import { DrumList, SampleStatus, makeDrumVoice } from "./DrumList";
@@ -217,15 +223,22 @@ const App = () => {
     ...defaultRustConfig,
     ...restoredSession?.rust,
   }));
-  const [jsConfig, setJsConfig] = useState<JsConfig>(() => ({
-    ...defaultJsConfig,
-    ...restoredSession?.js,
-  }));
+  // Resolved on the way in: a session restored from an older build can carry
+  // texts whose `val` predates the parameters saved alongside them.
+  const [jsConfig, setJsConfig] = useState<JsConfig>(() =>
+    resolveJsConfig({ ...defaultJsConfig, ...restoredSession?.js })
+  );
   const get = <T extends ConfigKey>(k: T) => {
     if (isRustConfigKey(k)) return rustConfig[k] as RustConfig[typeof k];
     else if (isJsConfigKey(k)) return jsConfig[k] as JsConfig[typeof k];
     else return "never" as never;
   };
+  // Every expression-backed field is re-resolved in the same update, so `val`
+  // can never lag a parameter change. An effect doing it afterwards would risk
+  // a render loop, and would leave one frame drawn from stale numbers.
+  const setParameters = (parameters: Parameter[]) =>
+    setJsConfig((js) => resolveJsConfig({ ...js, parameters }));
+
   const set = <T,>(k: string, v: T) => {
     if (isRustConfigKey(k)) {
       updateRustConfig({ [k]: v });
@@ -241,6 +254,7 @@ const App = () => {
     index: number;
     cfg: ViewConfig;
     layout: Layout;
+    visualGain: number;
     rowHeight: number;
     width: number;
     height: number;
@@ -255,6 +269,10 @@ const App = () => {
   const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([]);
   const [selectedView, setSelectedView] = useState(0);
 
+  // Resolved once per render and handed to every field that can hold an
+  // expression, so each pane's inputs read the same bindings.
+  const params = parameterValues(get("parameters"));
+
   const viewCols = get("viewCols");
   const viewRows = get("viewRows");
   // Floored once here rather than at the canvas element, so the backing store
@@ -263,9 +281,11 @@ const App = () => {
   const cellHeight = Math.max(1, Math.floor(get("canvasHeight") / viewRows));
 
   const viewCtxs: ViewCtx[] = get("views").map((cfg, index) => {
-    const maxBeatsInRow =
-      Math.max(...cfg.beatsPerRow) + cfg.marginLeft + cfg.marginRight;
-    const rowStarts = cfg.beatsPerRow.reduce(
+    const beatsPerRow = viewRowBeats(cfg);
+    const marginLeft = exprNumber(cfg.marginLeft);
+    const marginRight = exprNumber(cfg.marginRight);
+    const maxBeatsInRow = Math.max(...beatsPerRow) + marginLeft + marginRight;
+    const rowStarts = beatsPerRow.reduce(
       (acc, n) => [...acc, acc.slice(-1)[0] + n],
       [0]
     );
@@ -275,14 +295,15 @@ const App = () => {
       index,
       cfg,
       layout: {
-        beatsPerRow: cfg.beatsPerRow,
+        beatsPerRow,
         rowStarts,
-        beatsPerWindow: cfg.beatsPerRow.reduce((sum, n) => sum + n, 0),
+        beatsPerWindow: beatsPerRow.reduce((sum, n) => sum + n, 0),
         pixelsPerBeat: cellWidth / maxBeatsInRow,
-        marginLeft: cfg.marginLeft,
-        marginRight: cfg.marginRight,
+        marginLeft,
+        marginRight,
       },
-      rowHeight: cellHeight / cfg.beatsPerRow.length,
+      visualGain: exprNumber(cfg.visualGain),
+      rowHeight: cellHeight / beatsPerRow.length,
       width: cellWidth,
       height: cellHeight,
       state: viewStates.current[index],
@@ -469,7 +490,7 @@ const App = () => {
   const getCurrentPreset = () => makePreset(rustConfig, jsConfig);
 
   const loadPreset = (preset: Preset) => {
-    setJsConfig((jsConfig) => ({ ...jsConfig, ...preset.js }));
+    setJsConfig((jsConfig) => resolveJsConfig({ ...jsConfig, ...preset.js }));
     updateRustConfig(preset.rust);
   };
 
@@ -560,7 +581,7 @@ const App = () => {
         v,
         x,
         row,
-        Math.min(1, peaks[slot] * v.cfg.visualGain),
+        Math.min(1, peaks[slot] * v.visualGain),
         style,
         isMargin,
         halfFor(v, slot)
@@ -846,6 +867,13 @@ const App = () => {
           />
         </Section>
 
+        <Section label="parameters">
+          <ParameterList
+            parameters={get("parameters")}
+            setParameters={setParameters}
+          />
+        </Section>
+
         <Section label="views">
           <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
             <label>arrangement</label>
@@ -888,10 +916,30 @@ const App = () => {
               ))}
             </div>
           )}
-          <Input label="beats per row" _key="beatsPerRow" {...viewIO} />
-          <Input label="left margin" _key="marginLeft" {...viewIO} />
-          <Input label="right margin" _key="marginRight" {...viewIO} />
-          <Input label="visual gain" _key="visualGain" {...viewIO} />
+          <Input
+            label="beats per row"
+            _key="beatsPerRow"
+            params={params}
+            {...viewIO}
+          />
+          <Input
+            label="left margin"
+            _key="marginLeft"
+            params={params}
+            {...viewIO}
+          />
+          <Input
+            label="right margin"
+            _key="marginRight"
+            params={params}
+            {...viewIO}
+          />
+          <Input
+            label="visual gain"
+            _key="visualGain"
+            params={params}
+            {...viewIO}
+          />
           <Input label="split up/down" _key="splitChannels" {...viewIO} />
           <Input label="bar color mode" _key="barColorMode" {...viewIO} />
           <Input
@@ -913,6 +961,7 @@ const App = () => {
           <GridList
             grids={viewCtxs[activeView]?.cfg.grids ?? []}
             setGrids={(grids) => viewIO.set("grids", grids)}
+            params={params}
           />
         </Section>
 

@@ -1,0 +1,256 @@
+// Arithmetic over named parameters, so a config field can be written `bar/n x n`
+// instead of `0.25 x 16` and one parameter reshapes several settings at once.
+// Deliberately not a scripting language: numbers, parameter names, `+ - * / ( )`
+// and min/max/round, and nothing else.
+//
+// Everything here throws rather than returning NaN or a partial result. Callers
+// use the throw to decide between committing a new value and keeping the last
+// good one -- a silent NaN would reach the draw loop as a blank pane.
+
+export type Params = Record<string, number>;
+
+export type Token =
+  | { kind: "num"; value: number }
+  | { kind: "name"; value: string }
+  | { kind: "op"; value: string };
+
+const NUMBER = /^(?:\d+\.?\d*|\.\d+)/;
+const NAME = /^[A-Za-z_][A-Za-z0-9_]*/;
+
+const FUNCTIONS: Record<string, (args: number[]) => number> = {
+  min: (args) => Math.min(...args),
+  max: (args) => Math.max(...args),
+  round: (args) => {
+    if (args.length !== 1) throw new Error("round takes one argument");
+    return Math.round(args[0]);
+  },
+};
+
+// `x` is the repeat separator in a number list, so it can never be a parameter;
+// the function names would shadow the calls. Rejecting them at the point a
+// parameter is named is the only place a user can hit this.
+export const isValidParameterName = (name: string): boolean =>
+  /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) &&
+  !(name in FUNCTIONS) &&
+  !/^[xX](\d|$)/.test(name);
+
+export const tokenize = (text: string): Token[] => {
+  const out: Token[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === " " || c === "\t" || c === "\n" || c === "\r") {
+      i++;
+      continue;
+    }
+    if ("+-*/(),".includes(c)) {
+      out.push({ kind: "op", value: c });
+      i++;
+      continue;
+    }
+    const rest = text.slice(i);
+    const num = NUMBER.exec(rest);
+    if (num) {
+      out.push({ kind: "num", value: parseFloat(num[0]) });
+      i += num[0].length;
+      continue;
+    }
+    const name = NAME.exec(rest);
+    if (name) {
+      // `0.25x16` carries no spaces around the separator -- formatNumberList
+      // writes it that way -- so `x16` has to come apart here rather than being
+      // read as one identifier. Unambiguous because `x` is reserved.
+      if (/^[xX]\d/.test(name[0])) {
+        out.push({ kind: "name", value: "x" });
+        i += 1;
+        continue;
+      }
+      out.push({
+        kind: "name",
+        value: name[0] === "X" ? "x" : name[0],
+      });
+      i += name[0].length;
+      continue;
+    }
+    throw new Error(`unexpected character "${c}"`);
+  }
+  return out;
+};
+
+export const evaluateTokens = (tokens: Token[], params: Params): number => {
+  let i = 0;
+  const eat = (op: string) => {
+    const t = tokens[i];
+    if (t && t.kind === "op" && t.value === op) {
+      i++;
+      return true;
+    }
+    return false;
+  };
+  const expect = (op: string) => {
+    if (!eat(op)) throw new Error(`expected "${op}"`);
+  };
+
+  const expr = (): number => {
+    let v = term();
+    for (;;) {
+      if (eat("+")) v += term();
+      else if (eat("-")) v -= term();
+      else return v;
+    }
+  };
+
+  const term = (): number => {
+    let v = unary();
+    for (;;) {
+      if (eat("*")) v *= unary();
+      else if (eat("/")) {
+        const d = unary();
+        // `n = 0` is one backspace away from `n = 16`, so this is a live case
+        // during a parameter edit, not a theoretical one.
+        if (d === 0) throw new Error("division by zero");
+        v /= d;
+      } else return v;
+    }
+  };
+
+  const unary = (): number => {
+    if (eat("-")) return -unary();
+    if (eat("+")) return unary();
+    return primary();
+  };
+
+  const primary = (): number => {
+    const t = tokens[i];
+    if (!t) throw new Error("unexpected end of expression");
+    if (t.kind === "num") {
+      i++;
+      return t.value;
+    }
+    if (t.kind === "op") {
+      if (t.value !== "(") throw new Error(`unexpected "${t.value}"`);
+      i++;
+      const v = expr();
+      expect(")");
+      return v;
+    }
+    i++;
+    const fn = FUNCTIONS[t.value];
+    if (fn) {
+      expect("(");
+      const args = [expr()];
+      while (eat(",")) args.push(expr());
+      expect(")");
+      return fn(args);
+    }
+    if (!(t.value in params)) throw new Error(`unknown parameter "${t.value}"`);
+    const v = params[t.value];
+    if (!Number.isFinite(v)) throw new Error(`parameter "${t.value}" is not a number`);
+    return v;
+  };
+
+  const value = expr();
+  if (i < tokens.length) throw new Error(`unexpected "${tokens[i].value}"`);
+  if (!Number.isFinite(value)) throw new Error("not a finite number");
+  return value;
+};
+
+export const evaluate = (text: string, params: Params): number =>
+  evaluateTokens(tokenize(text), params);
+
+// Both the entry separator and the repeat separator have to be found at paren
+// depth zero: `min(n,4) x 2` has a comma that belongs to the call, not the list.
+const splitTop = (
+  tokens: Token[],
+  isSeparator: (t: Token) => boolean
+): Token[][] => {
+  const parts: Token[][] = [[]];
+  let depth = 0;
+  for (const t of tokens) {
+    if (t.kind === "op" && t.value === "(") depth++;
+    else if (t.kind === "op" && t.value === ")") depth--;
+    if (depth === 0 && isSeparator(t)) parts.push([]);
+    else parts[parts.length - 1].push(t);
+  }
+  return parts;
+};
+
+// A run of identical values can be written "3x2" instead of "3,3". Kept well
+// below anything useful as a row count, so a fat-fingered "3x1000" is rejected
+// rather than building a list big enough to stall the draw loop.
+export const MAX_LIST_LENGTH = 128;
+
+// Throws rather than returning something partial, so text that isn't a valid
+// list yet leaves the last good value in place.
+export const parseNumberList = (
+  text: string,
+  params: Params = {}
+): number[] => {
+  const out: number[] = [];
+  for (const entry of splitTop(
+    tokenize(text),
+    (t) => t.kind === "op" && t.value === ","
+  )) {
+    if (!entry.length) continue;
+    const [valueTokens, countTokens, ...extra] = splitTop(
+      entry,
+      (t) => t.kind === "name" && t.value === "x"
+    );
+    if (extra.length) throw new Error('only one "x" per entry');
+    const value = evaluateTokens(valueTokens, params);
+    // A repeat has to be whole, and a parameter sweep hands us 3.5 on the way
+    // past. Rounding keeps the field usable mid-sweep, where rejecting would
+    // flash it red for every intermediate value.
+    const count =
+      countTokens === undefined
+        ? 1
+        : Math.round(evaluateTokens(countTokens, params));
+    if (!(count >= 0)) throw new Error("negative repeat count");
+    if (out.length + count > MAX_LIST_LENGTH) throw new Error("list too long");
+    for (let i = 0; i < count; i++) out.push(value);
+  }
+  // An empty list would divide by zero downstream, so treat it as unfinished
+  // typing instead of committing it.
+  if (!out.length) throw new Error("empty list");
+  return out;
+};
+
+// Writes runs back out in the "3x2" shorthand, so what you typed survives a
+// round trip through the expanded array.
+export const formatNumberList = (values: number[]): string => {
+  const parts: string[] = [];
+  let i = 0;
+  while (i < values.length) {
+    let run = 1;
+    while (i + run < values.length && values[i + run] === values[i]) run++;
+    parts.push(run > 1 ? `${values[i]}x${run}` : `${values[i]}`);
+    i += run;
+  }
+  return parts.join(",");
+};
+
+// Float error would otherwise reach the rhythm parser as 0.30000000000000004,
+// which parses fine but makes any error about it unreadable.
+const formatValue = (n: number) => String(Number(n.toPrecision(12)));
+
+export const hasInterpolation = (text: string) => text.includes("{");
+
+// Rhythm text goes through the generated PEG parsers, so an expression is
+// substituted for its value *before* parsing rather than by touching the
+// grammar. Braced because rhythm text already has syntax of its own to collide
+// with: `{n/bar}:1` becomes `4:1`.
+export const interpolate = (text: string, params: Params): string => {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const open = text.indexOf("{", i);
+    if (open === -1) return out + text.slice(i);
+    const close = text.indexOf("}", open);
+    if (close === -1) throw new Error("unclosed {");
+    out +=
+      text.slice(i, open) +
+      formatValue(evaluate(text.slice(open + 1, close), params));
+    i = close + 1;
+  }
+  return out;
+};

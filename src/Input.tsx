@@ -1,5 +1,11 @@
-import { useRef, useState } from "react";
-import { Config, ConfigKey } from "./config";
+import { useState } from "react";
+import { Config, ConfigKey, NumberExpr, NumberListExpr } from "./config";
+import {
+  Params,
+  evaluate,
+  formatNumberList,
+  parseNumberList,
+} from "./expression";
 import parser1 from "./parser1";
 import parser2 from "./parser2";
 
@@ -26,6 +32,25 @@ export const useFocusedValue = (
   return [{ onFocus, onBlur, value }, setFocusedVal] as const;
 };
 
+// Recomputed from whatever is on screen rather than remembered from the last
+// keystroke, so a field also goes red when a parameter change breaks an
+// expression that was perfectly good when it was typed.
+export const accepts = (parse: () => unknown) => {
+  try {
+    parse();
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
+
+// Silently keeping the last good value reads as the field ignoring you, so an
+// unparseable field says so. The last good value does stay in effect.
+export const invalidBorder = (invalid: boolean): React.CSSProperties =>
+  invalid ? { border: "1px solid #f55", outline: "none" } : {};
+
+const asText = { toString: (x: unknown) => x as string };
+
 interface InputProps<T extends ConfigKey> {
   label: string;
   _key: T;
@@ -41,53 +66,22 @@ interface II<T> {
   validate?: (val: T) => boolean;
 }
 
-// A run of identical values can be written "3x2" instead of "3,3". Kept well
-// below anything useful as a row count, so a fat-fingered "3x1000" is rejected
-// rather than building a list big enough to stall the draw loop.
-const MAX_LIST_LENGTH = 128;
-
-const ENTRY = /^(-?(?:\d+\.?\d*|\.\d+))(?:\s*x\s*(\d+))?$/i;
-
-// Throws rather than returning something partial, so text that isn't a valid
-// list yet leaves the last good value in place.
-export const parseNumberList = (text: string): number[] => {
-  const out: number[] = [];
-  for (const part of text.split(",")) {
-    const entry = part.trim();
-    if (!entry) continue;
-    const match = ENTRY.exec(entry);
-    if (!match) throw new Error(`not a number or count: "${entry}"`);
-    const value = parseFloat(match[1]);
-    const count = match[2] === undefined ? 1 : parseInt(match[2], 10);
-    if (out.length + count > MAX_LIST_LENGTH) throw new Error("list too long");
-    for (let i = 0; i < count; i++) out.push(value);
-  }
-  // An empty list would divide by zero downstream, so treat it as unfinished
-  // typing instead of committing it.
-  if (!out.length) throw new Error("empty list");
-  return out;
+const rowStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "row",
+  gap: "4px",
 };
 
-// Writes runs back out in the "3x2" shorthand, so what you typed survives a
-// round trip through the expanded array.
-export const formatNumberList = (values: number[]): string => {
-  const parts: string[] = [];
-  let i = 0;
-  while (i < values.length) {
-    let run = 1;
-    while (i + run < values.length && values[i + run] === values[i]) run++;
-    parts.push(run > 1 ? `${values[i]}x${run}` : `${values[i]}`);
-    i += run;
-  }
-  return parts.join(",");
-};
+const LIST_HINT =
+  'comma separated; "1x2, 2, 3x2" means 1 1 2 3 3. Parameters and arithmetic allowed: "bar/n x n"';
 
 const NumberArrayInput = ({ label, _key, get, set }: II<number[]>) => {
   const [props, setFocusedVal] = useFocusedValue(get(_key), {
     toString: (val) => formatNumberList(val as number[]),
   });
+  const invalid = !accepts(() => parseNumberList(props.value));
   return (
-    <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
+    <div style={rowStyle}>
       <label>{label}</label>
       <input
         {...props}
@@ -99,8 +93,79 @@ const NumberArrayInput = ({ label, _key, get, set }: II<number[]>) => {
           } catch (e) {}
         }}
         title={'comma separated; "1x2, 2, 3x2" means 1 1 2 3 3'}
-        style={{ width: "8em" }}
+        style={{ width: "8em", ...invalidBorder(invalid) }}
       ></input>
+    </div>
+  );
+};
+
+// A list written over the parameters. Stored as {inputText, val} so the text
+// survives a parameter change that its value doesn't -- the number the draw
+// code reads is re-derived by resolveJsConfig, never by this component.
+const ExprListInput = ({
+  label,
+  _key,
+  set,
+  params,
+  val,
+}: {
+  label: string;
+  _key: ConfigKey;
+  set: (key: ConfigKey, val: NumberListExpr) => void;
+  params: Params;
+  val: NumberListExpr;
+}) => {
+  const [props, setFocusedVal] = useFocusedValue(val.inputText, asText);
+  const invalid = !accepts(() => parseNumberList(props.value, params));
+  return (
+    <div style={rowStyle}>
+      <label>{label}</label>
+      <input
+        {...props}
+        onChange={(e) => {
+          const v = e.target.value;
+          setFocusedVal(v);
+          try {
+            set(_key, { inputText: v, val: parseNumberList(v, params) });
+          } catch (e) {}
+        }}
+        title={LIST_HINT}
+        style={{ width: "8em", ...invalidBorder(invalid) }}
+      ></input>
+    </div>
+  );
+};
+
+const ExprNumberInput = ({
+  label,
+  _key,
+  set,
+  params,
+  val,
+}: {
+  label: string;
+  _key: ConfigKey;
+  set: (key: ConfigKey, val: NumberExpr) => void;
+  params: Params;
+  val: NumberExpr;
+}) => {
+  const [props, setFocusedVal] = useFocusedValue(val.inputText, asText);
+  const invalid = !accepts(() => evaluate(props.value, params));
+  return (
+    <div style={rowStyle}>
+      <label>{label}</label>
+      <input
+        {...props}
+        onChange={(e) => {
+          const v = e.target.value;
+          setFocusedVal(v);
+          try {
+            set(_key, { inputText: v, val: evaluate(v, params) });
+          } catch (e) {}
+        }}
+        title={'a number, or arithmetic over the parameters: "bar/n"'}
+        style={{ width: "6em", ...invalidBorder(invalid) }}
+      />
     </div>
   );
 };
@@ -120,12 +185,10 @@ const ParserArrayInput = ({
   parser: any;
   val: any;
 }) => {
-  const [props, setFocusedVal] = useFocusedValue(val.inputText, {
-    toString: (x) => x as string,
-  });
+  const [props, setFocusedVal] = useFocusedValue(val.inputText, asText);
 
   return (
-    <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
+    <div style={rowStyle}>
       <label>{label}</label>
       <input
         {...props}
@@ -144,7 +207,7 @@ const ParserArrayInput = ({
 };
 
 const BooleanInput = ({ label, _key, get, set }: II<boolean>) => (
-  <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
+  <div style={rowStyle}>
     <label>{label}</label>
     <input
       onChange={(e) => set(_key, !get(_key))}
@@ -158,7 +221,7 @@ const NumberInput = ({ label, _key, get, set, validate }: II<number>) => {
   const [props, setFocusedVal] = useFocusedValue(get(_key));
 
   return (
-    <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
+    <div style={rowStyle}>
       <label>{label}</label>
       <input
         {...props}
@@ -175,6 +238,11 @@ const NumberInput = ({ label, _key, get, set, validate }: II<number>) => {
   );
 };
 
+// Expression-backed fields carry no `type`, which is what tells them apart from
+// a rhythm; whether the resolved value is an array picks the widget.
+const isExprField = (val: any) =>
+  typeof val?.inputText === "string" && val.val !== undefined;
+
 // @ts-ignore
 export const Input = (props: InputProps) => {
   const { _key, get } = props;
@@ -187,6 +255,13 @@ export const Input = (props: InputProps) => {
           return <ParserArrayInput {...{ ...props, parser: parser1, val }} />;
         } else if (val.type === "parser2") {
           return <ParserArrayInput {...{ ...props, parser: parser2, val }} />;
+        } else if (isExprField(val)) {
+          const p = { ...props, val, params: (props as any).params ?? {} };
+          return Array.isArray(val.val) ? (
+            <ExprListInput {...p} />
+          ) : (
+            <ExprNumberInput {...p} />
+          );
         } else {
           throw new Error("Unknown object type");
         }

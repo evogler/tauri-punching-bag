@@ -1,3 +1,13 @@
+import parser1 from "./parser1";
+import parser2 from "./parser2";
+import {
+  Params,
+  evaluate,
+  hasInterpolation,
+  interpolate,
+  parseNumberList,
+} from "./expression";
+
 // How a single input channel is drawn.
 export type ChannelStyle = { color: string; alpha: number };
 
@@ -168,16 +178,38 @@ export const ROW_COLORS = [
   "#888888",
 ];
 
+// A named number, so "switch to 16ths" is one edit rather than five. A list
+// rather than a map because the panel needs a stable order to draw the rows in.
+export type Parameter = { name: string; value: number };
+
+// A field written as an expression over the parameters: the text typed, and the
+// number it currently evaluates to. Same shape as `Rhythm`, so the recursive
+// `unwrapValues` already strips it down to `val` on the way to Rust -- an
+// expression-backed field costs nothing there if one ever moves across.
+export type Expr<T> = { inputText: string; val: T };
+export type NumberExpr = Expr<number>;
+export type NumberListExpr = Expr<number[]>;
+
+// The bare-value branches are the second line of defence behind
+// `normalizeView`: restore merges saved values *over* the defaults, so a
+// session written before these fields took expressions can put a plain number
+// where an object is expected (the loopFeedback trap in CLAUDE.md).
+export const exprNumber = (field: NumberExpr | number): number =>
+  typeof field === "number" ? field : field?.val ?? 0;
+
+export const exprList = (field: NumberListExpr | number[]): number[] =>
+  Array.isArray(field) ? field : field?.val ?? [];
+
 // One pane of the waveform display. Everything here is per-view, so two panes
 // can show the same audio against different grids and row lengths -- looking
 // back and forth between 16ths and triplets is the whole point of having more
 // than one.
 export type ViewConfig = {
-  beatsPerRow: number[];
-  marginLeft: number;
-  marginRight: number;
+  beatsPerRow: NumberListExpr;
+  marginLeft: NumberExpr;
+  marginRight: NumberExpr;
   grids: VisualGrid[];
-  visualGain: number;
+  visualGain: NumberExpr;
   barColorMode: boolean;
   refreshAtCycleEnd: boolean;
   // Colors a row's waveform can take, in the order `rowColorPattern` indexes
@@ -216,10 +248,18 @@ export const rowColorFor = (
   return rowColors[i];
 };
 
+// A pane with no rows would divide by zero on the way to a row height.
+// `parseNumberList` rejects an empty list, so this only catches a hand-edited
+// or half-migrated session.
+export const viewRowBeats = (view: ViewConfig): number[] => {
+  const rows = exprList(view.beatsPerRow);
+  return rows.length ? rows : [1];
+};
+
 export const defaultViewConfig = (): ViewConfig => ({
-  beatsPerRow: [2, 2],
-  marginLeft: 0.11,
-  marginRight: 0.11,
+  beatsPerRow: { inputText: "2x2", val: [2, 2] },
+  marginLeft: { inputText: "0.11", val: 0.11 },
+  marginRight: { inputText: "0.11", val: 0.11 },
   grids: [
     {
       color: GRID_COLORS[0],
@@ -231,7 +271,7 @@ export const defaultViewConfig = (): ViewConfig => ({
       },
     },
   ],
-  visualGain: 10,
+  visualGain: { inputText: "10", val: 10 },
   barColorMode: false,
   refreshAtCycleEnd: false,
   rowColors: [],
@@ -253,6 +293,9 @@ export const defaultJsConfig = {
   canvasWidth: 2000,
   subdivisionOffset: 0,
   channelStyles: [] as ChannelStyle[],
+  // Global rather than per-view: one set of names every pane's expressions can
+  // reach, so `n` means the same thing wherever it's written.
+  parameters: [] as Parameter[],
   views: [defaultViewConfig()] as ViewConfig[],
   // The pane arrangement. `views.length` is held equal to viewCols * viewRows,
   // so changing either resizes the list rather than letting the two disagree.
@@ -288,3 +331,73 @@ export const isViewConfigKey = (k: string): k is ViewConfigKey =>
 export type Config = RustConfig & JsConfig & ViewConfig;
 
 export type ConfigKey = keyof Config;
+
+// Later duplicates would silently win, so the first binding of a name is the
+// one that counts. The panel refuses to create a duplicate; this only decides
+// what a hand-edited session does.
+export const parameterValues = (parameters: Parameter[]): Params => {
+  const out: Params = {};
+  for (const p of parameters) if (!(p.name in out)) out[p.name] = p.value;
+  return out;
+};
+
+// Failure keeps the last good `val` and leaves the text alone. Deleting a
+// parameter shouldn't wipe every field that referred to it -- the field goes
+// red and waits to be fixed, and meanwhile the pane still draws.
+const resolveNumber = (field: NumberExpr, params: Params): NumberExpr => {
+  if (!field || typeof field.inputText !== "string") return field;
+  try {
+    return { inputText: field.inputText, val: evaluate(field.inputText, params) };
+  } catch (e) {
+    return field;
+  }
+};
+
+const resolveList = (
+  field: NumberListExpr,
+  params: Params
+): NumberListExpr => {
+  if (!field || typeof field.inputText !== "string") return field;
+  try {
+    return {
+      inputText: field.inputText,
+      val: parseNumberList(field.inputText, params),
+    };
+  } catch (e) {
+    return field;
+  }
+};
+
+// Rhythms without a braced span can't have moved, and skipping them means text
+// the parsers no longer accept is never touched.
+const resolveRhythm = (rhythm: Rhythm, params: Params): Rhythm => {
+  if (!hasInterpolation(rhythm.inputText)) return rhythm;
+  try {
+    const parser = rhythm.type === "parser1" ? parser1 : parser2;
+    return { ...rhythm, val: parser.parse(interpolate(rhythm.inputText, params)) };
+  } catch (e) {
+    return rhythm;
+  }
+};
+
+const resolveView = (view: ViewConfig, params: Params): ViewConfig => ({
+  ...view,
+  beatsPerRow: resolveList(view.beatsPerRow, params),
+  marginLeft: resolveNumber(view.marginLeft, params),
+  marginRight: resolveNumber(view.marginRight, params),
+  visualGain: resolveNumber(view.visualGain, params),
+  grids: view.grids.map((g) => ({
+    ...g,
+    subdivisions: resolveRhythm(g.subdivisions, params),
+  })),
+});
+
+// Re-evaluates every expression-backed field against the config's own
+// parameters. Called from the parameter setter, inside the same update, rather
+// than from an effect: an effect that writes config is a render loop waiting to
+// happen, and the draw loop reads `val` directly, so it would also draw one
+// frame from stale numbers.
+export const resolveJsConfig = (js: JsConfig): JsConfig => {
+  const params = parameterValues(js.parameters);
+  return { ...js, views: js.views.map((v) => resolveView(v, params)) };
+};

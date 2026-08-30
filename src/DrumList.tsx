@@ -1,5 +1,6 @@
 import { DrumVoice, drumGains, drumLabel, drumShift } from "./config";
-import { formatNumberList, parseNumberList, useFocusedValue } from "./Input";
+import { formatNumberList, parseNumberList } from "./expression";
+import { useFocusedValue } from "./Input";
 import parser1 from "./parser1";
 import parser2 from "./parser2";
 

@@ -1,6 +1,8 @@
 import {
   JsConfig,
   JsConfigKey,
+  NumberExpr,
+  NumberListExpr,
   RustConfig,
   RustConfigKey,
   ViewConfig,
@@ -12,6 +14,7 @@ import {
   isJsConfigKey,
   isRustConfigKey,
 } from "./config";
+import { formatNumberList } from "./expression";
 
 const STORAGE_KEY = "tpb.presets.v1";
 const SESSION_KEY = "tpb.session.v1";
@@ -51,12 +54,41 @@ const clampSide = (n: unknown) =>
     ? Math.min(MAX_VIEW_SIDE, Math.max(1, Math.floor(n)))
     : 1;
 
+// `beatsPerRow`, the margins and `visualGain` were plain numbers before they
+// took expressions. Restore merges saved values *over* the defaults, so the old
+// shape lands on top of the new one and `Math.max(...beatsPerRow)` comes back
+// NaN -- a blank pane, the loopFeedback trap again. Wrapped here rather than
+// renamed out of the way, because a rename would throw away saved layouts.
+const wrapNumber = (val: unknown, fallback: NumberExpr): NumberExpr => {
+  if (typeof val === "number" && Number.isFinite(val))
+    return { inputText: String(val), val };
+  return typeof val === "object" && val !== null && "val" in val
+    ? (val as NumberExpr)
+    : fallback;
+};
+
+const wrapList = (val: unknown, fallback: NumberListExpr): NumberListExpr => {
+  if (Array.isArray(val))
+    return { inputText: formatNumberList(val as number[]), val };
+  return typeof val === "object" && val !== null && "val" in val
+    ? (val as NumberListExpr)
+    : fallback;
+};
+
 // Merging over the defaults is what lets a view saved by an older build pick up
 // keys added since, the same way the top-level config already worked.
-const normalizeView = (view: unknown): ViewConfig =>
-  typeof view === "object" && view !== null
-    ? { ...defaultViewConfig(), ...(view as Partial<ViewConfig>) }
-    : defaultViewConfig();
+const normalizeView = (view: unknown): ViewConfig => {
+  const base = defaultViewConfig();
+  if (typeof view !== "object" || view === null) return base;
+  const merged = { ...base, ...(view as Partial<ViewConfig>) };
+  return {
+    ...merged,
+    beatsPerRow: wrapList(merged.beatsPerRow, base.beatsPerRow),
+    marginLeft: wrapNumber(merged.marginLeft, base.marginLeft),
+    marginRight: wrapNumber(merged.marginRight, base.marginRight),
+    visualGain: wrapNumber(merged.visualGain, base.visualGain),
+  };
+};
 
 // Folds a pre-views js config into one view, then squares the list up with the
 // arrangement so `views.length === viewCols * viewRows` always holds.

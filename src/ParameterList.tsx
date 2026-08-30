@@ -1,0 +1,120 @@
+import { Parameter } from "./config";
+import { isValidParameterName } from "./expression";
+import { invalidBorder, useFocusedValue } from "./Input";
+
+const rowStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "row",
+  gap: "4px",
+  alignItems: "center",
+  flexWrap: "wrap",
+};
+
+// Offered in order to new parameters. `n` and `bar` first because they're the
+// pair the whole feature was designed around -- `bar/n x n` rows against a
+// `{n/bar}:1` grid.
+const NAMES = ["n", "bar", "m", "k", "a", "b", "c", "d"];
+
+const nextName = (parameters: Parameter[]) => {
+  const taken = parameters.map((p) => p.name);
+  const free = NAMES.find((n) => !taken.includes(n));
+  if (free) return free;
+  let i = 1;
+  while (taken.includes(`p${i}`)) i++;
+  return `p${i}`;
+};
+
+const ParameterRow = ({
+  parameter,
+  others,
+  onChange,
+  onRemove,
+}: {
+  parameter: Parameter;
+  others: string[];
+  onChange: (next: Parameter) => void;
+  onRemove: () => void;
+}) => {
+  const [nameProps, setNameText] = useFocusedValue(parameter.name, {
+    toString: (x) => x as string,
+  });
+  const [valueProps, setValueText] = useFocusedValue(parameter.value);
+  // A name that isn't an identifier, or is already in use, simply doesn't
+  // commit -- so the expressions that refer to the old one keep working while
+  // it's being retyped.
+  const nameOk = (name: string) =>
+    isValidParameterName(name) && !others.includes(name);
+
+  return (
+    <div style={rowStyle}>
+      <input
+        {...nameProps}
+        onChange={(e) => {
+          const name = e.target.value;
+          setNameText(name);
+          if (nameOk(name)) onChange({ ...parameter, name });
+        }}
+        title="Name to write in expressions. Letters, digits and underscore; x, min, max and round are taken"
+        style={{ width: "5em", ...invalidBorder(!nameOk(nameProps.value)) }}
+      />
+      <span style={{ color: "#aaa" }}>=</span>
+      <input
+        {...valueProps}
+        onChange={(e) => {
+          setValueText(e.target.value);
+          const value = parseFloat(e.target.value);
+          if (Number.isFinite(value)) onChange({ ...parameter, value });
+        }}
+        title={`Value of ${parameter.name}`}
+        style={{
+          width: "4em",
+          ...invalidBorder(!Number.isFinite(parseFloat(valueProps.value))),
+        }}
+      />
+      <button onClick={onRemove} title={`Remove ${parameter.name}`}>
+        ✕
+      </button>
+    </div>
+  );
+};
+
+// The named numbers every pane's expressions can reference. Renaming one does
+// not rewrite the expressions that use it: they go red and keep their last good
+// value until they're pointed at the new name.
+export const ParameterList = ({
+  parameters,
+  setParameters,
+}: {
+  parameters: Parameter[];
+  setParameters: (next: Parameter[]) => void;
+}) => (
+  <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+    {parameters.map((parameter, i) => (
+      <ParameterRow
+        key={i}
+        parameter={parameter}
+        others={parameters.filter((_, j) => j !== i).map((p) => p.name)}
+        onChange={(next) =>
+          setParameters(parameters.map((p, j) => (j === i ? next : p)))
+        }
+        onRemove={() => setParameters(parameters.filter((_, j) => j !== i))}
+      />
+    ))}
+    <div style={rowStyle}>
+      <button
+        onClick={() =>
+          setParameters([...parameters, { name: nextName(parameters), value: 1 }])
+        }
+        title="Add a named number expressions can refer to"
+      >
+        + ADD PARAMETER
+      </button>
+      {!parameters.length && (
+        <span style={{ color: "#aaa", fontSize: "0.8em" }}>
+          None -- fields hold plain numbers. With n = 16, bar = 4, rows can say
+          "bar/n x n" and a grid "&#123;n/bar&#125;:1".
+        </span>
+      )}
+    </div>
+  </div>
+);

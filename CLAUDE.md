@@ -55,7 +55,9 @@ position, looper) derives from it.
 | `App.tsx` | State, config plumbing, the whole canvas draw path. Large. |
 | `config.ts` | `defaultRustConfig` / `defaultJsConfig` — the split below matters. |
 | `layout.ts` | `getCanvasPositions` — pure geometry, where a beat lands on screen. |
-| `Input.tsx` | Generic config inputs, dispatched on value type. `parseNumberList`. |
+| `Input.tsx` | Generic config inputs, dispatched on value type. |
+| `expression.ts` | The parameter expression language, and `parseNumberList` / `formatNumberList` built on it. Pure. |
+| `ParameterList.tsx` | The named-number UI. |
 | `GridList.tsx` / `ChannelList.tsx` / `DrumList.tsx` | The three list UIs. |
 | `RowColorList.tsx` | The per-view row color swatches. |
 | `presets.ts` | Named presets *and* the auto-restored session. |
@@ -99,6 +101,51 @@ Rules that will bite you:
 - **Session restore** merges over defaults, so new keys keep their default and
   removed keys are dropped. A restored session pushes one `set_config` on mount,
   because Rust boots from its own `default_config()`.
+
+## Parameters and expressions
+
+`parameters: {name, value}[]` in `defaultJsConfig` is a global list of named
+numbers, and several view fields hold arithmetic over them instead of literals.
+With `n = 16, bar = 4`, a pane's rows read `bar/n x n` (0.25 x 16) and a grid
+reads `{n/bar}:1` (4:1) -- so "switch to 16ths" is one edit rather than five.
+
+`expression.ts` is the whole language: numbers, parameter names, `+ - * / ( )`,
+and `min` / `max` / `round`. Every entry point **throws** rather than returning
+NaN or a partial result; callers use the throw to decide between committing and
+keeping the last good value. Deliberately not a scripting language.
+
+- **Expression-backed fields are stored `{inputText, val}`** -- the same shape
+  as `Rhythm`, so the recursive `unwrapValues` already strips them to `val` and
+  they cost nothing if one ever moves to the Rust side. Currently
+  `beatsPerRow`, `marginLeft`, `marginRight` and `visualGain`, all per-view.
+  Read them through `exprNumber` / `exprList` / `viewRowBeats`, never directly.
+- **Rhythm text takes `{...}` interpolation instead**, because the generated PEG
+  parsers already own that syntax; the braced span is substituted for its value
+  *before* parsing rather than by touching the grammar. Grid rhythms only --
+  the click and drum rhythms are Rust-side and aren't re-resolved.
+- **`resolveJsConfig` is the freshness mechanism.** `val` must never be one
+  render stale, since the draw loop reads it directly, so the parameter setter
+  re-walks the whole js config in the *same* update. Not an effect: an effect
+  that writes config is a render loop waiting to happen, and it would still
+  draw one frame from the old numbers. It's also run on the restored session
+  and on preset load.
+- **A field that stops evaluating keeps its last good `val`** and its text.
+  Deleting a parameter marks every field that referred to it invalid (red
+  border, recomputed from what's on screen so it survives a blur) rather than
+  blanking the pane. Renaming a parameter does *not* rewrite the expressions
+  using it.
+- **`x` is reserved**, and so is `x` followed by digits: `formatNumberList`
+  writes `0.25x16` with no spaces, so the tokenizer has to split `x16` rather
+  than read it as an identifier. `min`/`max`/`round` are reserved too.
+  `isValidParameterName` is the one place a user can hit this.
+- **A fractional repeat count rounds**, it doesn't reject -- `bar/n x n/2` at
+  `n = 7` wants 3.5 rows, and rejecting would flash the field red at every
+  intermediate value of a parameter sweep. `MAX_LIST_LENGTH` still caps at 128.
+- **`beatsPerRow` changed shape** from `number[]` to `{inputText, val}`, which
+  is the `loopFeedback` trap above: restore merges a saved array *over* the new
+  object and `Math.max(...beatsPerRow)` returns NaN, drawing a blank pane.
+  `normalizeView` wraps arrays (and bare numbers, for the three scalar fields)
+  explicitly. Wrapped rather than renamed, so saved layouts survive.
 
 ## Audio thread rules
 

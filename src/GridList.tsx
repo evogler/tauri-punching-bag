@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { GRID_COLORS, Rhythm, VisualGrid, gridAlpha } from "./config";
-import { useFocusedValue } from "./Input";
+import { accepts, invalidBorder, useFocusedValue } from "./Input";
+import { Params, interpolate } from "./expression";
 import parser1 from "./parser1";
 import parser2 from "./parser2";
 
@@ -38,6 +39,7 @@ const rowStyle: React.CSSProperties = {
 const GridRow = ({
   grid,
   index,
+  params,
   dragging,
   onChange,
   onRemove,
@@ -47,6 +49,7 @@ const GridRow = ({
 }: {
   grid: VisualGrid;
   index: number;
+  params: Params;
   dragging: boolean;
   onChange: (grid: VisualGrid) => void;
   onRemove: () => void;
@@ -58,6 +61,9 @@ const GridRow = ({
     toString: (x) => x as string,
   });
   const alpha = gridAlpha(grid);
+  const parse = (text: string) =>
+    parserFor(grid.subdivisions).parse(interpolate(text, params));
+  const invalid = !accepts(() => parse(props.value));
 
   return (
     <div style={{ ...rowStyle, opacity: dragging ? 0.4 : 1 }}>
@@ -96,15 +102,18 @@ const GridRow = ({
           const v = e.target.value;
           setFocusedVal(v);
           try {
-            const parsed = parserFor(grid.subdivisions).parse(v);
             onChange({
               ...grid,
-              subdivisions: { ...grid.subdivisions, val: parsed, inputText: v },
+              subdivisions: {
+                ...grid.subdivisions,
+                val: parse(v),
+                inputText: v,
+              },
             });
           } catch (e) {}
         }}
-        title={`Grid ${index + 1} rhythm`}
-        style={{ flex: 1, minWidth: 0 }}
+        title={`Grid ${index + 1} rhythm. A braced span is an expression: "{n/bar}:1"`}
+        style={{ flex: 1, minWidth: 0, ...invalidBorder(invalid) }}
       />
       <input
         type="range"
@@ -128,9 +137,11 @@ const GridRow = ({
 export const GridList = ({
   grids,
   setGrids,
+  params,
 }: {
   grids: VisualGrid[];
   setGrids: (grids: VisualGrid[]) => void;
+  params: Params;
 }) => {
   const rowsRef = useRef<HTMLDivElement>(null);
   // `to` is where the dragged grid lands in the reordered list.
@@ -193,6 +204,7 @@ export const GridList = ({
             <GridRow
               grid={grid}
               index={i}
+              params={params}
               dragging={drag?.from === i}
               onChange={(next) =>
                 setGrids(grids.map((g, j) => (j === i ? next : g)))
