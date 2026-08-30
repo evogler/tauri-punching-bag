@@ -147,6 +147,21 @@ export const GRID_COLORS = [
   "#aaff33",
 ];
 
+// Offered in order when adding a row color, so consecutive swatches start out
+// easy to tell apart.
+export const ROW_COLORS = [
+  "#33cc66",
+  "#0088ff",
+  "#ff5533",
+  "#ffcc00",
+  "#cc66ff",
+  "#00ddcc",
+  "#ff66aa",
+  "#aaff33",
+  "#ffffff",
+  "#888888",
+];
+
 // One pane of the waveform display. Everything here is per-view, so two panes
 // can show the same audio against different grids and row lengths -- looking
 // back and forth between 16ths and triplets is the whole point of having more
@@ -159,6 +174,14 @@ export type ViewConfig = {
   visualGain: number;
   barColorMode: boolean;
   refreshAtCycleEnd: boolean;
+  // Colors a row's waveform can take, in the order `rowColorPattern` indexes
+  // them. Empty means rows keep the channel's own color, which is what every
+  // pane did before this existed.
+  rowColors: string[];
+  // Which row takes which color, 1-based and cycled by row index, in the same
+  // "1, 2x3" syntax as beatsPerRow. Only consulted when `rowColors` has more
+  // than one entry; empty means every row takes the first color.
+  rowColorPattern: number[];
   // Draw the first visible channel above the centre line and the second below,
   // instead of overlaying them. With more than two, even slots go up and odd
   // slots go down.
@@ -167,6 +190,26 @@ export type ViewConfig = {
 
 // A factory rather than a constant: each view needs grid and row arrays of its
 // own, or editing one pane's would edit every pane's.
+// The color a row's waveform takes: the pane's row palette if it has one,
+// otherwise null, meaning fall back to the channel's own color. The pattern is
+// cycled by row index rather than stretched over the rows, so one shorter than
+// the row list repeats down the pane -- with `0.25x16` rows and "1,2x3" that
+// lands color 1 on exactly the rows that start a beat.
+export const rowColorFor = (
+  { rowColors, rowColorPattern }: ViewConfig,
+  row: number
+): string | null => {
+  if (!rowColors.length) return null;
+  if (!rowColorPattern.length) return rowColors[0];
+  const pick = Math.round(rowColorPattern[row % rowColorPattern.length]);
+  // 1-based, and wrapped rather than clamped -- the same way drum `gains`
+  // cycles, so a number past the end of the list comes back round to the start
+  // instead of erroring or silently sticking on the last color.
+  const i =
+    (((pick - 1) % rowColors.length) + rowColors.length) % rowColors.length;
+  return rowColors[i];
+};
+
 export const defaultViewConfig = (): ViewConfig => ({
   beatsPerRow: [2, 2],
   marginLeft: 0.11,
@@ -185,6 +228,8 @@ export const defaultViewConfig = (): ViewConfig => ({
   visualGain: 10,
   barColorMode: false,
   refreshAtCycleEnd: false,
+  rowColors: [],
+  rowColorPattern: [],
   splitChannels: false,
 });
 

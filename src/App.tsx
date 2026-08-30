@@ -12,6 +12,7 @@ import {
   ChannelStyle,
   channelStyle,
   BUILT_IN_DRUMS,
+  rowColorFor,
   ViewConfig,
   defaultViewConfig,
   isViewConfigKey,
@@ -25,6 +26,7 @@ import { SlidingDivision } from "./SlidingDivision";
 import { PresetBar } from "./PresetBar";
 import { Preset, makePreset, readSession, writeSession } from "./presets";
 import { GridList } from "./GridList";
+import { RowColorList } from "./RowColorList";
 import { Layout, getCanvasPositions } from "./layout";
 import { ChannelList } from "./ChannelList";
 import { DrumList, SampleStatus, makeDrumVoice } from "./DrumList";
@@ -522,7 +524,7 @@ const App = () => {
       ctx.moveTo(x, y);
       ctx.lineTo(x, y + height);
     } else {
-      ctx.strokeStyle = style.color;
+      ctx.strokeStyle = rowColorFor(v.cfg, row) ?? style.color;
       const top = half === "down" ? 0.5 : 0.5 - 0.5 * val;
       const bottom = half === "up" ? 0.5 : 0.5 + 0.5 * val;
       ctx.moveTo(x, y + top * height);
@@ -883,6 +885,17 @@ const App = () => {
             _key="refreshAtCycleEnd"
             {...viewIO}
           />
+          <RowColorList
+            colors={viewCtxs[activeView]?.cfg.rowColors ?? []}
+            setColors={(colors) => viewIO.set("rowColors", colors)}
+          />
+          {(viewCtxs[activeView]?.cfg.rowColors.length ?? 0) > 1 && (
+            <Input
+              label="row color pattern"
+              _key="rowColorPattern"
+              {...viewIO}
+            />
+          )}
           <GridList
             grids={viewCtxs[activeView]?.cfg.grids ?? []}
             setGrids={(grids) => viewIO.set("grids", grids)}

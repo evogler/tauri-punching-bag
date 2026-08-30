@@ -57,6 +57,7 @@ position, looper) derives from it.
 | `layout.ts` | `getCanvasPositions` — pure geometry, where a beat lands on screen. |
 | `Input.tsx` | Generic config inputs, dispatched on value type. `parseNumberList`. |
 | `GridList.tsx` / `ChannelList.tsx` / `DrumList.tsx` | The three list UIs. |
+| `RowColorList.tsx` | The per-view row color swatches. |
 | `presets.ts` | Named presets *and* the auto-restored session. |
 | `parser1.js` / `parser2.js` | Generated PEG parsers for rhythm syntax. Don't hand-edit. |
 
@@ -165,7 +166,29 @@ per-pane, held in `views: ViewConfig[]`.
   and channel peaks. Panes disagree about where a pixel column ends, because
   `pixelsPerBeat` is derived from each pane's own cell width.
 - Only `channelStyles` and the channel selection stay global, so a channel keeps
-  its colour in every pane.
+  its colour in every pane -- unless the pane sets row colours, below.
+
+### Row colours
+
+`rowColors` is a per-pane list of colours and `rowColorPattern` says which row
+takes which, 1-based, in the same `parseNumberList` syntax as `beatsPerRow`.
+`rowColorFor` in `config.ts` resolves them, next to `gridAlpha` and `drumGains`.
+
+- **The pattern is cycled by row index, not stretched over the rows.** Like drum
+  `gains`, a pattern that doesn't divide the row count drifts rather than
+  resetting. That's the point: `0.25x16` rows with `"1,2x3"` puts colour 1 on
+  rows 0, 4, 8, 12 -- exactly the 16ths that start a beat.
+- Empty `rowColors` means rows keep the channel's colour, so panes behave
+  exactly as they did before this existed. One colour (or an empty pattern)
+  paints every row the same. The pattern input only appears once there are two
+  colours to choose between; emptying the colour list is the off switch, since
+  `parseNumberList` rejects an empty list and so can't clear the pattern.
+- An index past the end of the colour list **wraps**, so deleting a colour can't
+  leave the pattern reading `undefined`.
+- **Row colour overrides the channel colour**, so with several channels visible
+  in one pane they all draw in the row's colour. `splitChannels` still tells
+  them apart by position. `barColorMode` still wins over both -- it encodes
+  amplitude as brightness, so a hue would have nothing to say.
 
 `getCanvasPositions(layout, beat)` in `layout.ts` returns **every** place a beat
 appears on screen. Each row draws its own beats plus `marginLeft` beats of lead-in
@@ -268,12 +291,14 @@ drums/click display buses. The click's timbre was preserved *by construction*
 (its counter and per-channel RNG were deliberately left untouched) rather than by
 listening.
 
-Multiple views are new and **not yet verified on screen** -- the build passes and
-the session migration is covered by a temp test that was run and deleted, but
-nobody has looked at two panes side by side yet. Worth checking first: that the
-two panes sweep independently, that a restored pre-views session comes back with
-its old rows and grids intact, and that switching arrangement doesn't leave stale
-pixels in a pane.
+Multiple views are confirmed working by the owner. Row colours are newer and
+**not yet verified on screen** -- the build passes and the pattern logic is
+covered by a temp test that was run and deleted, but nobody has looked at a
+coloured row yet.
+
+Still unchecked on the views work: that a restored pre-views session comes back
+with its old rows and grids intact, and that switching arrangement doesn't leave
+stale pixels in a pane.
 
 ## Discussed but not built
 
