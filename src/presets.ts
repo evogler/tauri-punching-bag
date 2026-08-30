@@ -5,8 +5,10 @@ import {
   NumberListExpr,
   RustConfig,
   RustConfigKey,
+  RustExprKey,
   ViewConfig,
   MAX_VIEW_SIDE,
+  numExpr,
   copyView,
   defaultJsConfig,
   defaultRustConfig,
@@ -48,6 +50,28 @@ const LEGACY_VIEW_KEYS: (keyof ViewConfig)[] = [
   "refreshAtCycleEnd",
   "splitChannels",
 ];
+
+// Same hazard as the view fields: a session written before these took
+// expressions stores a bare number, and restore merges it *over* the default
+// object. Wrapped rather than renamed so saved bpm and buffer compensation
+// survive the upgrade.
+const RUST_EXPR_KEYS: RustExprKey[] = [
+  "bpm",
+  "beatsToLoop",
+  "loopEchoes",
+  "loopEchoGain",
+  "clickVolume",
+  "audioInGain",
+  "bufferCompensation",
+];
+
+const migrateRust = (rust: Record<string, unknown>): Record<string, unknown> => {
+  const out = { ...rust };
+  for (const key of RUST_EXPR_KEYS) {
+    if (typeof out[key] === "number") out[key] = numExpr(out[key] as number);
+  }
+  return out;
+};
 
 const clampSide = (n: unknown) =>
   typeof n === "number" && Number.isFinite(n)
@@ -152,9 +176,11 @@ const sanitizePreset = (preset: unknown): Preset | null => {
   const { rust, js } = preset as Record<string, unknown>;
   return {
     rust: pickKnownKeys<Partial<RustConfig>>(
-      typeof rust === "object" && rust !== null
-        ? (rust as Record<string, unknown>)
-        : {},
+      migrateRust(
+        typeof rust === "object" && rust !== null
+          ? (rust as Record<string, unknown>)
+          : {}
+      ),
       isRustConfigKey,
       TRANSIENT_RUST_KEYS
     ),

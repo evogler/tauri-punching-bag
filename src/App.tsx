@@ -22,6 +22,7 @@ import {
   exprNumber,
   parameterValues,
   resolveJsConfig,
+  resolveRustConfig,
   viewRowBeats,
 } from "./config";
 import { Input } from "./Input";
@@ -219,10 +220,12 @@ const App = () => {
 
   // Read once, on the first render only.
   const [restoredSession] = useState(readSession);
-  const [rustConfig, setRustConfig] = useState<RustConfig>(() => ({
-    ...defaultRustConfig,
-    ...restoredSession?.rust,
-  }));
+  const [rustConfig, setRustConfig] = useState<RustConfig>(() =>
+    resolveRustConfig(
+      { ...defaultRustConfig, ...restoredSession?.rust },
+      parameterValues(restoredSession?.js?.parameters ?? [])
+    )
+  );
   // Resolved on the way in: a session restored from an older build can carry
   // texts whose `val` predates the parameters saved alongside them.
   const [jsConfig, setJsConfig] = useState<JsConfig>(() =>
@@ -236,8 +239,15 @@ const App = () => {
   // Every expression-backed field is re-resolved in the same update, so `val`
   // can never lag a parameter change. An effect doing it afterwards would risk
   // a render loop, and would leave one frame drawn from stale numbers.
-  const setParameters = (parameters: Parameter[]) =>
+  const setParameters = (parameters: Parameter[]) => {
     setJsConfig((js) => resolveJsConfig({ ...js, parameters }));
+    // The rust side has to be re-resolved *and* pushed -- unlike the js config
+    // nothing here re-reads it on render, so a stale `val` would sit in the
+    // audio thread until the next unrelated setting change.
+    updateRustConfig(
+      resolveRustConfig(rustConfig, parameterValues(parameters))
+    );
+  };
 
   const set = <T,>(k: string, v: T) => {
     if (isRustConfigKey(k)) {
@@ -490,8 +500,14 @@ const App = () => {
   const getCurrentPreset = () => makePreset(rustConfig, jsConfig);
 
   const loadPreset = (preset: Preset) => {
-    setJsConfig((jsConfig) => resolveJsConfig({ ...jsConfig, ...preset.js }));
-    updateRustConfig(preset.rust);
+    const next = resolveJsConfig({ ...jsConfig, ...preset.js });
+    setJsConfig(next);
+    updateRustConfig(
+      resolveRustConfig(
+        { ...rustConfig, ...preset.rust },
+        parameterValues(next.parameters)
+      )
+    );
   };
 
   const resetBeat = () => {
@@ -791,6 +807,7 @@ const App = () => {
           <Input
             label="bpm"
             _key="bpm"
+            params={params}
             set={set}
             get={get}
             validate={(n: number) => n > 0}
@@ -802,16 +819,18 @@ const App = () => {
           <Input
             label="click rhythm"
             _key="audioSubdivisions"
+            params={params}
             set={set}
             get={get}
           />
           <Input label="click toggle" _key="clickToggle" set={set} get={get} />
-          <Input label="click volume" _key="clickVolume" set={set} get={get} />
+          <Input label="click volume" _key="clickVolume" params={params} set={set} get={get} />
         </Section>
 
         <Section label="drums">
           <Input label="drums on" _key="drumOn" set={set} get={get} />
           <DrumList
+            params={params}
             drums={get("drums")}
             setDrums={(next) => set("drums", next)}
             onAdd={addDrumSample}
@@ -820,15 +839,16 @@ const App = () => {
         </Section>
 
         <Section label="gain">
-          <Input label="input gain" _key="audioInGain" set={set} get={get} />
+          <Input label="input gain" _key="audioInGain" params={params} set={set} get={get} />
         </Section>
 
         <Section label="looping">
           <Input label="looping" _key="loopingOn" set={set} get={get} />
-          <Input label="beatsToLoop" _key="beatsToLoop" set={set} get={get} />
+          <Input label="beatsToLoop" _key="beatsToLoop" params={params} set={set} get={get} />
           <Input
             label="loop echoes"
             _key="loopEchoes"
+            params={params}
             set={set}
             get={get}
             validate={(n: number) => n >= 1 && n <= 16}
@@ -836,6 +856,7 @@ const App = () => {
           <Input
             label="loop echo gain"
             _key="loopEchoGain"
+            params={params}
             set={set}
             get={get}
             validate={(n: number) => n >= 0 && n <= 1}
@@ -862,6 +883,7 @@ const App = () => {
           <Input
             label="visual subdivision offset"
             _key="subdivisionOffset"
+            params={params}
             set={set}
             get={get}
           />
@@ -982,6 +1004,7 @@ const App = () => {
           <Input
             label="bufferCompensation"
             _key="bufferCompensation"
+            params={params}
             set={set}
             get={get}
           />

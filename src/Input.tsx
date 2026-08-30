@@ -5,6 +5,7 @@ import {
   evaluate,
   formatNumberList,
   parseNumberList,
+  resolveRhythmText,
 } from "./expression";
 import parser1 from "./parser1";
 import parser2 from "./parser2";
@@ -142,15 +143,25 @@ const ExprNumberInput = ({
   set,
   params,
   val,
+  validate,
 }: {
   label: string;
   _key: ConfigKey;
   set: (key: ConfigKey, val: NumberExpr) => void;
   params: Params;
   val: NumberExpr;
+  validate?: (n: number) => boolean;
 }) => {
   const [props, setFocusedVal] = useFocusedValue(val.inputText, asText);
-  const invalid = !accepts(() => evaluate(props.value, params));
+  // A validator failing is treated like a syntax error -- red, and not applied.
+  // `resolveNumber` enforces the same rule when a parameter changes, which is
+  // the path this component can't see.
+  const parse = (text: string) => {
+    const n = evaluate(text, params);
+    if (validate && !validate(n)) throw new Error("out of range");
+    return n;
+  };
+  const invalid = !accepts(() => parse(props.value));
   return (
     <div style={rowStyle}>
       <label>{label}</label>
@@ -160,7 +171,7 @@ const ExprNumberInput = ({
           const v = e.target.value;
           setFocusedVal(v);
           try {
-            set(_key, { inputText: v, val: evaluate(v, params) });
+            set(_key, { inputText: v, val: parse(v) });
           } catch (e) {}
         }}
         title={'a number, or arithmetic over the parameters: "bar/n"'}
@@ -177,6 +188,7 @@ const ParserArrayInput = ({
   set,
   parser = parser1,
   val,
+  params,
 }: {
   label: string;
   _key: ConfigKey;
@@ -184,8 +196,15 @@ const ParserArrayInput = ({
   set: any;
   parser: any;
   val: any;
+  params?: Params;
 }) => {
   const [props, setFocusedVal] = useFocusedValue(val.inputText, asText);
+  // The grammars already do arithmetic on numbers, so a parameter only has to
+  // become its value before parsing -- no braces, and no expression syntax of
+  // our own competing with the rhythm notation.
+  const parse = (text: string) =>
+    parser.parse(resolveRhythmText(text, params ?? {}));
+  const invalid = !accepts(() => parse(props.value));
 
   return (
     <div style={rowStyle}>
@@ -196,11 +215,11 @@ const ParserArrayInput = ({
           const v = e.target.value;
           setFocusedVal(v);
           try {
-            const g = parser.parse(v);
-            set(_key, { ...val, val: g, inputText: v });
+            set(_key, { ...val, val: parse(v), inputText: v });
           } catch (e) {}
         }}
-        style={{ width: "8em" }}
+        title={'a rhythm; parameters work bare: "div:1", "1/div"'}
+        style={{ width: "8em", ...invalidBorder(invalid) }}
       ></input>
     </div>
   );

@@ -3,8 +3,7 @@ import parser2 from "./parser2";
 import {
   Params,
   evaluate,
-  hasInterpolation,
-  interpolate,
+  resolveRhythmText,
   parseNumberList,
 } from "./expression";
 
@@ -68,18 +67,62 @@ export const channelPan = (pans: number[], index: number) => pans[index] ?? 0;
 export const drumLabel = (path: string) =>
   BUILT_IN_DRUMS.includes(path) ? path : path.split("/").pop() || path;
 
+export type Parameter = { name: string; value: number };
+
+// A field written as an expression over the parameters: the text typed, and the
+// number it currently evaluates to. Same shape as `Rhythm`, so the recursive
+// `unwrapValues` already strips it down to `val` on the way to Rust -- an
+// expression-backed field costs nothing there if one ever moves across.
+export type Expr<T> = { inputText: string; val: T };
+export type NumberExpr = Expr<number>;
+export type NumberListExpr = Expr<number[]>;
+
+// The bare-value branches are the second line of defence behind
+// `normalizeView`: restore merges saved values *over* the defaults, so a
+// session written before these fields took expressions can put a plain number
+// where an object is expected (the loopFeedback trap in CLAUDE.md).
+export const exprNumber = (field: NumberExpr | number): number =>
+  typeof field === "number" ? field : field?.val ?? 0;
+
+export const exprList = (field: NumberListExpr | number[]): number[] =>
+  Array.isArray(field) ? field : field?.val ?? [];
+
+// Wraps a literal for a field that takes expressions. Defaults are written this
+// way so the shape is uniform from the start; `normalizeRust`/`normalizeView`
+// wrap the bare numbers that sessions written before it saved.
+export const numExpr = (n: number): NumberExpr => ({
+  inputText: String(n),
+  val: n,
+});
+
+// Must match MAX_LOOP_ECHOES in src-tauri/src/constants.rs. Duplicated rather
+// than plumbed across because it only guards the input here.
+export const MAX_LOOP_ECHOES = 16;
+
+// The rust-side fields that take expressions -- every numeric one that has a
+// text input. The sliders and dropdowns keep plain numbers, having nowhere to
+// type an expression.
+export type RustExprKey =
+  | "bpm"
+  | "beatsToLoop"
+  | "loopEchoes"
+  | "loopEchoGain"
+  | "clickVolume"
+  | "audioInGain"
+  | "bufferCompensation";
+
 export const defaultRustConfig = {
-	audioInGain: 1.0,
+	audioInGain: numExpr(1.0),
   audioMonitorOn: false,
-  beatsToLoop: 4,
+  beatsToLoop: numExpr(4),
   // How many times a phrase comes back, one `beatsToLoop` apart each time.
-  loopEchoes: 1,
+  loopEchoes: numExpr(1),
   // Gain per echo, compounding: 1 keeps them all at full volume, below that the
   // run fades out. 0 silences everything after the first echo, so it is a gain,
   // not a "feedback amount" -- see the note in structs.rs on the rename.
-  loopEchoGain: 1,
-  bpm: 91,
-  bufferCompensation: 4330,
+  loopEchoGain: numExpr(1),
+  bpm: numExpr(91),
+  bufferCompensation: numExpr(4330),
   paused: false,
   // Which input channels get sent to the display, by device channel index.
   visibleChannels: [0] as number[],
@@ -88,7 +131,7 @@ export const defaultRustConfig = {
   channelPans: [] as number[],
   clickOn: true,
   clickToggle: false,
-  clickVolume: 0.3,
+  clickVolume: numExpr(0.3),
   drumOn: true,
   loopingOn: false,
   playFile: true,
@@ -100,7 +143,7 @@ export const defaultRustConfig = {
       end: 1,
     },
     type: "parser2",
-  },
+  } as Rhythm,
   visualMonitorOn: true,
   drums: [
     {
@@ -180,26 +223,6 @@ export const ROW_COLORS = [
 
 // A named number, so "switch to 16ths" is one edit rather than five. A list
 // rather than a map because the panel needs a stable order to draw the rows in.
-export type Parameter = { name: string; value: number };
-
-// A field written as an expression over the parameters: the text typed, and the
-// number it currently evaluates to. Same shape as `Rhythm`, so the recursive
-// `unwrapValues` already strips it down to `val` on the way to Rust -- an
-// expression-backed field costs nothing there if one ever moves across.
-export type Expr<T> = { inputText: string; val: T };
-export type NumberExpr = Expr<number>;
-export type NumberListExpr = Expr<number[]>;
-
-// The bare-value branches are the second line of defence behind
-// `normalizeView`: restore merges saved values *over* the defaults, so a
-// session written before these fields took expressions can put a plain number
-// where an object is expected (the loopFeedback trap in CLAUDE.md).
-export const exprNumber = (field: NumberExpr | number): number =>
-  typeof field === "number" ? field : field?.val ?? 0;
-
-export const exprList = (field: NumberListExpr | number[]): number[] =>
-  Array.isArray(field) ? field : field?.val ?? [];
-
 // One pane of the waveform display. Everything here is per-view, so two panes
 // can show the same audio against different grids and row lengths -- looking
 // back and forth between 16ths and triplets is the whole point of having more
@@ -291,7 +314,7 @@ export const copyView = (view: ViewConfig): ViewConfig =>
 export const defaultJsConfig = {
   canvasHeight: 1000,
   canvasWidth: 2000,
-  subdivisionOffset: 0,
+  subdivisionOffset: numExpr(0),
   channelStyles: [] as ChannelStyle[],
   // Global rather than per-view: one set of names every pane's expressions can
   // reach, so `n` means the same thing wherever it's written.
@@ -344,10 +367,19 @@ export const parameterValues = (parameters: Parameter[]): Params => {
 // Failure keeps the last good `val` and leaves the text alone. Deleting a
 // parameter shouldn't wipe every field that referred to it -- the field goes
 // red and waits to be fixed, and meanwhile the pane still draws.
-const resolveNumber = (field: NumberExpr, params: Params): NumberExpr => {
+const resolveNumber = (
+  field: NumberExpr,
+  params: Params,
+  validate?: (n: number) => boolean
+): NumberExpr => {
   if (!field || typeof field.inputText !== "string") return field;
   try {
-    return { inputText: field.inputText, val: evaluate(field.inputText, params) };
+    const val = evaluate(field.inputText, params);
+    // A validator failing is treated exactly like a parse failure: keep the last
+    // good value. It matters most for bpm, where `n - n` would otherwise push a
+    // 0 to Rust and `get_loop_spacing` would divide by it.
+    if (validate && !validate(val)) return field;
+    return { inputText: field.inputText, val };
   } catch (e) {
     return field;
   }
@@ -368,13 +400,14 @@ const resolveList = (
   }
 };
 
-// Rhythms without a braced span can't have moved, and skipping them means text
-// the parsers no longer accept is never touched.
 const resolveRhythm = (rhythm: Rhythm, params: Params): Rhythm => {
-  if (!hasInterpolation(rhythm.inputText)) return rhythm;
   try {
+    const text = resolveRhythmText(rhythm.inputText, params);
+    // Nothing in it referred to a parameter, so the stored val can't have
+    // moved -- and text the parsers no longer accept is never re-parsed.
+    if (text === rhythm.inputText) return rhythm;
     const parser = rhythm.type === "parser1" ? parser1 : parser2;
-    return { ...rhythm, val: parser.parse(interpolate(rhythm.inputText, params)) };
+    return { ...rhythm, val: parser.parse(text) };
   } catch (e) {
     return rhythm;
   }
@@ -397,6 +430,39 @@ const resolveView = (view: ViewConfig, params: Params): ViewConfig => ({
 // than from an effect: an effect that writes config is a render loop waiting to
 // happen, and the draw loop reads `val` directly, so it would also draw one
 // frame from stale numbers.
+// The rust-side expression fields, with the guards that keep a nonsense value
+// from crossing. Nothing in the frontend reads these -- they exist only to be
+// pushed to the audio thread -- so `unwrapValues` stripping them to `val` is the
+// whole of the Rust-side story.
+const RUST_EXPR_FIELDS: {
+  key: RustExprKey;
+  validate?: (n: number) => boolean;
+}[] = [
+  { key: "bpm", validate: (n) => n > 0 && n < 100000 },
+  { key: "beatsToLoop", validate: (n) => n > 0 },
+  { key: "loopEchoes", validate: (n) => n >= 1 && n <= MAX_LOOP_ECHOES },
+  { key: "loopEchoGain", validate: (n) => n >= 0 && n <= 1 },
+  { key: "clickVolume", validate: (n) => n >= 0 },
+  { key: "audioInGain", validate: (n) => n >= 0 },
+  { key: "bufferCompensation", validate: (n) => n >= 0 },
+];
+
+export const resolveRustConfig = (
+  rust: RustConfig,
+  params: Params
+): RustConfig => {
+  const out = { ...rust } as Record<string, unknown>;
+  for (const { key, validate } of RUST_EXPR_FIELDS) {
+    out[key] = resolveNumber(rust[key], params, validate);
+  }
+  out.audioSubdivisions = resolveRhythm(rust.audioSubdivisions, params);
+  out.drums = rust.drums.map((d) => ({
+    ...d,
+    rhythm: resolveRhythm(d.rhythm, params),
+  }));
+  return out as RustConfig;
+};
+
 export const resolveJsConfig = (js: JsConfig): JsConfig => {
   const params = parameterValues(js.parameters);
   return { ...js, views: js.views.map((v) => resolveView(v, params)) };

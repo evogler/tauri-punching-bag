@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { GRID_COLORS, Rhythm, VisualGrid, gridAlpha } from "./config";
 import { accepts, invalidBorder, useFocusedValue } from "./Input";
-import { Params, interpolate } from "./expression";
+import { Params, resolveRhythmText } from "./expression";
 import parser1 from "./parser1";
 import parser2 from "./parser2";
 
@@ -62,7 +62,7 @@ const GridRow = ({
   });
   const alpha = gridAlpha(grid);
   const parse = (text: string) =>
-    parserFor(grid.subdivisions).parse(interpolate(text, params));
+    parserFor(grid.subdivisions).parse(resolveRhythmText(text, params));
   const invalid = !accepts(() => parse(props.value));
 
   return (
@@ -112,7 +112,7 @@ const GridRow = ({
             });
           } catch (e) {}
         }}
-        title={`Grid ${index + 1} rhythm. A braced span is an expression: "{n/bar}:1"`}
+        title={`Grid ${index + 1} rhythm. Parameters work bare: "div:1", "1/div"`}
         style={{ flex: 1, minWidth: 0, ...invalidBorder(invalid) }}
       />
       <input

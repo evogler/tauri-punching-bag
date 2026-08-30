@@ -26,12 +26,17 @@ const FUNCTIONS: Record<string, (args: number[]) => number> = {
   },
 };
 
-// `x` is the repeat separator in a number list, so it can never be a parameter;
-// the function names would shadow the calls. Rejecting them at the point a
-// parameter is named is the only place a user can hit this.
+// Names the substitution would eat or that would shadow something. `x` is the
+// repeat separator in a number list; the function names would shadow the calls;
+// and h/k/r/s are parser2's sound letters, which `substituteParams` would
+// otherwise replace with a number inside a rhythm. Rejecting them where a
+// parameter is named is the only place a user can hit any of this.
+const RHYTHM_SOUNDS = ["h", "k", "r", "s"];
+
 export const isValidParameterName = (name: string): boolean =>
   /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) &&
   !(name in FUNCTIONS) &&
+  !RHYTHM_SOUNDS.includes(name.toLowerCase()) &&
   !/^[xX](\d|$)/.test(name);
 
 export const tokenize = (text: string): Token[] => {
@@ -239,6 +244,22 @@ export const hasInterpolation = (text: string) => text.includes("{");
 // substituted for its value *before* parsing rather than by touching the
 // grammar. Braced because rhythm text already has syntax of its own to collide
 // with: `{n/bar}:1` becomes `4:1`.
+// Both rhythm grammars already do arithmetic on numbers -- `1/5` parses to a
+// span of 0.2, `2*3` to 6, and they reserve `+ - * / ( ) [ ]` for it. So a
+// rhythm doesn't need an expression language bolted on: swapping each parameter
+// name for its value and letting the grammar evaluate the result is enough, and
+// it means no braces. Identifiers that aren't parameters are left alone, which
+// is what keeps parser2's sound letters working.
+export const substituteParams = (text: string, params: Params): string =>
+  text.replace(/[A-Za-z_][A-Za-z0-9_]*/g, (name) =>
+    name in params ? formatValue(params[name]) : name
+  );
+
+// What a rhythm field runs before parsing. Braces are still honoured first, for
+// `min`/`max`/`round` -- the grammars have no functions of their own.
+export const resolveRhythmText = (text: string, params: Params): string =>
+  substituteParams(interpolate(text, params), params);
+
 export const interpolate = (text: string, params: Params): string => {
   let out = "";
   let i = 0;

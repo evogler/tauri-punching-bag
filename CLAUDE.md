@@ -116,13 +116,32 @@ keeping the last good value. Deliberately not a scripting language.
 
 - **Expression-backed fields are stored `{inputText, val}`** -- the same shape
   as `Rhythm`, so the recursive `unwrapValues` already strips them to `val` and
-  they cost nothing if one ever moves to the Rust side. Currently
-  `beatsPerRow`, `marginLeft`, `marginRight` and `visualGain`, all per-view.
-  Read them through `exprNumber` / `exprList` / `viewRowBeats`, never directly.
-- **Rhythm text takes `{...}` interpolation instead**, because the generated PEG
-  parsers already own that syntax; the braced span is substituted for its value
-  *before* parsing rather than by touching the grammar. Grid rhythms only --
-  the click and drum rhythms are Rust-side and aren't re-resolved.
+  they cost nothing on the Rust side. Per-view: `beatsPerRow`, `marginLeft`,
+  `marginRight`, `visualGain`. Rust-side: `bpm`, `beatsToLoop`, `loopEchoes`,
+  `loopEchoGain`, `clickVolume`, `audioInGain`, `bufferCompensation` (see
+  `RustExprKey`). Read them through `exprNumber` / `exprList` / `viewRowBeats`,
+  never directly. Sliders and dropdowns keep plain numbers -- there's nowhere to
+  type an expression.
+- **Rhythm text takes bare parameter names**, no braces. Both generated PEG
+  grammars already reserve `+ - * / ( ) [ ]` and evaluate them (`1/5` parses to
+  a span of 0.2, `2*3` to 6), so a parameter only has to become its value before
+  parsing and the grammar does the arithmetic. `substituteParams` leaves
+  identifiers it doesn't know alone, which is what keeps parser2's sound letters
+  working -- and is why `h`/`k`/`r`/`s` are reserved parameter names.
+  `resolveRhythmText` runs braces first, since `min`/`max`/`round` have no
+  equivalent in the grammars. Grid, click and drum rhythms all re-resolve.
+- **The Rust side has to be re-resolved *and* pushed.** Nothing in the frontend
+  reads those keys -- they exist only to reach the audio thread -- so a stale
+  `val` would sit there until some unrelated setting change happened to push
+  again. `setParameters` calls `resolveRustConfig` and `updateRustConfig`
+  alongside the js update; `loadPreset` and the restored session do the same.
+- **A validator failing is treated exactly like a syntax error**: red, not
+  applied, last good value kept. `resolveNumber` takes the same validator, since
+  a parameter change is a path the input component can't see. This matters most
+  for `bpm` -- `n - n` would otherwise push a 0 across, and `get_loop_spacing`
+  divides by it, giving infinity, which `as usize` saturates to `usize::MAX` and
+  panics at the allocation. `get_loop_buffer_size` clamps to `MAX_LOOP_FRAMES`
+  as the last line of defence.
 - **`resolveJsConfig` is the freshness mechanism.** `val` must never be one
   render stale, since the draw loop reads it directly, so the parameter setter
   re-walks the whole js config in the *same* update. Not an effect: an effect
@@ -145,7 +164,13 @@ keeping the last good value. Deliberately not a scripting language.
   is the `loopFeedback` trap above: restore merges a saved array *over* the new
   object and `Math.max(...beatsPerRow)` returns NaN, drawing a blank pane.
   `normalizeView` wraps arrays (and bare numbers, for the three scalar fields)
-  explicitly. Wrapped rather than renamed, so saved layouts survive.
+  explicitly, and `migrateRust` does the same for the Rust-side keys. Wrapped
+  rather than renamed, so saved layouts and tempos survive.
+- **Drum `offset`, `shift` and `gains` are deliberately still literals.** They're
+  nested in the drums array and not in the re-resolution walk, so an expression
+  there would silently go stale on a parameter change. Add them to
+  `resolveRustConfig` first, then make them expression-backed -- not the other
+  way round.
 
 ## Audio thread rules
 

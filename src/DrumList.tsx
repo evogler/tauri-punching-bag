@@ -1,6 +1,11 @@
 import { DrumVoice, drumGains, drumLabel, drumShift } from "./config";
-import { formatNumberList, parseNumberList } from "./expression";
-import { useFocusedValue } from "./Input";
+import {
+  Params,
+  formatNumberList,
+  parseNumberList,
+  resolveRhythmText,
+} from "./expression";
+import { accepts, invalidBorder, useFocusedValue } from "./Input";
 import parser1 from "./parser1";
 import parser2 from "./parser2";
 
@@ -32,11 +37,13 @@ const rowStyle: React.CSSProperties = {
 const DrumRow = ({
   voice,
   status,
+  params,
   onChange,
   onRemove,
 }: {
   voice: DrumVoice;
   status?: SampleStatus;
+  params: Params;
   onChange: (next: DrumVoice) => void;
   onRemove: () => void;
 }) => {
@@ -49,6 +56,13 @@ const DrumRow = ({
     toString: (val) => formatNumberList(val as number[]),
   });
   const parser = voice.rhythm.type === "parser1" ? parser1 : parser2;
+  // Bare parameter names, same as the grid rhythms -- the grammar does the
+  // arithmetic. `resolveRustConfig` re-parses this when a parameter changes;
+  // the offset, shift and gains beside it are plain numbers and are not in that
+  // walk, so they stay literal on purpose.
+  const parseRhythm = (text: string) =>
+    parser.parse(resolveRhythmText(text, params));
+  const rhythmInvalid = !accepts(() => parseRhythm(rhythmProps.value));
   const failed = status === "error";
 
   return (
@@ -82,14 +96,14 @@ const DrumRow = ({
               ...voice,
               rhythm: {
                 ...voice.rhythm,
-                val: parser.parse(text),
+                val: parseRhythm(text),
                 inputText: text,
               },
             });
           } catch (e) {}
         }}
-        title="Rhythm for this sound"
-        style={{ flex: 1, minWidth: 0 }}
+        title='Rhythm for this sound; parameters work bare: "div:1"'
+        style={{ flex: 1, minWidth: 0, ...invalidBorder(rhythmInvalid) }}
       />
       <input
         {...gainsProps}
@@ -147,11 +161,13 @@ const DrumRow = ({
 };
 
 export const DrumList = ({
+  params,
   drums,
   setDrums,
   onAdd,
   status,
 }: {
+  params: Params;
   drums: DrumVoice[];
   setDrums: (next: DrumVoice[]) => void;
   onAdd: () => void;
@@ -168,6 +184,7 @@ export const DrumList = ({
     </div>
     {drums.map((voice, i) => (
       <DrumRow
+        params={params}
         key={i}
         voice={voice}
         status={status[voice.path]}
