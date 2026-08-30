@@ -63,6 +63,8 @@ const RUST_EXPR_KEYS: RustExprKey[] = [
   "clickVolume",
   "audioInGain",
   "bufferCompensation",
+  "analysisBandLow",
+  "analysisBandHigh",
 ];
 
 const migrateRust = (rust: Record<string, unknown>): Record<string, unknown> => {

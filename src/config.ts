@@ -109,7 +109,9 @@ export type RustExprKey =
   | "loopEchoGain"
   | "clickVolume"
   | "audioInGain"
-  | "bufferCompensation";
+  | "bufferCompensation"
+  | "analysisBandLow"
+  | "analysisBandHigh";
 
 export const defaultRustConfig = {
 	audioInGain: numExpr(1.0),
@@ -128,6 +130,18 @@ export const defaultRustConfig = {
   // switch it off. Not derived from the panes: that would mean writing rust
   // config from a render, which is a loop waiting to happen.
   analysisOn: true,
+  // The band the spectral flux is summed over, in Hz. Wide by default -- it
+  // spans everything the bin edges cover -- so the curve starts as the whole
+  // picture and gets narrowed onto whatever you're listening for. Nothing in
+  // the frontend reads these; they exist to reach the audio thread.
+  analysisBandLow: numExpr(30),
+  analysisBandHigh: numExpr(16000),
+  // FFT window in frames, trading frequency resolution against time
+  // resolution. A plain number, not an expression: it's a dropdown over
+  // ANALYSIS_WINDOWS, with nowhere to type one. The hop -- and so the
+  // spectrogram's column width and how precisely the flux places an attack --
+  // is always a quarter of it.
+  analysisWindow: 1024,
   paused: false,
   // Which input channels get sent to the display, by device channel index.
   visibleChannels: [0] as number[],
@@ -261,6 +275,16 @@ export type ViewConfig = {
   // "1, 2x3" syntax as beatsPerRow. Only consulted when `rowColors` has more
   // than one entry; empty means every row takes the first color.
   rowColorPattern: number[];
+  // Draw the spectral flux over the waveform, one bar per pixel column, in
+  // each visible input channel's own colour. It arrives on the analysis stream
+  // rather than the sample stream, so it is a second pass over the pane -- see
+  // drawFlux in App.tsx.
+  showFlux: boolean;
+  // Multiplies the flux before it is clamped to the row. A plain number, not an
+  // expression: it's a slider, with nowhere to type one. Well below 1 by
+  // default because a hard full-band attack measures around 2.3 -- the flux is
+  // normalised so a threshold can be a single setting, not so it fills a row.
+  fluxGain: number;
   // Draw the first visible channel above the centre line and the second below,
   // instead of overlaying them. With more than two, even slots go up and odd
   // slots go down.
@@ -305,10 +329,19 @@ export const VIEW_KINDS: ViewKind[] = ["waveform", "spectrogram"];
 // rather than plumbed across because it only bounds the channel picker here.
 export const MAX_ANALYSIS_CHANNELS = 4;
 
+// Half SAMPLE_RATE in src-tauri/src/constants.rs. Duplicated rather than
+// plumbed across because it only bounds the band inputs here.
+export const ANALYSIS_NYQUIST = 22050;
+
 // How many bins Rust groups the spectrum into. Duplicated rather than plumbed
 // across because the stream says its own `bins` -- this is only the fallback
 // the draw code sizes a fresh accumulator from.
 export const ANALYSIS_BINS = 64;
+
+// Must match ANALYSIS_WINDOWS in src-tauri/src/analysis.rs. Duplicated rather
+// than plumbed across because it only fills the dropdown here; Rust snaps
+// anything else to the nearest of these anyway.
+export const ANALYSIS_WINDOWS = [256, 512, 1024, 2048, 4096];
 
 export const defaultViewConfig = (): ViewConfig => ({
   kind: "waveform",
@@ -334,6 +367,8 @@ export const defaultViewConfig = (): ViewConfig => ({
   refreshAtCycleEnd: false,
   rowColors: [],
   rowColorPattern: [],
+  showFlux: false,
+  fluxGain: 0.3,
   splitChannels: false,
 });
 
@@ -469,6 +504,11 @@ const resolveView = (view: ViewConfig, params: Params): ViewConfig => ({
 // from crossing. Nothing in the frontend reads these -- they exist only to be
 // pushed to the audio thread -- so `unwrapValues` stripping them to `val` is the
 // whole of the Rust-side story.
+// A band edge past Nyquist describes no bin at all; Rust falls back to the full
+// range rather than reporting nothing, which would read as the flux being
+// broken. Rejecting here is the honest place to say so.
+const inBand = (n: number) => Number.isFinite(n) && n > 0 && n < ANALYSIS_NYQUIST;
+
 const RUST_EXPR_FIELDS: {
   key: RustExprKey;
   validate?: (n: number) => boolean;
@@ -480,6 +520,8 @@ const RUST_EXPR_FIELDS: {
   { key: "clickVolume", validate: (n) => n >= 0 },
   { key: "audioInGain", validate: (n) => n >= 0 },
   { key: "bufferCompensation", validate: (n) => n >= 0 },
+  { key: "analysisBandLow", validate: inBand },
+  { key: "analysisBandHigh", validate: inBand },
 ];
 
 export const resolveRustConfig = (

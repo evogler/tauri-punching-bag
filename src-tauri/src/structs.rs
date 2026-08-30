@@ -53,6 +53,13 @@ pub struct AnalysisFrames {
     /// Flattened for the same reason as `VisualSamples::values`. Read as
     /// `mags[(hop * channels + ch) * bins + bin]`.
     pub mags: Vec<u8>,
+    /// Spectral flux, `beats.len() * channels` long: `flux[hop * channels + ch]`.
+    /// It rides here rather than in the sample stream because this one already
+    /// carries a per-hop stamp at the window centre -- putting a half-window-old
+    /// value on a per-frame sample would need every other channel delayed to
+    /// match it. f32 rather than u8: it is one number a hop, not 64, and a
+    /// threshold will eventually be set against it.
+    pub flux: Vec<f32>,
 }
 
 pub struct AnalysisOutputBuffer {
@@ -119,6 +126,17 @@ pub struct Config {
     /// the work and pushes nothing, so a pane that isn't a spectrogram costs
     /// nothing on the audio thread.
     pub analysis_on: bool,
+    /// The band, in Hz, the flux is summed over. Restricting it is how a bass
+    /// note is kept from registering on a detector watching a snare; the
+    /// defaults span everything the bin edges cover, so out of the box it is
+    /// the whole picture. Resolved to a range of bin groups once per callback.
+    pub analysis_band_low: f64,
+    pub analysis_band_high: f64,
+    /// FFT window in frames, one of `ANALYSIS_WINDOWS`. Frequency resolution
+    /// against time resolution: the hop, and so the spectrogram's column width
+    /// and the flux's precision, is always a quarter of it. Anything not in
+    /// that list snaps to the nearest that is.
+    pub analysis_window: usize,
     /// Which input channels get sent to the display. Only these are pushed, so
     /// a 16-input interface doesn't cost 16 channels of JSON to watch two.
     pub visible_channels: Vec<usize>,

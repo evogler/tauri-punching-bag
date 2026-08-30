@@ -58,6 +58,21 @@ tunes a threshold against it.
 
 ### Analysis parameters
 
+**The window is a setting** (`analysisWindow`, one of 256/512/1024/2048/4096,
+default 1024), because frequency resolution and time resolution trade directly
+and which side you want depends on what you are looking at. The hop is always a
+quarter of it: one control moves the smear, the spectrogram's column width and
+the flux's precision together, and the overlap stays at the conventional 4x.
+Decoupling them would add a knob whose wrong settings blur the flux rather than
+sharpen it.
+
+The cost of a shorter window is the low end, in the exact way the bin edges
+already suffer: wherever log spacing asks for finer than the window's
+resolution the axis goes one FFT bin per group -- linear, not log -- and a
+shorter window pushes more of the axis into that regime.
+
+What follows describes the default.
+
 Window 1024 (23 ms), hop 256 (5.8 ms), Hann. The render callback delivers 2048
 frames, so that is exactly 8 hops per callback with no partial-hop bookkeeping
 across callbacks. ~172 FFTs/sec/channel — well under a percent of a core.
@@ -82,27 +97,33 @@ producer and consumer Arcs of the *same* queue and the render callback drains
 them, so a worker needs its own copy of the input rather than a second consumer.
 That is a project; don't start there.
 
-## Massaging the signal: analysis as a synthetic channel
+## Massaging the signal: not a synthetic channel
 
-The cheap integration. Rather than a new drawing path for "the massaged
-waveform", emit it as another synthetic channel, held at full rate into the
-existing flattened stream:
+The cheap-looking integration, and the one this document originally proposed,
+was to emit the massaged signal as another synthetic channel held at full rate
+in the existing flattened stream:
 
 ```
 [ ch 1 … ch N ]  [ drums ]  [ click ]  [ analysis 1 … analysis N ]
 ```
 
 That inherits rows, margins, grids, row colours, split-channel, visual gain and
-per-pane visibility for **zero new drawing code**. Put the flux in its own pane,
-or split it against the raw waveform in the same row and watch the spikes line
-up with the attacks.
+per-pane visibility for zero new drawing code. **It was not built that way**,
+because of the trap below: the flux describes a window centred half a window
+back, and a per-frame stream can only carry a value stamped *now*.
 
-"Which massage" is then a single Rust enum — high-passed, envelope follower,
-spectral flux — so building several options to compare costs one dropdown, not
-three features. `channelLabels` in `App.tsx` must grow to match, since the
-frontend's label order is what defines the bus order.
+**What was built instead: the flux rides in `AnalysisFrames`, next to `mags`.**
+That stream already carries one beat stamp per hop, at the window centre, in
+input time — the alignment problem is already solved there and already verified.
+The sample stream, `buffer_compensation` and `BusDelay` are untouched. The price
+is a small amount of new drawing code in `App.tsx` (`drawFlux`, `collectFlux`,
+`drawFluxAt`), which reuses `drawChannel`, so rows, margins, `isMargin` dimming,
+split-channel and channel colours still come for free.
 
-### The half-window alignment trap
+"Which massage" can still be a Rust enum later; those modes just don't need a
+bus.
+
+### The half-window alignment trap — why the synthetic channel was dropped
 
 The flux value computed at frame *t* describes the window centred at *t − 512*.
 Attach it to frame *t* in the full-rate stream and it draws **11.6 ms late** —
@@ -110,14 +131,23 @@ which at `0.25x16` and 140 bpm is about **30 pixels**. Very visible, and it
 would read as the detector being wrong rather than the plumbing.
 
 It cannot be fixed by delaying the analysis; delaying makes it later still. The
-fix is to delay *everything else*: run the raw channels through a 512-frame
-delay line (the `BusDelay` pattern already in `structs.rs`) and stamp the whole
-stream with `beat - (buffer_compensation + 512) * beats_per_sample`. Raw and
-analysis then describe the same moment, and nothing moves on screen.
+only fix inside the per-frame stream is to delay *everything else*: run the raw
+channels through a 512-frame delay line (the `BusDelay` pattern in `structs.rs`)
+and stamp the whole stream with `beat - (buffer_compensation + 512) *
+beats_per_sample`. That works, and it is a lot: a delay line on every channel, a
+global shift of the display, and a second thing that has to stay in step with
+`buffer_compensation` forever — all to avoid writing one draw pass.
 
-**This does not apply to the spectrogram or to discrete onsets**, which carry
-their own per-hop beat stamps and can simply be stamped at the window centre.
-It is only a problem for values riding in the per-frame stream.
+**This never applied to the spectrogram, to the flux as shipped, or to discrete
+onsets**, all of which carry their own per-hop beat stamps and are simply
+stamped at the window centre. It is only a problem for values riding in the
+per-frame stream, which is why nothing rides there.
+
+It also does not apply to the *sample-rate* massage modes (high-pass, envelope
+follower). A filtered sample is aligned with the sample it came from, so those
+can go in the per-frame stream — as another synthetic channel, or as a mode
+switch on an existing one — with no delay line at all. Only the FFT-derived
+values are half a window behind.
 
 ## Onset markers
 
@@ -127,13 +157,13 @@ location like everything else on the pane.
 
 Peak-picking: normalise the ODF against a moving median over ~100 ms, take local
 maxima above a threshold, enforce a minimum inter-onset interval of ~30–50 ms.
-Log-magnitude flux rather than linear — better dynamic-range invariance. A
-frequency band limit matters more than it sounds: restricting the flux to a band
-is how you stop a bass note triggering a snare detector.
+The ODF itself is log-magnitude and band-limited already — both were built in
+step 2, for the same reasons: dynamic-range invariance, and stopping a bass note
+from triggering a snare detector.
 
-Controls wanted in the panel: threshold, minimum gap, band low/high. Likely
-per-input-channel eventually — a kick and a guitar want different bands — but
-start global and see.
+Controls still wanted in the panel: threshold and minimum gap. The band pair is
+global and already there. Per-input-channel bands eventually — a kick and a
+guitar want different ones — but global first, and see.
 
 Ordering: markers arrive a few tens of ms after the sweep has passed their
 column, so in sweep mode a marker pops in slightly behind the cursor. In
@@ -208,23 +238,27 @@ been done by ear.
 
 1. **FFT infrastructure + spectrogram pane.** The bulk of the Rust work, and the
    diagnostic for everything after it.
-2. **Flux as a synthetic channel.** Nearly free once the FFT exists, and it lets
-   the ODF be *looked at* before a threshold is tuned against it. Needs the
-   half-window delay line above.
-3. **Peak picking → onset markers**, with threshold / min-gap / band controls.
-4. **The other massage modes** (high-pass, envelope follower) as alternatives on
-   the same bus.
+2. **Flux on the analysis stream.** Nearly free once the FFT exists, and it lets
+   the ODF be *looked at* before a threshold is tuned against it. No delay line:
+   see the section above for why it does not go in the per-frame stream.
+3. **Peak picking → onset markers**, with threshold / min-gap controls (the band
+   controls exist already, since the flux needs them).
+4. **The other massage modes** (high-pass, envelope follower). Sample-rate, so
+   they *can* be synthetic channels in the per-frame stream, and they need no
+   delay line either — a filtered sample sits on the frame it came from.
 
 ## Status
 
-Step 1 is built: the FFT infrastructure and the spectrogram pane. Steps 2-4 are
-not.
+Steps 1 and 2 are built: the FFT infrastructure, the spectrogram pane, and the
+spectral flux. Steps 3 and 4 are not.
 
-Built:
+Built in step 1:
 
-- `src-tauri/src/analysis.rs` -- `Analyzer`, window 1024 / hop 256 / 64 log-ish
-  bins, Hann, `realfft`. Planner and scratch built at startup, `resize` once per
-  callback, `push` per frame. Analysed channels capped at 4.
+- `src-tauri/src/analysis.rs` -- `Analyzer`, settable window (256..4096,
+  default 1024) with hop always a quarter of it, 64 log-ish bins, Hann,
+  `realfft`. Every size planned and every buffer sized at the maximum at
+  startup, so a window change reallocates nothing; `configure(channels, window)`
+  once per callback, `push` per frame. Analysed channels capped at 4.
 - `AnalysisFrames` + `AnalysisOutputBuffer` in `structs.rs`, `get_analysis` in
   `commands.rs`, both mirroring the sample stream. Magnitudes are `u8` over a
   fixed -100..0 dB range.
@@ -232,18 +266,53 @@ Built:
   stamped at the window centre in input time, reset on beat reset and while
   paused.
 - `analysis_on` / `analysisOn`, default true, with a checkbox in the visual
-  section.
+  section, and `analysis_window` / `analysisWindow` as a dropdown beside it.
 - `views[i].kind` plus `spectrogramChannel` / `spectrogramGain` /
   `spectrogramFloor`, a kind dropdown and the three controls in the panel, and
   `drawSpectrogram` in `App.tsx` -- sweep only, grids clipped to each painted
   column so they sit on top without their alpha saturating.
 
-Not built, and no config keys added for any of it: spectral flux, the ODF, the
-synthetic analysis channel and its half-window delay line, peak picking, onset
-markers, the other massage modes.
+Built in step 2:
 
-Verified by build, by simulation of the hop timing / beat stamp / flattening
-index, and by throwaway Rust tests (a tone lands in its own group, silence
-reads 0, hops arrive every 256 frames) that were run and deleted. **Nobody has
-looked at the picture yet** -- that it is a sensible spectrogram of real playing,
-and that the columns line up with the grid, is unconfirmed.
+- Log-magnitude spectral flux in `analyze_into`: the per-group dB values land in
+  a reused `db` buffer, get quantised to `u8` exactly as before, and are then
+  differenced against a per-channel `prev_db`. Positive change only, summed over
+  the band, divided by the number of groups in it and by a 20 dB per-bin
+  reference -- so a strong attack reads around 1 whatever the band's width.
+- The dB values are now floored at -100 dB before either consumer sees them.
+  They always were for the `u8`, via the clamp; the flux needs it too, because a
+  bin holding nothing but numerical noise sits near -300 dB and wanders by tens
+  of dB a hop. Without the floor that noise was most of the flux.
+- `analysis_band_low` / `analysis_band_high` in Hz (30 / 16000), expression-backed
+  on the frontend, resolved to a range of bin groups once per callback by
+  `Analyzer::band_groups`, which falls back to the full range for anything
+  unusable.
+- `AnalysisFrames.flux: Vec<f32>`, `flux[hop * channels + ch]`, drained by
+  `get_analysis` with the others. A `hops_since_reset` count makes the first hop
+  after a reset report 0 rather than the whole spectrum arriving at once.
+- Per-view `showFlux` / `fluxGain`, a checkbox and a slider in the pane section,
+  and `drawFlux` / `collectFlux` / `drawFluxAt` in `App.tsx` -- both draw modes,
+  drawn after `drawSweep` because the sweep erases each column before redrawing
+  it. Skipped for spectrogram panes and in `barColorMode`: both fill the row
+  height, so there is nowhere to put a second signal.
+- `mockGetArray` fakes a flux with a spike every half beat, offset per channel,
+  so `yarn start` exercises the draw path.
+
+Not built, and no config keys added for any of it: peak picking, onset markers,
+thresholds, minimum inter-onset intervals, SuperFlux max-filtering, and the
+high-pass / envelope massage modes.
+
+Verified by build; by simulation of the hop timing, beat stamp and flattening
+index; and by throwaway Rust tests that were run and deleted. The step 2 tests
+covered: silence gives exactly 0; a tone entering gives 2.31 on the hop it
+arrives and under 0.009 across twenty hops of sustain; a decaying tone stays
+under 0.01; a band excluding the tone gives exactly 0 while a band around it
+gives 1.22; the first hop after `reset()` is 0; and the `u8` spectrogram bytes
+are bit-identical to the pre-refactor formula on every hop of a test signal.
+
+**Nobody has looked at either picture yet.** That the spectrogram is legible
+against real playing, that the flux spikes on real attacks and not between them,
+and that both line up with the grid, are all unconfirmed. A full-band hard onset
+measures about 2.3, so `fluxGain` defaults to 0.3 over a 0.05..4 slider -- the
+useful range is below 1, not above it. That is the normalisation being about
+making a threshold portable across dynamics, not about filling a row.

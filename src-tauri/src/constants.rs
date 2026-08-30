@@ -1,3 +1,4 @@
+use crate::analysis::DEFAULT_WINDOW;
 use crate::structs::{Config, DrumVoice, Note, ParserRhythm};
 use coreaudio::audio_unit::SampleFormat;
 pub const SAMPLE_RATE: f64 = 44100.0;
@@ -34,6 +35,9 @@ pub fn default_config() -> Config {
         buffer_compensation: 4330,
         paused: false,
         analysis_on: true,
+        analysis_band_low: 30.0,
+        analysis_band_high: 16000.0,
+        analysis_window: DEFAULT_WINDOW,
         visible_channels: vec![0],
         channel_pans: vec![],
         audio_subdivisions: ParserRhythm {

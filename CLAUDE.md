@@ -47,7 +47,7 @@ position, looper) derives from it.
 | `commands.rs` | Tauri commands (`set_config`, `get_samples`, `load_drum_sample`, …). |
 | `constants.rs` | `SAMPLE_RATE`, `MAX_INPUT_BACKLOG`, `default_config()`. |
 | `util.rs` | `beat_bisect` (which subdivision a beat falls in), `mod_add`. |
-| `analysis.rs` | The short-time FFT behind the spectrogram (see below). |
+| `analysis.rs` | The short-time FFT behind the spectrogram and the spectral flux (see below). |
 
 ### Layout of the frontend
 
@@ -62,6 +62,7 @@ position, looper) derives from it.
 | `GridList.tsx` / `ChannelList.tsx` / `DrumList.tsx` | The three list UIs. |
 | `RowColorList.tsx` | The per-view row color swatches. |
 | `SpectrogramControls.tsx` | The per-view spectrogram channel/gain/floor controls. |
+| `Slider.tsx` | The labelled range input those and `flux gain` share. |
 | `presets.ts` | Named presets *and* the auto-restored session. |
 | `parser1.js` / `parser2.js` | Generated PEG parsers for rhythm syntax (see Rhythm syntax). Don't hand-edit. |
 
@@ -448,24 +449,49 @@ can refer to one without knowing the install path.
 ### The analysis stream and the spectrogram view kind
 
 A second stream, deliberately separate from `VisualSamples` so the per-frame path
-is untouched: `analysis.rs` runs a 1024-point Hann FFT every 256 frames per input
-channel (exactly 8 hops per 2048-frame callback), groups the 513 magnitudes into
-64 bins and sends them as `u8` decibels. `views[i].kind = "spectrogram"` draws
-them instead of the waveform; everything else about the pane -- rows, margins,
-grids, `getCanvasPositions`, the sweep -- is unchanged.
+is untouched: `analysis.rs` runs a Hann FFT every `window / 4` frames per input
+channel, groups the magnitudes into 64 bins and sends them as `u8` decibels.
+`views[i].kind = "spectrogram"` draws them instead of the waveform; everything
+else about the pane -- rows, margins, grids, `getCanvasPositions`, the sweep --
+is unchanged.
 
+- **The window is a setting, `analysisWindow`**, one of `ANALYSIS_WINDOWS`
+  (256/512/1024/2048/4096), default 1024. It is the frequency-vs-time trade, and
+  **the hop is always a quarter of it** so one control moves the smear, the
+  column width and the flux's precision together while the overlap stays at the
+  conventional 4x. A dropdown, so a plain number rather than an expression.
+  Anything not in the list snaps to the nearest that is. Global, not per-pane:
+  one FFT feeds every pane and the flux.
+- **Changing the window allocates nothing.** Every size is planned at startup
+  and every buffer is sized at `MAX_WINDOW`, so `configure` only recomputes the
+  Hann table and the bin edges in place. `realfft` wants `input` and `spectrum`
+  at exactly the transform's length but only requires `scratch` to be *at least*
+  long enough, which is why one max-sized scratch serves every plan and the
+  other two are sliced. Pointer-identity checked.
+- **A shorter window makes the low end worse**, in the specific way `edges`
+  already documents: wherever log spacing asks for finer than the window's
+  resolution the axis is one bin per group, i.e. linear, and a shorter window
+  pushes more of the axis into that regime. That is the cost of the trade, not a
+  bug to fix.
 - **All the FFT state is in one `Analyzer`**, built before the render closure so
-  the planner and scratch buffers are allocated once. `resize(channels)` is
-  called once per callback next to `bus_delay.resize`; `push` per frame, next to
-  where `input_frame` is filled -- *not* inside the per-output-channel loop.
-  Reset on beat reset and while paused, so no window is stitched across a gap.
+  the planners and scratch buffers are allocated once. `configure(channels,
+  window)` is called once per callback next to `bus_delay.resize`; `push` per
+  frame, next to where `input_frame` is filled -- *not* inside the
+  per-output-channel loop. Reset on beat reset, while paused, and on either
+  change, so no window is stitched across a gap and no spectrum is differenced
+  against one grouped by different edges.
 - **The stamp is the window centre.** A hop completing at frame *i* describes
-  the window centred `WINDOW/2` frames earlier, so it is stamped
-  `visual_beat - (WINDOW/2) * beats_per_sample` -- the sample stream's stamp,
-  less half a window. Attaching it to frame *i* draws every column a whole half
-  window late: ~92 px at `0.25x16` and 140bpm, which reads as the FFT being
+  the window centred `window_len/2` frames earlier, so it is stamped
+  `visual_beat - (window_len/2) * beats_per_sample` -- the sample stream's stamp,
+  less half a window, **read from the analyzer** since the window moves.
+  Attaching it to frame *i* draws every column a whole half window late: ~92 px
+  at `0.25x16` and 140bpm with the default window, which reads as the FFT being
   broken rather than the stamp. (Simulation-checked, along with the flattening
   index below.)
+- **The flux scale is stable across windows.** Magnitudes are normalised by the
+  window length, so a hard 1 kHz attack measures ~0.30-0.32 at every size --
+  changing the window must not move the picture's brightness or make a threshold
+  mean something different. Measured, not assumed.
 - **The `u8` contract is fixed at -100..0 dB.** 0 is silence, 255 is full scale.
   Deliberately wide, because `spectrogramGain` and `spectrogramFloor` are applied
   in the frontend: tuning the picture must never push config to the audio thread.
@@ -487,6 +513,64 @@ grids, `getCanvasPositions`, the sweep -- is unchanged.
   grids every frame instead would composite a sub-1 alpha to opaque in a few
   frames.
 - `refreshAtCycleEnd` is ignored for spectrogram panes. Sweep only.
+
+#### Spectral flux
+
+The onset detection function, computed in `analyze_into` next to the
+spectrogram's bytes and sent on the same stream: `flux[hop * channels + ch]`,
+one f32 a hop a channel, unclamped.
+
+- **It rides here rather than in the sample stream on purpose.** A hop describes
+  the window centred `WINDOW/2` frames back, and a per-frame value can only be
+  stamped *now* -- so putting the flux in `VisualSamples` would need a 512-frame
+  delay line on every other channel and the whole display shifted to match. This
+  stream is already stamped at the window centre, so there is nothing to align.
+  `buffer_compensation`, the sample stamp and `bus_delay` are untouched by any of
+  it. `docs/onsets.md` has the long version.
+- **Log domain, not linear.** The sum of positive frame-to-frame change in *dB*,
+  so the same attack reads about the same whether it lands in a quiet passage or
+  a loud one -- which is what lets a threshold over it be one setting rather
+  than one per dynamic. Falls don't count: a note decaying is not an onset.
+- **The dB values are floored at -100 dB before either consumer sees them.** The
+  `u8` never noticed, since anything under the floor already clamped to 0. The
+  flux does: a bin holding numerical noise sits near -300 dB and wanders tens of
+  dB a hop, and without the floor that noise was most of the number. Found by
+  test, not by reading.
+- **Normalised per bin, not per band.** Divided by 20 dB (a factor of ten in
+  amplitude, roughly what a bin does under a transient) *and* by the number of
+  groups actually in the band, so narrowing the band doesn't rescale the curve.
+  A strong full-band attack measures around 2.3, so the useful `fluxGain` is
+  below 1 -- it defaults to 0.3 over a 0.05..4 slider. The normalisation is
+  about a threshold meaning the same thing at any dynamic, not about the curve
+  filling a row.
+- **`analysisBandLow` / `analysisBandHigh`, in Hz** (30 / 16000) are how you stop
+  a bass note reading on a snare's detector. Expression-backed, so they are
+  registered in `RustExprKey`, `RUST_EXPR_FIELDS` and `RUST_EXPR_KEYS`.
+  `Analyzer::band_groups` turns them into a group range **once per callback**,
+  from the groups' real spans rather than the nominal log spacing, and falls back
+  to the full range for anything unusable -- reversed, non-finite, or covering no
+  group.
+- **The first hop after a reset reports 0.** Its "previous" spectrum is the
+  zeroed buffer, which every bin is far above, so it would read as a full-scale
+  onset on every unpause. `hops_since_reset` is a count rather than a bool
+  because `analyze_into` runs once per channel and the state has to outlast all
+  of them; `reset()` clears it and `prev_db` along with the ring.
+- **Drawn after `drawSweep`**, which erases each column immediately before
+  redrawing it -- draw the flux first and it is wiped. It lands a few pixels
+  *behind* the sweep cursor, because its stamp is half a window older than the
+  newest sample. That is the stamp being honest, not lag.
+- Per-view `showFlux` / `fluxGain` are plain values, not expressions: a checkbox
+  and a slider have nowhere to type one. Both draw modes work --
+  `fluxColumns` mirrors `cycleColumns` for `refreshAtCycleEnd`, collected before
+  the wrap check because a cycle's last hops arrive after its samples have
+  wrapped.
+- **Indexed by device channel, not by stream slot.** The sample stream is packed
+  in `visibleChannels` order; the analysis stream is in device order, so
+  `drawFluxAt` reads `peaks[visibleChannels[slot]]` and draws it in
+  `visibleStyles[slot]`'s colour. A slot pointing at a synthetic bus has no
+  entry and is skipped -- the buses aren't captured, so they have no spectrum.
+- Skipped for spectrogram panes and in `barColorMode`, both of which fill the
+  row height: there is nowhere to put a second signal.
 
 ## Known issues / latent bugs
 
@@ -521,15 +605,21 @@ left untouched) rather than by listening.
 Parameters and expressions are committed (`variables`, `arithmetic in more
 places`) and covered by temp tests that were run and deleted.
 
-The analysis stream and the spectrogram pane are new and **nobody has looked at
-the picture**. The arithmetic (hop timing, the window-centre stamp, the
-flattening index, the log bin edges) is simulation- and unit-checked; that it
-draws a legible spectrogram of real playing, aligned to the grid, is not.
+The analysis stream, the spectrogram pane and the spectral flux are new and
+**nobody has looked at either picture**. The arithmetic (hop timing, the
+window-centre stamp, the flattening index, the log bin edges) is simulation- and
+unit-checked, and so is the flux: silence reads 0, a tone entering reads 2.3 and
+under 0.009 across twenty hops of sustain, a decay reads 0, a band excluding the
+tone reads 0, the first hop after a reset reads 0, and the spectrogram bytes are
+bit-identical to the pre-flux formula. That either picture is legible against
+real playing, that the flux spikes on real attacks and not between them, and
+that both line up with the grid, are not.
 
-Uncommitted: the macOS `Info.plist` and entitlements fix. Both were verified
-against a real build with `plutil` and `codesign`, but **nobody has confirmed
-the microphone prompt actually appears yet** -- that needs
-`tccutil reset Microphone com.vogler.dev` and a launch of the bundled app.
+The macOS `Info.plist` and entitlements fix is committed (`documentation &
+permissions`) and was verified against a real build with `plutil` and
+`codesign`, but **nobody has confirmed the microphone prompt actually appears
+yet** -- that needs `tccutil reset Microphone com.vogler.dev` and a launch of
+the bundled app.
 
 Still unchecked on the views work: that a restored pre-views session comes back
 with its old rows and grids intact, and that switching arrangement doesn't leave

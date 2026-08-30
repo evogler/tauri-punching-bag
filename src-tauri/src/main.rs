@@ -15,7 +15,7 @@ mod util;
 
 extern crate coreaudio;
 
-use crate::analysis::{Analyzer, BINS, MAX_ANALYSIS_CHANNELS, WINDOW};
+use crate::analysis::{Analyzer, BINS, MAX_ANALYSIS_CHANNELS};
 use crate::commands::{
     get_analysis, get_input_channel_count, get_samples, load_drum_sample, reset_beat, set_config,
     set_mp3_buffer,
@@ -248,7 +248,12 @@ fn main() -> Result<(), coreaudio::Error> {
         } else {
             0
         };
-        analyzer.resize(analysis_channels);
+        // Channels and window together: both invalidate the history, and
+        // neither reallocates unless the channel count moved.
+        analyzer.configure(analysis_channels, config.analysis_window);
+        // Hz to a range of bin groups once per callback, not once per hop: the
+        // band only moves when the config does.
+        let flux_band = analyzer.band_groups(config.analysis_band_low, config.analysis_band_high);
 
         let loop_spacing = get_loop_spacing(&config);
         tap_gains.resize(loop_echo_count(&config), 0.0);
@@ -276,6 +281,7 @@ fn main() -> Result<(), coreaudio::Error> {
                 frames.bins = BINS;
                 frames.beats.clear();
                 frames.mags.clear();
+                frames.flux.clear();
             }
         }
 
@@ -313,16 +319,19 @@ fn main() -> Result<(), coreaudio::Error> {
                     if analyzer.push(&input_frame) {
                         // The hop that just completed describes the window
                         // centred half a window behind this frame, so its stamp
-                        // is this frame's visual beat less that half window.
-                        // Stamping it here instead would draw every column
-                        // ~12ms late -- about 30 pixels at 0.25x16 and 140bpm,
-                        // which reads as the FFT being wrong rather than the
-                        // stamp.
+                        // is this frame's visual beat less that half window --
+                        // read from the analyzer, since the window is a
+                        // setting. Stamping it here instead would draw every
+                        // column a half window late, which is ~92 pixels at
+                        // 0.25x16 and 140bpm with the default 1024, and reads
+                        // as the FFT being wrong rather than the stamp.
                         frames.beats.push(
-                            visual_beat - (WINDOW as f64 / 2.0) * beats_per_sample,
+                            visual_beat
+                                - (analyzer.window_len() as f64 / 2.0) * beats_per_sample,
                         );
                         for ch in 0..analyzer.channels() {
-                            analyzer.analyze_into(ch, &mut frames.mags);
+                            let flux = analyzer.analyze_into(ch, &mut frames.mags, flux_band);
+                            frames.flux.push(flux);
                         }
                     }
                 }

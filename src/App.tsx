@@ -25,6 +25,8 @@ import {
   resolveRustConfig,
   viewRowBeats,
   ANALYSIS_BINS,
+  ANALYSIS_NYQUIST,
+  ANALYSIS_WINDOWS,
   MAX_ANALYSIS_CHANNELS,
   VIEW_KINDS,
   ViewKind,
@@ -38,6 +40,7 @@ import { Preset, makePreset, readSession, writeSession } from "./presets";
 import { GridList } from "./GridList";
 import { RowColorList } from "./RowColorList";
 import { SpectrogramControls } from "./SpectrogramControls";
+import { Slider } from "./Slider";
 import { ParameterList } from "./ParameterList";
 import { Layout, getCanvasPositions } from "./layout";
 import { ChannelList } from "./ChannelList";
@@ -81,6 +84,15 @@ type ViewDrawState = {
   // a one-pixel line per hop would draw a picket fence rather than a picture.
   binPeaks: number[];
   lastHopBeat: number;
+  // Flux: peak per *analysed input channel* since the last flush, and the pixel
+  // column that flush went into. Its own column rather than `canvasPos`, which
+  // the waveform sweep owns and compares as a float.
+  fluxPeaks: number[];
+  fluxColumn: number;
+  // Whole-cycle mode's equivalent of `cycleColumns`, kept separate because the
+  // two streams arrive at different rates and are indexed by different things
+  // -- device channel here, stream slot there.
+  fluxColumns: Map<number, number[]>;
 };
 
 const freshViewState = (): ViewDrawState => ({
@@ -90,6 +102,9 @@ const freshViewState = (): ViewDrawState => ({
   channelPeaks: [],
   binPeaks: [],
   lastHopBeat: NaN,
+  fluxPeaks: [],
+  fluxColumn: -1,
+  fluxColumns: new Map(),
 });
 
 // const log = <T,>(label: string, x: T) => {
@@ -401,12 +416,17 @@ const App = () => {
     bins: number;
     beats: number[];
     mags: number[];
+    // One value per hop per analysed channel: `flux[hop * channels + ch]`. It
+    // rides here rather than in the sample stream precisely because these beats
+    // are already stamped at the window centre.
+    flux: number[];
   };
   const analysis = useRef<AnalysisFrames>({
     channels: 0,
     bins: 0,
     beats: [],
     mags: [],
+    flux: [],
   });
   const appendAnalysis = (batch: AnalysisFrames) => {
     const held = analysis.current;
@@ -420,6 +440,7 @@ const App = () => {
     // backlog can blow the stack.
     for (let i = 0; i < batch.beats.length; i++) held.beats.push(batch.beats[i]);
     for (let i = 0; i < batch.mags.length; i++) held.mags.push(batch.mags[i]);
+    for (let i = 0; i < batch.flux.length; i++) held.flux.push(batch.flux[i]);
   };
   const getArray = async () => {
     appendSamples(await invoke("get_samples"));
@@ -454,6 +475,7 @@ const App = () => {
       bins: ANALYSIS_BINS,
       beats: [],
       mags: [],
+      flux: [],
     };
     while (mockHopBeat.current < mockGetArrayPos.current) {
       const beat = mockHopBeat.current;
@@ -465,6 +487,11 @@ const App = () => {
           frames.mags.push(
             Math.round(255 * Math.exp(-Math.abs(b - centre) / 4))
           );
+        // A spike on every half beat, offset per channel, and near-silence
+        // between them -- the shape a real onset function has, so a flux drawn
+        // in the wrong place or on the wrong channel is obvious at a glance.
+        const phase = (beat + c * 0.25) % 0.5;
+        frames.flux.push(phase < 0.03 ? 0.9 : 0.02 * Math.random());
       }
     }
     appendAnalysis(frames);
@@ -670,6 +697,92 @@ const App = () => {
     }
   };
 
+  // The flux is per *device* input channel, in device order, so it is indexed by
+  // what's in `visibleChannels` rather than by the slot -- unlike the sample
+  // stream, which Rust packs in `visibleChannels` order. A slot pointing at a
+  // synthetic bus has no entry and is skipped: the buses aren't captured, so
+  // there is no spectrum to difference.
+  const drawFluxAt = (
+    ctx: CanvasRenderingContext2D,
+    v: ViewCtx,
+    x: number,
+    row: number,
+    isMargin: boolean,
+    peaks: number[]
+  ) => {
+    const visible = get("visibleChannels");
+    for (let slot = 0; slot < visible.length; slot++) {
+      const value = peaks[visible[slot]];
+      const style = visibleStyles[slot];
+      if (value === undefined || !style) continue;
+      drawChannel(
+        ctx,
+        v,
+        x,
+        row,
+        Math.min(1, value * v.cfg.fluxGain),
+        style,
+        isMargin,
+        halfFor(v, slot)
+      );
+    }
+  };
+
+  // `barColorMode` paints the whole row height as a shade, so there is nowhere
+  // to put a second signal -- the same reason a spectrogram pane ignores this.
+  const showsFlux = (v: ViewCtx) => v.cfg.showFlux && !v.cfg.barColorMode;
+
+  // A second pass over the pane, from the analysis stream. Called *after*
+  // drawSweep, which erases each column before redrawing it and would otherwise
+  // wipe this out. A hop is stamped at its window centre, half a window behind
+  // the newest sample, so the flux lands a few pixels behind the sweep cursor --
+  // that is the stamp being honest about when the value describes, not a lag.
+  const drawFlux = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
+    const { channels, beats, flux } = analysis.current;
+    const { beatsPerWindow, pixelsPerBeat } = v.layout;
+    if (!(beatsPerWindow > 0) || channels < 1 || !flux.length) return;
+    const peaks = v.state.fluxPeaks;
+    for (let i = 0; i < beats.length; i++) {
+      for (let c = 0; c < channels; c++) {
+        const value = flux[i * channels + c];
+        if (peaks[c] === undefined || value > peaks[c]) peaks[c] = value;
+      }
+      const beat = beats[i];
+      // A whole pixel column, like the spectrogram and unlike drawSweep's float
+      // compare: at low zoom several hops share a column and the loudest has to
+      // win rather than the last one overwriting the rest.
+      const column = Math.floor((beat % beatsPerWindow) * pixelsPerBeat);
+      if (column !== v.state.fluxColumn) {
+        for (const { x, row, isMargin } of getCanvasPositions(v.layout, beat)) {
+          drawFluxAt(ctx, v, x, row, isMargin, peaks);
+        }
+        peaks.length = 0;
+        v.state.fluxColumn = column;
+      }
+    }
+  };
+
+  // Whole-cycle mode's accumulator. Nothing is drawn here -- paintWholeCycle
+  // puts it up when the cycle wraps.
+  const collectFlux = (v: ViewCtx) => {
+    const { channels, beats, flux } = analysis.current;
+    const { beatsPerWindow, pixelsPerBeat } = v.layout;
+    if (!(beatsPerWindow > 0) || channels < 1 || !flux.length) return;
+    for (let i = 0; i < beats.length; i++) {
+      const b = ((beats[i] % beatsPerWindow) + beatsPerWindow) % beatsPerWindow;
+      const column = Math.floor(b * pixelsPerBeat);
+      let peaks = v.state.fluxColumns.get(column);
+      if (!peaks || peaks.length !== channels) {
+        peaks = new Array(channels).fill(0);
+        v.state.fluxColumns.set(column, peaks);
+      }
+      for (let c = 0; c < channels; c++) {
+        const value = flux[i * channels + c];
+        if (value > peaks[c]) peaks[c] = value;
+      }
+    }
+  };
+
   // Tiles each grid's rhythm across the pane. Drawn last-to-first so the top of
   // the list ends up on top of the stack.
   const drawGrids = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
@@ -844,6 +957,13 @@ const App = () => {
         drawChannelsAt(ctx, v, x, row, isMargin, peaks);
       }
     });
+    if (!showsFlux(v)) return;
+    v.state.fluxColumns.forEach((peaks, column) => {
+      const beat = (column + 0.5) / v.layout.pixelsPerBeat;
+      for (const { x, row, isMargin } of getCanvasPositions(v.layout, beat)) {
+        drawFluxAt(ctx, v, x, row, isMargin, peaks);
+      }
+    });
   };
 
   // The alternative: hold the picture still and repaint the whole pane at once
@@ -860,6 +980,7 @@ const App = () => {
       if (b < v.state.lastCyclePos) {
         paintWholeCycle(ctx, v);
         v.state.cycleColumns.clear();
+        v.state.fluxColumns.clear();
       }
       v.state.lastCyclePos = b;
       const column = Math.floor(b * pixelsPerBeat);
@@ -883,10 +1004,18 @@ const App = () => {
       // `refreshAtCycleEnd` is a waveform mode and is ignored here.
       drawSpectrogram(ctx, v);
     } else if (v.cfg.refreshAtCycleEnd) {
+      // Collected before the wrap check inside drawWholeCycle: a hop is stamped
+      // half a window behind the samples, so the tail of a cycle's flux arrives
+      // after the samples have already wrapped, and it belongs to the picture
+      // that is about to go up rather than the next one.
+      if (showsFlux(v)) collectFlux(v);
       drawWholeCycle(ctx, v);
     } else {
       drawGrids(ctx, v);
       drawSweep(ctx, v);
+      // After the sweep: it erases each column just before redrawing it, so
+      // anything drawn first is painted over.
+      if (showsFlux(v)) drawFlux(ctx, v);
     }
   };
 
@@ -909,6 +1038,7 @@ const App = () => {
       bins: analysis.current.bins,
       beats: [],
       mags: [],
+      flux: [],
     };
   };
 
@@ -1068,6 +1198,44 @@ const App = () => {
             set={set}
             get={get}
           />
+          {/* Frequency resolution against time resolution, and the one knob
+              for both: the hop is a quarter of the window, so a shorter one
+              narrows the spectrogram's columns and places an attack more
+              precisely at the cost of smearing the bass end further. Global
+              rather than per-pane -- one FFT feeds every pane and the flux. */}
+          <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
+            <label>fft window</label>
+            <select
+              value={get("analysisWindow")}
+              onChange={(e) => set("analysisWindow", Number(e.target.value))}
+              title="FFT window in frames. Shorter is sharper in time, coarser in frequency"
+            >
+              {ANALYSIS_WINDOWS.map((n) => (
+                <option key={n} value={n}>
+                  {n} ({Math.round((n / 44100) * 10000) / 10} ms)
+                </option>
+              ))}
+            </select>
+          </div>
+          {/* The band the flux is summed over. Global rather than per-pane:
+              it's an audio-thread setting, and narrowing it onto what you're
+              listening for is what stops a bass note reading as a snare hit. */}
+          <Input
+            label="flux band low (Hz)"
+            _key="analysisBandLow"
+            params={params}
+            set={set}
+            get={get}
+            validate={(n: number) => n > 0 && n < ANALYSIS_NYQUIST}
+          />
+          <Input
+            label="flux band high (Hz)"
+            _key="analysisBandHigh"
+            params={params}
+            set={set}
+            get={get}
+            validate={(n: number) => n > 0 && n < ANALYSIS_NYQUIST}
+          />
         </Section>
 
         <Section label="parameters">
@@ -1168,6 +1336,22 @@ const App = () => {
             {...viewIO}
           />
           <Input label="split up/down" _key="splitChannels" {...viewIO} />
+          {viewCtxs[activeView]?.cfg.kind === "waveform" && (
+            <>
+              <Input label="show flux" _key="showFlux" {...viewIO} />
+              {viewCtxs[activeView]?.cfg.showFlux && (
+                <Slider
+                  label="flux gain"
+                  value={viewCtxs[activeView].cfg.fluxGain}
+                  min={0.05}
+                  max={4}
+                  step={0.05}
+                  onChange={(n) => viewIO.set("fluxGain", n)}
+                  title="Multiplies the onset function before it is clamped to the row"
+                />
+              )}
+            </>
+          )}
           <Input label="bar color mode" _key="barColorMode" {...viewIO} />
           <Input
             label="refresh at cycle end"
