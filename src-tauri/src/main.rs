@@ -15,7 +15,7 @@ mod util;
 
 extern crate coreaudio;
 
-use crate::analysis::{Analyzer, BINS, MAX_ANALYSIS_CHANNELS};
+use crate::analysis::{Analyzer, OnsetParams, BINS, MAX_ANALYSIS_CHANNELS};
 use crate::commands::{
     get_analysis, get_input_channel_count, get_samples, load_drum_sample, reset_beat, set_config,
     set_mp3_buffer,
@@ -254,6 +254,12 @@ fn main() -> Result<(), coreaudio::Error> {
         // Hz to a range of bin groups once per callback, not once per hop: the
         // band only moves when the config does.
         let flux_band = analyzer.band_groups(config.analysis_band_low, config.analysis_band_high);
+        // Milliseconds to frames once per callback, for the same reason.
+        let onset_params = OnsetParams {
+            threshold: config.onset_threshold.max(0.0) as f32,
+            min_gap_frames: (config.onset_min_gap.max(0.0) / 1000.0 * SAMPLE_RATE) as usize,
+            offset_frames: config.onset_offset / 1000.0 * SAMPLE_RATE,
+        };
 
         let loop_spacing = get_loop_spacing(&config);
         tap_gains.resize(loop_echo_count(&config), 0.0);
@@ -282,6 +288,7 @@ fn main() -> Result<(), coreaudio::Error> {
                 frames.beats.clear();
                 frames.mags.clear();
                 frames.flux.clear();
+                frames.onsets.clear();
             }
         }
 
@@ -329,10 +336,24 @@ fn main() -> Result<(), coreaudio::Error> {
                             visual_beat
                                 - (analyzer.window_len() as f64 / 2.0) * beats_per_sample,
                         );
+                        analyzer.note_hop_beat(
+                            visual_beat
+                                - (analyzer.window_len() as f64 / 2.0) * beats_per_sample,
+                        );
                         for ch in 0..analyzer.channels() {
                             let flux = analyzer.analyze_into(ch, &mut frames.mags, flux_band);
                             frames.flux.push(flux);
+                            // Decides the hop a few back, not this one, and
+                            // stamps it with that hop's own beat.
+                            analyzer.pick_onset(
+                                ch,
+                                flux,
+                                beats_per_sample,
+                                onset_params,
+                                &mut frames.onsets,
+                            );
                         }
+                        analyzer.advance_hop();
                     }
                 }
                 // The loop is read and written once per frame, per channel --
@@ -388,6 +409,13 @@ fn main() -> Result<(), coreaudio::Error> {
                     loop_buffer.pos = (p + 1) % loop_len;
                 }
 
+                // Alternating halves of a double-length loop: the metronome
+                // plays for one loop and is silent for the next, so you play
+                // the second half against what you just recorded. Once per
+                // frame -- the drums read it too, and their trigger is out here.
+                let in_loop = beat % (config.beats_to_loop * 2.0) < config.beats_to_loop;
+                let toggled_off = config.click_toggle && !in_loop;
+
                 // Triggers, once per frame rather than once per output channel.
                 let click_beat = beat_bisect(&click_times, beat);
                 if click_beat != last_beat {
@@ -429,11 +457,18 @@ fn main() -> Result<(), coreaudio::Error> {
                             } else {
                                 voice.gains[hit.rem_euclid(voice.gains.len() as isize) as usize]
                             };
-                            sounding_samples.push(SoundingSample {
-                                sample: sample.clone(),
-                                pos: 0,
-                                volume: (voice.volume * gain) as f32,
-                            });
+                            // Gated at the trigger, not at the mix: a hit that
+                            // started just before the toggle boundary rings out
+                            // instead of being chopped off mid-sample. The beat
+                            // is still recorded, so coming back doesn't fire a
+                            // burst for everything missed.
+                            if !toggled_off {
+                                sounding_samples.push(SoundingSample {
+                                    sample: sample.clone(),
+                                    pos: 0,
+                                    volume: (voice.volume * gain) as f32,
+                                });
+                            }
                             drum_last_beats[v] = hit;
                         }
                     }
@@ -491,9 +526,8 @@ fn main() -> Result<(), coreaudio::Error> {
 
                     if click_sound_counter > 0 {
                         click_sound_counter -= 1;
-                        let in_loop = beat % (config.beats_to_loop * 2.0) < config.beats_to_loop;
                         if config.click_on {
-                            if !config.click_toggle || in_loop {
+                            if !toggled_off {
                                 let mut r = rng.gen::<f32>() * (config.click_volume as f32);
                                 if r > 1.0 {
                                     r = 1.0;

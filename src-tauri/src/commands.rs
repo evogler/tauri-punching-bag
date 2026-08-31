@@ -54,6 +54,7 @@ pub fn get_analysis(state: State<AnalysisOutputBuffer>) -> Result<AnalysisFrames
             bins: frames.bins,
             beats: std::mem::take(&mut frames.beats),
             mags: std::mem::take(&mut frames.mags),
+            onsets: std::mem::take(&mut frames.onsets),
             flux: std::mem::take(&mut frames.flux),
         });
     } else {

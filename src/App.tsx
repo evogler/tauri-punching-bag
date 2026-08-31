@@ -93,7 +93,16 @@ type ViewDrawState = {
   // two streams arrive at different rates and are indexed by different things
   // -- device channel here, stream slot there.
   fluxColumns: Map<number, number[]>;
+  // Whole-cycle mode's onset list, cleared at the wrap alongside fluxColumns.
+  // A list rather than a column map: onsets are discrete and carry a sub-hop
+  // beat, and rounding them into columns would throw away the precision the
+  // parabolic fit exists to recover.
+  cycleOnsets: OnsetMark[];
 };
+
+// One detected attack, as Rust reports it. `channel` is a *device* input
+// channel, like the flux and unlike the sample stream's slot order.
+type OnsetMark = { beat: number; channel: number; strength: number };
 
 const freshViewState = (): ViewDrawState => ({
   canvasPos: 0,
@@ -105,6 +114,7 @@ const freshViewState = (): ViewDrawState => ({
   fluxPeaks: [],
   fluxColumn: -1,
   fluxColumns: new Map(),
+  cycleOnsets: [],
 });
 
 // const log = <T,>(label: string, x: T) => {
@@ -420,6 +430,9 @@ const App = () => {
     // rides here rather than in the sample stream precisely because these beats
     // are already stamped at the window centre.
     flux: number[];
+    // Sparse, not one per hop, and each carries its own beat -- so unlike
+    // `mags` and `flux` these are not indexed against `beats` at all.
+    onsets: OnsetMark[];
   };
   const analysis = useRef<AnalysisFrames>({
     channels: 0,
@@ -427,6 +440,7 @@ const App = () => {
     beats: [],
     mags: [],
     flux: [],
+    onsets: [],
   });
   const appendAnalysis = (batch: AnalysisFrames) => {
     const held = analysis.current;
@@ -441,6 +455,8 @@ const App = () => {
     for (let i = 0; i < batch.beats.length; i++) held.beats.push(batch.beats[i]);
     for (let i = 0; i < batch.mags.length; i++) held.mags.push(batch.mags[i]);
     for (let i = 0; i < batch.flux.length; i++) held.flux.push(batch.flux[i]);
+    for (let i = 0; i < batch.onsets.length; i++)
+      held.onsets.push(batch.onsets[i]);
   };
   const getArray = async () => {
     appendSamples(await invoke("get_samples"));
@@ -476,6 +492,7 @@ const App = () => {
       beats: [],
       mags: [],
       flux: [],
+      onsets: [],
     };
     while (mockHopBeat.current < mockGetArrayPos.current) {
       const beat = mockHopBeat.current;
@@ -491,7 +508,12 @@ const App = () => {
         // between them -- the shape a real onset function has, so a flux drawn
         // in the wrong place or on the wrong channel is obvious at a glance.
         const phase = (beat + c * 0.25) % 0.5;
-        frames.flux.push(phase < 0.03 ? 0.9 : 0.02 * Math.random());
+        const spike = phase < 0.03;
+        frames.flux.push(spike ? 0.9 : 0.02 * Math.random());
+        // One onset on the leading edge of each spike, so the marker can be
+        // checked against the curve it is supposed to have come from.
+        if (spike && phase - 256 * beatsPerSample < 0)
+          frames.onsets.push({ beat, channel: c, strength: 0.9 });
       }
     }
     appendAnalysis(frames);
@@ -732,6 +754,11 @@ const App = () => {
   // to put a second signal -- the same reason a spectrogram pane ignores this.
   const showsFlux = (v: ViewCtx) => v.cfg.showFlux && !v.cfg.barColorMode;
 
+  // Onsets survive barColorMode -- a tick at the row's edge sits on top of the
+  // shading rather than competing with it for the row's height, which is what
+  // rules the flux out there.
+  const showsOnsets = (v: ViewCtx) => v.cfg.showOnsets;
+
   // A second pass over the pane, from the analysis stream. Called *after*
   // drawSweep, which erases each column before redrawing it and would otherwise
   // wipe this out. A hop is stamped at its window centre, half a window behind
@@ -781,6 +808,53 @@ const App = () => {
         if (value > peaks[c]) peaks[c] = value;
       }
     }
+  };
+
+  // Fraction of the row height an onset tick takes. Short and at the row's edge
+  // rather than a full-height line, so it can't be mistaken for a grid line --
+  // which is exactly what it has to be read *against*.
+  const ONSET_TICK = 0.22;
+
+  const drawOnsetMark = (
+    ctx: CanvasRenderingContext2D,
+    v: ViewCtx,
+    x: number,
+    row: number,
+    isMargin: boolean,
+    mark: OnsetMark
+  ) => {
+    const visible = get("visibleChannels");
+    const slot = visible.indexOf(mark.channel);
+    const style = visibleStyles[slot];
+    if (slot < 0 || !style) return;
+    const y = row * v.rowHeight;
+    const height = v.rowHeight - 1;
+    const tick = Math.max(3, height * ONSET_TICK);
+    // In split mode the tick sits on the edge its channel's waveform grows
+    // from, so two channels' onsets stay told apart.
+    const top = halfFor(v, slot) === "down" ? y + height - tick : y;
+    ctx.globalAlpha = style.alpha * (isMargin ? 0.55 : 1);
+    ctx.fillStyle = style.color;
+    ctx.fillRect(x - 1, top, 2, tick);
+    ctx.globalAlpha = 1;
+  };
+
+  // Onsets are discrete and already carry a sub-hop beat, so there is no column
+  // accumulation here -- each one is simply drawn everywhere its beat lands.
+  // Called after drawSweep and drawFlux, both of which would paint over it.
+  const drawOnsets = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
+    const { onsets } = analysis.current;
+    if (!(v.layout.beatsPerWindow > 0)) return;
+    for (const mark of onsets) {
+      for (const { x, row, isMargin } of getCanvasPositions(v.layout, mark.beat)) {
+        drawOnsetMark(ctx, v, x, row, isMargin, mark);
+      }
+    }
+  };
+
+  // Whole-cycle mode's accumulator, drained by paintWholeCycle at the wrap.
+  const collectOnsets = (v: ViewCtx) => {
+    for (const mark of analysis.current.onsets) v.state.cycleOnsets.push(mark);
   };
 
   // Tiles each grid's rhythm across the pane. Drawn last-to-first so the top of
@@ -957,13 +1031,22 @@ const App = () => {
         drawChannelsAt(ctx, v, x, row, isMargin, peaks);
       }
     });
-    if (!showsFlux(v)) return;
-    v.state.fluxColumns.forEach((peaks, column) => {
-      const beat = (column + 0.5) / v.layout.pixelsPerBeat;
-      for (const { x, row, isMargin } of getCanvasPositions(v.layout, beat)) {
-        drawFluxAt(ctx, v, x, row, isMargin, peaks);
+    if (showsFlux(v)) {
+      v.state.fluxColumns.forEach((peaks, column) => {
+        const beat = (column + 0.5) / v.layout.pixelsPerBeat;
+        for (const { x, row, isMargin } of getCanvasPositions(v.layout, beat)) {
+          drawFluxAt(ctx, v, x, row, isMargin, peaks);
+        }
+      });
+    }
+    // Last, so a tick is never painted over by the waveform or the flux.
+    if (showsOnsets(v)) {
+      for (const mark of v.state.cycleOnsets) {
+        for (const { x, row, isMargin } of getCanvasPositions(v.layout, mark.beat)) {
+          drawOnsetMark(ctx, v, x, row, isMargin, mark);
+        }
       }
-    });
+    }
   };
 
   // The alternative: hold the picture still and repaint the whole pane at once
@@ -981,6 +1064,7 @@ const App = () => {
         paintWholeCycle(ctx, v);
         v.state.cycleColumns.clear();
         v.state.fluxColumns.clear();
+        v.state.cycleOnsets.length = 0;
       }
       v.state.lastCyclePos = b;
       const column = Math.floor(b * pixelsPerBeat);
@@ -1009,6 +1093,7 @@ const App = () => {
       // after the samples have already wrapped, and it belongs to the picture
       // that is about to go up rather than the next one.
       if (showsFlux(v)) collectFlux(v);
+      if (showsOnsets(v)) collectOnsets(v);
       drawWholeCycle(ctx, v);
     } else {
       drawGrids(ctx, v);
@@ -1016,6 +1101,7 @@ const App = () => {
       // After the sweep: it erases each column just before redrawing it, so
       // anything drawn first is painted over.
       if (showsFlux(v)) drawFlux(ctx, v);
+      if (showsOnsets(v)) drawOnsets(ctx, v);
     }
   };
 
@@ -1039,6 +1125,7 @@ const App = () => {
       beats: [],
       mags: [],
       flux: [],
+      onsets: [],
     };
   };
 
@@ -1128,7 +1215,12 @@ const App = () => {
             set={set}
             get={get}
           />
-          <Input label="click toggle" _key="clickToggle" set={set} get={get} />
+          <Input
+            label="toggle (click + drums)"
+            _key="clickToggle"
+            set={set}
+            get={get}
+          />
           <Input label="click volume" _key="clickVolume" params={params} set={set} get={get} />
         </Section>
 
@@ -1235,6 +1327,33 @@ const App = () => {
             set={set}
             get={get}
             validate={(n: number) => n > 0 && n < ANALYSIS_NYQUIST}
+          />
+          {/* Peak picking. Relative to the flux's local median, so the
+              threshold means the same thing loud or quiet; the gap is what
+              stops one broad attack reporting its own shoulders. */}
+          <Input
+            label="onset threshold"
+            _key="onsetThreshold"
+            params={params}
+            set={set}
+            get={get}
+            validate={(n: number) => Number.isFinite(n) && n >= 0}
+          />
+          <Input
+            label="onset min gap (ms)"
+            _key="onsetMinGap"
+            params={params}
+            set={set}
+            get={get}
+            validate={(n: number) => Number.isFinite(n) && n >= 0 && n < 10000}
+          />
+          <Input
+            label="onset offset (ms)"
+            _key="onsetOffset"
+            params={params}
+            set={set}
+            get={get}
+            validate={(n: number) => Number.isFinite(n) && Math.abs(n) < 10000}
           />
         </Section>
 
@@ -1350,6 +1469,7 @@ const App = () => {
                   title="Multiplies the onset function before it is clamped to the row"
                 />
               )}
+              <Input label="show onsets" _key="showOnsets" {...viewIO} />
             </>
           )}
           <Input label="bar color mode" _key="barColorMode" {...viewIO} />

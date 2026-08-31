@@ -111,7 +111,10 @@ export type RustExprKey =
   | "audioInGain"
   | "bufferCompensation"
   | "analysisBandLow"
-  | "analysisBandHigh";
+  | "analysisBandHigh"
+  | "onsetThreshold"
+  | "onsetMinGap"
+  | "onsetOffset";
 
 export const defaultRustConfig = {
 	audioInGain: numExpr(1.0),
@@ -142,6 +145,19 @@ export const defaultRustConfig = {
   // spectrogram's column width and how precisely the flux places an attack --
   // is always a quarter of it.
   analysisWindow: 1024,
+  // How far above its local median the flux has to peak to count as an attack.
+  // Relative, not absolute, so one number holds across dynamics -- a hard
+  // full-band onset measures around 2.3 and a sustaining note under 0.01.
+  onsetThreshold: numExpr(0.05),
+  // Milliseconds an onset suppresses further ones on the same channel. A single
+  // attack spreads over a few hops and the peak test alone reports the
+  // shoulders of a broad one.
+  onsetMinGap: numExpr(40),
+  // Milliseconds to nudge every onset, positive later. A trim on top of the
+  // structural correction in analysis.rs, which is measured on an instant
+  // attack; a slow-attack instrument sits differently. Calibrate against the
+  // drums bus, whose trigger times the callback knows exactly.
+  onsetOffset: numExpr(0),
   paused: false,
   // Which input channels get sent to the display, by device channel index.
   visibleChannels: [0] as number[],
@@ -280,6 +296,10 @@ export type ViewConfig = {
   // rather than the sample stream, so it is a second pass over the pane -- see
   // drawFlux in App.tsx.
   showFlux: boolean;
+  // Mark each detected attack with a tick at the row's edge, in the channel's
+  // colour. Discrete events rather than a curve, so unlike `showFlux` they
+  // carry their own sub-hop beat and need no per-column accumulation.
+  showOnsets: boolean;
   // Multiplies the flux before it is clamped to the row. A plain number, not an
   // expression: it's a slider, with nowhere to type one. Well below 1 by
   // default because a hard full-band attack measures around 2.3 -- the flux is
@@ -369,6 +389,7 @@ export const defaultViewConfig = (): ViewConfig => ({
   rowColorPattern: [],
   showFlux: false,
   fluxGain: 0.3,
+  showOnsets: false,
   splitChannels: false,
 });
 
@@ -517,6 +538,9 @@ const RUST_EXPR_FIELDS: {
   { key: "beatsToLoop", validate: (n) => n > 0 },
   { key: "loopEchoes", validate: (n) => n >= 1 && n <= MAX_LOOP_ECHOES },
   { key: "loopEchoGain", validate: (n) => n >= 0 && n <= 1 },
+  { key: "onsetThreshold", validate: (n) => Number.isFinite(n) && n >= 0 },
+  { key: "onsetMinGap", validate: (n) => Number.isFinite(n) && n >= 0 && n < 10000 },
+  { key: "onsetOffset", validate: (n) => Number.isFinite(n) && Math.abs(n) < 10000 },
   { key: "clickVolume", validate: (n) => n >= 0 },
   { key: "audioInGain", validate: (n) => n >= 0 },
   { key: "bufferCompensation", validate: (n) => n >= 0 },

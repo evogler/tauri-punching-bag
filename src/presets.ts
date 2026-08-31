@@ -65,6 +65,9 @@ const RUST_EXPR_KEYS: RustExprKey[] = [
   "bufferCompensation",
   "analysisBandLow",
   "analysisBandHigh",
+  "onsetThreshold",
+  "onsetMinGap",
+  "onsetOffset",
 ];
 
 const migrateRust = (rust: Record<string, unknown>): Record<string, unknown> => {

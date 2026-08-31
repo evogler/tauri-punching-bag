@@ -16,6 +16,7 @@
 //! `configure` is called once per callback and only does work when something
 //! actually moved, and the per-frame entry point is a store and an index bump.
 
+use crate::structs::Onset;
 use realfft::num_complex::Complex32;
 use realfft::{RealFftPlanner, RealToComplex};
 use std::sync::Arc;
@@ -46,6 +47,53 @@ const DB_REF: f32 = 20.0;
 /// Deliberately fixed and wide -- the frontend applies its own gain and floor,
 /// so tuning the picture never has to push config back to the audio thread.
 const DB_FLOOR: f32 = -100.0;
+
+/// Peak picking, in milliseconds rather than hops so it means the same thing at
+/// every window setting -- the hop moves with the window, and a radius fixed in
+/// hops would quietly become 70 ms of lookahead at 4096 and 1.5 ms at 256.
+///
+/// `PEAK_RADIUS_MS` is how far either side of a candidate it has to be the
+/// largest; it is also the lookahead, and so the only latency peak picking adds
+/// on top of the half window. `MEDIAN_BACK_MS` is the stretch behind the
+/// candidate the local median is taken over -- the threshold is relative to
+/// that, so a loud passage doesn't fire continuously and a quiet one still
+/// registers.
+const PEAK_RADIUS_MS: f64 = 20.0;
+const MEDIAN_BACK_MS: f64 = 100.0;
+const MIN_PEAK_RADIUS: usize = 1;
+const MAX_PEAK_RADIUS: usize = 8;
+const MIN_MEDIAN_BACK: usize = 4;
+const MAX_MEDIAN_BACK: usize = 32;
+/// Long enough for the furthest either measure reaches back: the median ends at
+/// the candidate, which is itself `radius` hops back.
+const ODF_HISTORY: usize = MAX_MEDIAN_BACK + MAX_PEAK_RADIUS + 1;
+
+/// How far *before* the true attack the flux peaks, as a fraction of the
+/// window.
+///
+/// The stamp on a hop names its window's centre, which is right for a
+/// spectrogram column but not for an onset: the flux peaks when a transient
+/// *enters* the window, not when it reaches the middle of it. Measured across
+/// every window size against clicks at known frames, the bias came out at
+/// 0.303/0.318/0.321/0.336/0.321 of the window for 256..4096 -- proportional to
+/// the window and otherwise constant, so it is corrected here rather than left
+/// for the eye. Uncorrected it is ~60 px at 0.25x16 and 140bpm on the default
+/// window, which would read as the detector being wrong.
+///
+/// Empirical, and measured on an instant attack: a slow-attack instrument will
+/// sit differently, which is what `onset_offset` is for.
+const ONSET_CENTRE_BIAS: f64 = 0.32;
+
+/// What the peak picker is tuned to, resolved from config once per callback.
+#[derive(Clone, Copy)]
+pub struct OnsetParams {
+    /// How far above the local median a peak has to stand.
+    pub threshold: f32,
+    /// Frames an onset suppresses further ones on the same channel.
+    pub min_gap_frames: usize,
+    /// A trim, in frames, on top of `ONSET_CENTRE_BIAS`. Positive is later.
+    pub offset_frames: f64,
+}
 
 /// Analysing every channel of a 16-input interface would cost 16 FFTs a hop to
 /// look at one, and nothing draws more than a pane at a time.
@@ -105,6 +153,28 @@ pub struct Analyzer {
     /// Last hop's dB per group, per channel: `prev_db[ch * BINS + b]`. The
     /// flux is the positive part of the difference against this.
     prev_db: Vec<f32>,
+    /// Recent flux per channel, `odf[ch * ODF_HISTORY + i]`, written at
+    /// `odf_pos`. Peak picking needs a candidate's neighbours on *both* sides,
+    /// so it always works `radius` hops behind the newest value.
+    odf: Vec<f32>,
+    /// The beat each of those hops was stamped with, shared across channels
+    /// because the hops are simultaneous. Kept so an onset can be reported at
+    /// its own beat rather than at the beat it was decided on.
+    odf_beats: Vec<f64>,
+    odf_pos: usize,
+    /// Hops completed since the last reset, as an index rather than a count:
+    /// the current hop is this one. `i64` so the "no onset yet" sentinel can
+    /// sit below zero without wrapping.
+    hop_index: i64,
+    /// Hop the last onset was reported on, per channel, for the minimum gap.
+    last_onset_hop: Vec<i64>,
+    /// Peak-picking spans in hops, derived from the millisecond constants in
+    /// `retune` so they track the window.
+    peak_radius: usize,
+    median_back: usize,
+    /// Scratch for the median. Sorting needs somewhere to put a copy, and the
+    /// audio thread can't allocate one per hop.
+    median_scratch: Vec<f32>,
     // Reused across hops, all sized for MAX_WINDOW and sliced to the window in
     // use. `input` is the windowed copy the FFT consumes (it writes into its
     // argument), `spectrum` and `scratch` are realfft's. realfft wants `input`
@@ -139,6 +209,14 @@ impl Analyzer {
             hz_per_bin: 0.0,
             hops_since_reset: 0,
             prev_db: Vec::new(),
+            odf: Vec::new(),
+            odf_beats: vec![0.0; ODF_HISTORY],
+            odf_pos: 0,
+            hop_index: 0,
+            last_onset_hop: Vec::new(),
+            peak_radius: MIN_PEAK_RADIUS,
+            median_back: MIN_MEDIAN_BACK,
+            median_scratch: vec![0.0; ODF_HISTORY],
             ring: Vec::new(),
             channels: 0,
             pos: 0,
@@ -163,6 +241,13 @@ impl Analyzer {
         }
         self.hz_per_bin = self.sample_rate / (n as f64);
         fill_log_bin_edges(&mut self.edges, self.sample_rate, n);
+        // In hops, from the millisecond spans, so the picker behaves the same
+        // whatever the window is set to.
+        let hops_per_ms = self.sample_rate / 1000.0 / (self.hop as f64);
+        self.peak_radius = ((PEAK_RADIUS_MS * hops_per_ms).round() as usize)
+            .clamp(MIN_PEAK_RADIUS, MAX_PEAK_RADIUS);
+        self.median_back = ((MEDIAN_BACK_MS * hops_per_ms).round() as usize)
+            .clamp(MIN_MEDIAN_BACK, MAX_MEDIAN_BACK);
     }
 
     /// Called once per callback, next to `bus_delay.resize`: the only place the
@@ -179,6 +264,10 @@ impl Analyzer {
             self.ring.resize(channels * MAX_WINDOW, 0.0);
             self.prev_db.clear();
             self.prev_db.resize(channels * BINS, 0.0);
+            self.odf.clear();
+            self.odf.resize(channels * ODF_HISTORY, 0.0);
+            self.last_onset_hop.clear();
+            self.last_onset_hop.resize(channels, i64::MIN / 2);
         }
         if self.plan != plan {
             self.plan = plan;
@@ -205,6 +294,19 @@ impl Analyzer {
         for d in self.prev_db.iter_mut() {
             *d = 0.0;
         }
+        // Same reasoning for the onset history: a peak picked across the gap
+        // would be measured against a median from before it.
+        for f in self.odf.iter_mut() {
+            *f = 0.0;
+        }
+        for b in self.odf_beats.iter_mut() {
+            *b = 0.0;
+        }
+        for h in self.last_onset_hop.iter_mut() {
+            *h = i64::MIN / 2;
+        }
+        self.odf_pos = 0;
+        self.hop_index = 0;
         self.pos = 0;
         self.since_hop = 0;
         self.hops_since_reset = 0;
@@ -355,6 +457,124 @@ impl Analyzer {
         }
         sum / ((hi - lo) as f32 * DB_REF)
     }
+
+    /// The hop in frames. The caller needs it to turn a sub-hop peak offset
+    /// into beats.
+    pub fn hop_frames(&self) -> usize {
+        self.hop
+    }
+
+    /// Records the beat this hop was stamped with, before the per-channel work.
+    /// Call once per hop.
+    pub fn note_hop_beat(&mut self, beat: f64) {
+        self.odf_beats[self.odf_pos] = beat;
+    }
+
+    /// Finishes a hop: everything written at `odf_pos` is now history. Call
+    /// once, after every channel has been through `pick_onset`.
+    pub fn advance_hop(&mut self) {
+        self.odf_pos = (self.odf_pos + 1) % ODF_HISTORY;
+        self.hop_index += 1;
+    }
+
+    /// `back` hops before the hop being written now: 0 is this one.
+    fn odf_at(&self, channel: usize, back: usize) -> f32 {
+        let i = (self.odf_pos + ODF_HISTORY - back) % ODF_HISTORY;
+        self.odf[channel * ODF_HISTORY + i]
+    }
+
+    /// Files this hop's flux and decides whether the hop `peak_radius` back was
+    /// an onset, pushing it to `out` if so. Call once per channel per hop, then
+    /// `advance_hop`.
+    ///
+    /// Three conditions, the standard ones: the candidate is the largest value
+    /// within `peak_radius` either side of it, it stands `threshold` above the
+    /// median of the `median_back` hops behind it, and it is at least
+    /// `min_gap_frames` after the last onset on this channel. The median rather
+    /// than a mean because a mean is dragged up by the very peaks being
+    /// detected, which suppresses the next one.
+    ///
+    /// Deciding `peak_radius` hops late is the lookahead, and it is affordable
+    /// precisely because the display already runs `buffer_compensation` behind
+    /// the audio -- see the latency note in docs/onsets.md.
+    pub fn pick_onset(
+        &mut self,
+        channel: usize,
+        flux: f32,
+        beats_per_sample: f64,
+        params: OnsetParams,
+        out: &mut Vec<Onset>,
+    ) {
+        let slot = channel * ODF_HISTORY + self.odf_pos;
+        self.odf[slot] = flux;
+
+        let radius = self.peak_radius;
+        let back = self.median_back;
+        // Every index the tests below read has to be real history, not the
+        // zeroes a reset left behind.
+        if self.hop_index < (radius + back + 1) as i64 {
+            return;
+        }
+
+        let candidate = self.odf_at(channel, radius);
+        if !(candidate > 0.0) {
+            return;
+        }
+        // Largest within the radius. `>=` on the earlier side and `>` on the
+        // later one, so a plateau reports its first hop rather than every hop.
+        for d in 1..=radius {
+            if self.odf_at(channel, radius + d) >= candidate
+                || self.odf_at(channel, radius - d) > candidate
+            {
+                return;
+            }
+        }
+
+        let n = back + 1;
+        for i in 0..n {
+            self.median_scratch[i] = self.odf_at(channel, radius + i);
+        }
+        let window = &mut self.median_scratch[..n];
+        window.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let median = window[n / 2];
+        if candidate < median + params.threshold {
+            return;
+        }
+
+        let candidate_hop = self.hop_index - radius as i64;
+        let gap_hops = (params.min_gap_frames as f64 / self.hop as f64).ceil() as i64;
+        if candidate_hop - self.last_onset_hop[channel] < gap_hops {
+            return;
+        }
+        self.last_onset_hop[channel] = candidate_hop;
+
+        // Sub-hop placement. A hop is 5.8 ms at the default window, which is
+        // ~46 px at 0.25x16 and 140bpm -- coarse enough to be the limit on a
+        // tool whose whole point is where an attack sits. Fitting a parabola
+        // through the candidate and its two neighbours recovers the peak
+        // between them. Clamped to half a hop: beyond that the fit is telling
+        // us the peak isn't really here, and the max test above says it is.
+        let earlier = self.odf_at(channel, radius + 1);
+        let later = self.odf_at(channel, radius - 1);
+        let denom = earlier - 2.0 * candidate + later;
+        let offset = if denom.abs() > f32::EPSILON {
+            (0.5 * (earlier - later) / denom).clamp(-0.5, 0.5)
+        } else {
+            0.0
+        };
+
+        // Window centre, plus the sub-hop peak position, plus the structural
+        // lead the flux has on the attack, plus the user's trim.
+        let frames = (offset as f64) * (self.hop as f64)
+            + ONSET_CENTRE_BIAS * (self.window_len as f64)
+            + params.offset_frames;
+        out.push(Onset {
+            beat: self.odf_beats[(self.odf_pos + ODF_HISTORY - radius) % ODF_HISTORY]
+                + frames * beats_per_sample,
+            channel,
+            strength: candidate - median,
+        });
+    }
 }
 
 /// Log-spaced group boundaries over the `window / 2 + 1` magnitude bins,
@@ -387,4 +607,5 @@ fn fill_log_bin_edges(edges: &mut Vec<usize>, sample_rate: f64, window: usize) {
         last = bin;
     }
 }
+
 

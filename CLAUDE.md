@@ -514,6 +514,49 @@ is unchanged.
   frames.
 - `refreshAtCycleEnd` is ignored for spectrogram panes. Sweep only.
 
+### Onsets
+
+Peak picking over the flux, in `Analyzer::pick_onset`, reported as sparse
+`Onset { beat, channel, strength }` on the same stream. `views[i].showOnsets`
+draws each as a short tick at the row's edge in the channel's colour -- short
+and at the edge so it can't be mistaken for a grid line, which is the thing it
+exists to be read against.
+
+- **Three standard conditions**: largest within `peak_radius` either side,
+  standing `onsetThreshold` above the *median* of the `median_back` hops behind
+  it, and at least `onsetMinGap` after the last onset on that channel. Median
+  rather than mean because a mean is dragged up by the very peaks being
+  detected, which suppresses the next one.
+- **The spans are in milliseconds, not hops** (20 ms radius, 100 ms median),
+  converted in `retune`. Fixed in hops they would silently become 70 ms of
+  lookahead at a 4096 window and 1.5 ms at 256.
+- **The picker runs `peak_radius` hops behind**, because a candidate needs
+  neighbours on both sides. That is the only latency it adds on top of the half
+  window, and it is affordable exactly because the display already runs
+  `buffer_compensation` behind the audio.
+- **Nothing is reported for 60-140 ms after a reset**, depending on the window:
+  the guard waits until a candidate has a full median behind it and a full
+  radius in front. Not a bug -- a peak picked across the gap would be measured
+  against a median from before it.
+- **`ONSET_CENTRE_BIAS = 0.32` is a measured correction, not a fudge.** The hop
+  stamp names its window's *centre*, which is right for a spectrogram column and
+  wrong for an onset: the flux peaks when a transient *enters* the window.
+  Measured against clicks at known frames the lead came out at
+  0.303/0.318/0.321/0.336/0.321 of the window for 256..4096 -- proportional and
+  otherwise constant. Uncorrected it is ~60 px at `0.25x16` and 140bpm.
+  With it, reported times land within half a hop at every window.
+- **`onsetOffset` (ms) is the trim on top**, because that 0.32 was measured on an
+  instant attack and a slow-attack instrument sits differently. The drums bus is
+  the reference to calibrate against -- the callback knows its trigger times
+  exactly, which is the one thing in this app that has only ever been set by ear.
+- **Sub-hop placement.** A parabola through the candidate and its two neighbours
+  recovers the peak between them; a hop is 5.8 ms at the default window, which
+  is ~46 px at the zoom levels in use, so the hop grid alone would be the
+  binding limit on a tool about where an attack sits.
+- Onsets carry their own beat, so they are *not* indexed against `beats`, and
+  they survive `barColorMode` (a tick sits on top of the shading) where the flux
+  does not.
+
 #### Spectral flux
 
 The onset detection function, computed in `analyze_into` next to the

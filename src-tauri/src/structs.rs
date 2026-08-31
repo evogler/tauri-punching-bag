@@ -53,6 +53,11 @@ pub struct AnalysisFrames {
     /// Flattened for the same reason as `VisualSamples::values`. Read as
     /// `mags[(hop * channels + ch) * bins + bin]`.
     pub mags: Vec<u8>,
+    /// Onsets picked from the flux this batch, sparse rather than one per hop.
+    /// Each carries its own beat, so it needs no alignment with `beats` -- and
+    /// that beat is sub-hop, since a hop is far coarser than a screen pixel at
+    /// the zoom levels this tool is used at.
+    pub onsets: Vec<Onset>,
     /// Spectral flux, `beats.len() * channels` long: `flux[hop * channels + ch]`.
     /// It rides here rather than in the sample stream because this one already
     /// carries a per-hop stamp at the window centre -- putting a half-window-old
@@ -60,6 +65,17 @@ pub struct AnalysisFrames {
     /// match it. f32 rather than u8: it is one number a hop, not 64, and a
     /// threshold will eventually be set against it.
     pub flux: Vec<f32>,
+}
+
+/// One detected attack: when, on which *device input* channel, and how far the
+/// flux stood above its local median. Reported `peak_radius` hops after the fact
+/// -- the picker needs the candidate's neighbours on both sides -- so it reaches
+/// the display just behind the sweep cursor.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Onset {
+    pub beat: f64,
+    pub channel: usize,
+    pub strength: f32,
 }
 
 pub struct AnalysisOutputBuffer {
@@ -132,6 +148,20 @@ pub struct Config {
     /// the whole picture. Resolved to a range of bin groups once per callback.
     pub analysis_band_low: f64,
     pub analysis_band_high: f64,
+    /// How far above the local median of the flux a peak has to stand to count
+    /// as an onset. Relative, not absolute, so one number works across
+    /// dynamics -- see the flux normalisation in analysis.rs.
+    pub onset_threshold: f64,
+    /// Milliseconds an onset suppresses further ones on the same channel. A
+    /// single attack spreads across a few hops, and the peak test alone would
+    /// report the shoulders of a broad one.
+    pub onset_min_gap: f64,
+    /// Milliseconds to nudge every reported onset, positive later. A trim on
+    /// top of the structural correction in `analysis.rs`, which is measured on
+    /// an instant attack -- a slow-attack instrument reads differently. The
+    /// drum bus is the reference to calibrate against: its trigger times are
+    /// known exactly, because the callback generates them.
+    pub onset_offset: f64,
     /// FFT window in frames, one of `ANALYSIS_WINDOWS`. Frequency resolution
     /// against time resolution: the hop, and so the spectrogram's column width
     /// and the flux's precision, is always a quarter of it. Anything not in
