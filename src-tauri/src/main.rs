@@ -32,11 +32,45 @@ use crate::structs::{
 use crate::types::{Args, S};
 use crate::util::{beat_bisect, mod_add};
 use rand::Rng;
+use tauri::{CustomMenuItem, Manager, Menu, MenuEntry, MenuItem};
 use std::{
     collections::HashMap,
     sync::atomic::AtomicBool,
     sync::{Arc, Mutex},
 };
+
+// Restarting is the quickest way out of a wedged audio device -- the render
+// callback and the input stream are set up once, at launch, so there is no
+// other way to rebuild them. The settings survive it: the frontend writes the
+// session to local storage on every config change, and reads it back on boot.
+const RESTART_MENU_ID: &str = "restart";
+
+// The default menu is kept whole and added to rather than replaced. Building
+// one from scratch would drop Edit, and with it cut/copy/paste in every text
+// field in the settings panel.
+fn menu_with_restart(app_name: &str) -> Menu {
+    let mut menu = Menu::os_default(app_name);
+    // The app submenu, found by title rather than by position -- os_default
+    // only puts it first on macOS.
+    let app_submenu = menu.items.iter_mut().find_map(|entry| match entry {
+        MenuEntry::Submenu(submenu) if submenu.title == app_name => Some(submenu),
+        _ => None,
+    });
+    if let Some(submenu) = app_submenu {
+        // Just under About, above Services: an action on the app itself.
+        submenu
+            .inner
+            .items
+            .insert(1, MenuEntry::NativeItem(MenuItem::Separator));
+        submenu.inner.items.insert(
+            2,
+            MenuEntry::CustomItem(
+                CustomMenuItem::new(RESTART_MENU_ID, "Restart").accelerator("cmd+shift+r"),
+            ),
+        );
+    }
+    menu
+}
 
 fn main() -> Result<(), coreaudio::Error> {
     let context = tauri::generate_context!();
@@ -570,7 +604,22 @@ fn main() -> Result<(), coreaudio::Error> {
     })?;
     output_audio_unit.start()?;
 
+    // Built here rather than inline in the chain: the menu needs the product
+    // name, which only the generated context knows.
+    let context = tauri::generate_context!();
+
     tauri::Builder::default()
+        .menu(menu_with_restart(&context.package_info().name))
+        .on_menu_event(|event| {
+            if event.menu_item_id() == RESTART_MENU_ID {
+                // Relaunches the bundle and exits this process. On macOS
+                // `api::process::restart` reads Info.plist to find the binary,
+                // so the .app comes back rather than the bare executable --
+                // which matters here, since only the bundle has the microphone
+                // grant (see the packaging notes in CLAUDE.md).
+                event.window().app_handle().restart();
+            }
+        })
         .manage(sample_output_buffer)
         .manage(analysis_output_buffer)
         .manage(config_state)
@@ -589,7 +638,7 @@ fn main() -> Result<(), coreaudio::Error> {
             get_input_channel_count,
             load_drum_sample,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 
     println!("next line after tauri builder");
