@@ -1144,6 +1144,26 @@ const App = () => {
     return () => window.cancelAnimationFrame(id);
   }, []);
 
+  // Transport shortcuts: cmd-P pauses, cmd-L toggles looping. The listener is
+  // registered once and reaches the current config through a ref, for the same
+  // reason the draw loop does -- `set` and `get` are new closures every render,
+  // so depending on them would tear the listener down and rebuild it each time.
+  const toggleRef = useRef((k: "paused" | "loopingOn") => {});
+  toggleRef.current = (k) => set(k, !get(k));
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!e.metaKey || e.ctrlKey || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key !== "p" && key !== "l") return;
+      // Both are the browser's (print, address bar) even inside a text field,
+      // and neither means anything here, so they're taken unconditionally.
+      e.preventDefault();
+      toggleRef.current(key === "p" ? "paused" : "loopingOn");
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   // const Input = ({ label, _key }: { label: string; _key: string }) => (
   // <RealInput label={label} _key={_key} set={set} get={get} />
   // );
@@ -1170,7 +1190,7 @@ const App = () => {
         <div style={{ display: "flex", flexDirection: "row", gap: "2px" }}>
           <button
             onClick={() => set("paused", !get("paused"))}
-            title="Freeze the beat, the click, the file and the display"
+            title="Freeze the beat, the click, the file and the display (⌘P)"
             style={{
               flex: 1,
               fontWeight: "bold",
@@ -1240,7 +1260,7 @@ const App = () => {
         </Section>
 
         <Section label="looping">
-          <Input label="looping" _key="loopingOn" set={set} get={get} />
+          <Input label="looping (⌘L)" _key="loopingOn" set={set} get={get} />
           <Input label="beatsToLoop" _key="beatsToLoop" params={params} set={set} get={get} />
           <Input
             label="loop echoes"
