@@ -173,9 +173,91 @@ const Section = ({
   </div>
 );
 
+// The panel groups by what a setting acts on: the sound being made, the signal
+// coming back in, how it is drawn, and the panes drawing it. Transport, the
+// parameters every expression reads and the preset bar stay above the tabs --
+// parameters especially, since you edit `n` while looking at a field that
+// reads `bar/n x n`.
+const PANEL_TABS = ["sound", "signal", "visual", "views"] as const;
+type PanelTab = (typeof PANEL_TABS)[number];
+
+const TabBar = ({
+  active,
+  onSelect,
+}: {
+  active: PanelTab;
+  onSelect: (tab: PanelTab) => void;
+}) => (
+  <div style={{ display: "flex", flexDirection: "row", gap: "2px", margin: "4px 4px 0" }}>
+    {PANEL_TABS.map((tab) => (
+      <button
+        key={tab}
+        onClick={() => onSelect(tab)}
+        style={{
+          flex: 1,
+          padding: "4px",
+          border: "1px solid #777",
+          borderRadius: "8px 8px 0 0",
+          backgroundColor: tab === active ? "#444" : "#333",
+          color: tab === active ? "#fff" : "#aaa",
+          fontWeight: tab === active ? "bold" : undefined,
+          cursor: "pointer",
+        }}
+      >
+        {tab}
+      </button>
+    ))}
+  </div>
+);
+
+// Hidden rather than unmounted: `Input` holds the text you are typing in local
+// state, and an expression is invalid for most of the time it takes to type,
+// so unmounting would throw a half-written field away on every tab switch.
+// Every section rendered on every render before this existed, so nothing here
+// costs more than it used to.
+const TabPanel = ({
+  active,
+  children,
+}: {
+  active: boolean;
+  children: React.ReactNode;
+}) => <div style={{ display: active ? "block" : "none" }}>{children}</div>;
+
+// A labelled hairline between groups of settings inside one Section. The views
+// pane holds four unrelated kinds of setting -- which pane, how it is ruled,
+// how it draws, what is drawn over it -- and reads as a wall of inputs without
+// something separating them.
+const Divider = ({ label }: { label?: string }) => (
+  <div
+    style={{
+      display: "flex",
+      alignItems: "center",
+      gap: "6px",
+      margin: "8px 0 4px",
+    }}
+  >
+    {label && (
+      <span
+        style={{
+          color: "#999",
+          fontSize: "10px",
+          textTransform: "uppercase",
+          letterSpacing: "0.5px",
+        }}
+      >
+        {label}
+      </span>
+    )}
+    <div style={{ flex: 1, height: "1px", backgroundColor: "#777" }} />
+  </div>
+);
+
 const App = () => {
   const [log, setLog] = useState("log");
   const [hideConfig, setHideConfig] = useState(false);
+  // Plain state rather than a config key: which tab is open is transient UI,
+  // and keeping it out of config keeps it out of presets and the session.
+  const [panelTab, setPanelTab] = useState<PanelTab>("sound");
   useEffect(() => {
     const setListener = async () => {
       const unlisten = await listen("log", (msg) => {
@@ -1211,172 +1293,6 @@ const App = () => {
 				NEW MP3 2
 			</button> */}
 
-        <Section label="configs">
-          <PresetBar getCurrent={getCurrentPreset} onLoad={loadPreset} />
-        </Section>
-
-        <Section label="bpm">
-          <Input
-            label="bpm"
-            _key="bpm"
-            params={params}
-            set={set}
-            get={get}
-            validate={(n: number) => n > 0}
-          />
-        </Section>
-
-        <Section label="click">
-          <Input label="click" _key="clickOn" set={set} get={get} />
-          <Input
-            label="click rhythm"
-            _key="audioSubdivisions"
-            params={params}
-            set={set}
-            get={get}
-          />
-          <Input
-            label="toggle (click + drums)"
-            _key="clickToggle"
-            set={set}
-            get={get}
-          />
-          <Input label="click volume" _key="clickVolume" params={params} set={set} get={get} />
-        </Section>
-
-        <Section label="drums">
-          <Input label="drums on" _key="drumOn" set={set} get={get} />
-          <DrumList
-            params={params}
-            drums={get("drums")}
-            setDrums={(next) => set("drums", next)}
-            onAdd={addDrumSample}
-            status={sampleStatus}
-          />
-        </Section>
-
-        <Section label="gain">
-          <Input label="input gain" _key="audioInGain" params={params} set={set} get={get} />
-        </Section>
-
-        <Section label="looping">
-          <Input label="looping (⌘L)" _key="loopingOn" set={set} get={get} />
-          <Input label="beatsToLoop" _key="beatsToLoop" params={params} set={set} get={get} />
-          <Input
-            label="loop echoes"
-            _key="loopEchoes"
-            params={params}
-            set={set}
-            get={get}
-            validate={(n: number) => n >= 1 && n <= 16}
-          />
-          <Input
-            label="loop echo gain"
-            _key="loopEchoGain"
-            params={params}
-            set={set}
-            get={get}
-            validate={(n: number) => n >= 0 && n <= 1}
-          />
-          <Input
-            label="audio monitor"
-            _key="audioMonitorOn"
-            set={set}
-            get={get}
-          />
-        </Section>
-
-        <Section label="file">
-          <Input label="play file" _key="playFile" set={set} get={get} />
-        </Section>
-
-        <Section label="visual">
-          <Input
-            label="visual monitor"
-            _key="visualMonitorOn"
-            set={set}
-            get={get}
-          />
-          <Input
-            label="visual subdivision offset"
-            _key="subdivisionOffset"
-            params={params}
-            set={set}
-            get={get}
-          />
-          <Input
-            label="spectrum analysis"
-            _key="analysisOn"
-            set={set}
-            get={get}
-          />
-          {/* Frequency resolution against time resolution, and the one knob
-              for both: the hop is a quarter of the window, so a shorter one
-              narrows the spectrogram's columns and places an attack more
-              precisely at the cost of smearing the bass end further. Global
-              rather than per-pane -- one FFT feeds every pane and the flux. */}
-          <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
-            <label>fft window</label>
-            <select
-              value={get("analysisWindow")}
-              onChange={(e) => set("analysisWindow", Number(e.target.value))}
-              title="FFT window in frames. Shorter is sharper in time, coarser in frequency"
-            >
-              {ANALYSIS_WINDOWS.map((n) => (
-                <option key={n} value={n}>
-                  {n} ({Math.round((n / 44100) * 10000) / 10} ms)
-                </option>
-              ))}
-            </select>
-          </div>
-          {/* The band the flux is summed over. Global rather than per-pane:
-              it's an audio-thread setting, and narrowing it onto what you're
-              listening for is what stops a bass note reading as a snare hit. */}
-          <Input
-            label="flux band low (Hz)"
-            _key="analysisBandLow"
-            params={params}
-            set={set}
-            get={get}
-            validate={(n: number) => n > 0 && n < ANALYSIS_NYQUIST}
-          />
-          <Input
-            label="flux band high (Hz)"
-            _key="analysisBandHigh"
-            params={params}
-            set={set}
-            get={get}
-            validate={(n: number) => n > 0 && n < ANALYSIS_NYQUIST}
-          />
-          {/* Peak picking. Relative to the flux's local median, so the
-              threshold means the same thing loud or quiet; the gap is what
-              stops one broad attack reporting its own shoulders. */}
-          <Input
-            label="onset threshold"
-            _key="onsetThreshold"
-            params={params}
-            set={set}
-            get={get}
-            validate={(n: number) => Number.isFinite(n) && n >= 0}
-          />
-          <Input
-            label="onset min gap (ms)"
-            _key="onsetMinGap"
-            params={params}
-            set={set}
-            get={get}
-            validate={(n: number) => Number.isFinite(n) && n >= 0 && n < 10000}
-          />
-          <Input
-            label="onset offset (ms)"
-            _key="onsetOffset"
-            params={params}
-            set={set}
-            get={get}
-            validate={(n: number) => Number.isFinite(n) && Math.abs(n) < 10000}
-          />
-        </Section>
-
         <Section label="parameters">
           <ParameterList
             parameters={get("parameters")}
@@ -1384,160 +1300,335 @@ const App = () => {
           />
         </Section>
 
-        <Section label="views">
-          <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
-            <label>arrangement</label>
-            <select
-              value={`${viewCols}x${viewRows}`}
-              onChange={(e) => {
-                const [cols, rows] = e.target.value.split("x").map(Number);
-                setArrangement(cols, rows);
-              }}
-            >
-              {ARRANGEMENTS.map(([cols, rows]) => (
-                <option key={`${cols}x${rows}`} value={`${cols}x${rows}`}>
-                  {cols} across x {rows} down
-                </option>
-              ))}
-            </select>
-          </div>
-          {viewCtxs.length > 1 && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "row",
-                flexWrap: "wrap",
-                gap: "2px",
-                margin: "4px 0",
-              }}
-            >
-              {viewCtxs.map((v) => (
-                <button
-                  key={v.index}
-                  onClick={() => setSelectedView(v.index)}
-                  style={{
-                    flex: 1,
-                    fontWeight: v.index === activeView ? "bold" : "normal",
-                    backgroundColor: v.index === activeView ? "#666" : undefined,
-                  }}
-                >
-                  view {v.index + 1}
-                </button>
-              ))}
-            </div>
-          )}
-          <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
-            <label>kind</label>
-            <select
-              value={viewCtxs[activeView]?.cfg.kind ?? "waveform"}
-              onChange={(e) => viewIO.set("kind", e.target.value as ViewKind)}
-              title="What the pane's vertical axis means"
-            >
-              {VIEW_KINDS.map((kind) => (
-                <option key={kind} value={kind}>
-                  {kind}
-                </option>
-              ))}
-            </select>
-          </div>
-          {viewCtxs[activeView]?.cfg.kind === "spectrogram" && (
-            <SpectrogramControls
-              cfg={viewCtxs[activeView].cfg}
-              labels={channelLabels}
-              // Only the real inputs are analysed, and only the first few of
-              // them -- the buses aren't captured and have no spectrum.
-              count={Math.min(inputChannelCount, MAX_ANALYSIS_CHANNELS)}
-              set={viewIO.set}
-            />
-          )}
-          <Input
-            label="beats per row"
-            _key="beatsPerRow"
-            params={params}
-            {...viewIO}
-          />
-          <Input
-            label="left margin"
-            _key="marginLeft"
-            params={params}
-            {...viewIO}
-          />
-          <Input
-            label="right margin"
-            _key="marginRight"
-            params={params}
-            {...viewIO}
-          />
-          <Input
-            label="visual gain"
-            _key="visualGain"
-            params={params}
-            {...viewIO}
-          />
-          <Input label="split up/down" _key="splitChannels" {...viewIO} />
-          {viewCtxs[activeView]?.cfg.kind === "waveform" && (
-            <>
-              <Input label="show flux" _key="showFlux" {...viewIO} />
-              {viewCtxs[activeView]?.cfg.showFlux && (
-                <Slider
-                  label="flux gain"
-                  value={viewCtxs[activeView].cfg.fluxGain}
-                  min={0.05}
-                  max={4}
-                  step={0.05}
-                  onChange={(n) => viewIO.set("fluxGain", n)}
-                  title="Multiplies the onset function before it is clamped to the row"
-                />
-              )}
-              <Input label="show onsets" _key="showOnsets" {...viewIO} />
-            </>
-          )}
-          <Input label="bar color mode" _key="barColorMode" {...viewIO} />
-          <Input
-            label="refresh at cycle end"
-            _key="refreshAtCycleEnd"
-            {...viewIO}
-          />
-          <RowColorList
-            colors={viewCtxs[activeView]?.cfg.rowColors ?? []}
-            setColors={(colors) => viewIO.set("rowColors", colors)}
-          />
-          {(viewCtxs[activeView]?.cfg.rowColors.length ?? 0) > 1 && (
+        <Section label="configs">
+          <PresetBar getCurrent={getCurrentPreset} onLoad={loadPreset} />
+        </Section>
+
+        <TabBar active={panelTab} onSelect={setPanelTab} />
+
+        <TabPanel active={panelTab === "sound"}>
+          <Section label="bpm">
             <Input
-              label="row color pattern"
-              _key="rowColorPattern"
+              label="bpm"
+              _key="bpm"
+              params={params}
+              set={set}
+              get={get}
+              validate={(n: number) => n > 0}
+            />
+          </Section>
+          <Section label="click">
+            <Input label="click" _key="clickOn" set={set} get={get} />
+            <Input
+              label="click rhythm"
+              _key="audioSubdivisions"
+              params={params}
+              set={set}
+              get={get}
+            />
+            <Input
+              label="toggle (click + drums)"
+              _key="clickToggle"
+              set={set}
+              get={get}
+            />
+            <Input label="click volume" _key="clickVolume" params={params} set={set} get={get} />
+          </Section>
+          <Section label="drums">
+            <Input label="drums on" _key="drumOn" set={set} get={get} />
+            <DrumList
+              params={params}
+              drums={get("drums")}
+              setDrums={(next) => set("drums", next)}
+              onAdd={addDrumSample}
+              status={sampleStatus}
+            />
+          </Section>
+          <Section label="file">
+            <Input label="play file" _key="playFile" set={set} get={get} />
+          </Section>
+        </TabPanel>
+
+        <TabPanel active={panelTab === "signal"}>
+          <Section label="gain">
+            <Input label="input gain" _key="audioInGain" params={params} set={set} get={get} />
+          </Section>
+          <Section label="looping">
+            <Input label="looping (⌘L)" _key="loopingOn" set={set} get={get} />
+            <Input label="beatsToLoop" _key="beatsToLoop" params={params} set={set} get={get} />
+            <Input
+              label="loop echoes"
+              _key="loopEchoes"
+              params={params}
+              set={set}
+              get={get}
+              validate={(n: number) => n >= 1 && n <= 16}
+            />
+            <Input
+              label="loop echo gain"
+              _key="loopEchoGain"
+              params={params}
+              set={set}
+              get={get}
+              validate={(n: number) => n >= 0 && n <= 1}
+            />
+            <Input
+              label="audio monitor"
+              _key="audioMonitorOn"
+              set={set}
+              get={get}
+            />
+          </Section>
+          <Section label="input channels">
+            <ChannelList
+              labels={channelLabels}
+              inputCount={inputChannelCount}
+              visible={get("visibleChannels")}
+              styles={get("channelStyles")}
+              pans={get("channelPans")}
+              setVisible={(next) => set("visibleChannels", next)}
+              setStyles={(next) => set("channelStyles", next)}
+              setPans={(next) => set("channelPans", next)}
+            />
+          </Section>
+          <Section label="latency">
+            <Input
+              label="bufferCompensation"
+              _key="bufferCompensation"
+              params={params}
+              set={set}
+              get={get}
+            />
+          </Section>
+        </TabPanel>
+
+        <TabPanel active={panelTab === "visual"}>
+          <Section label="visual">
+            <Input
+              label="visual monitor"
+              _key="visualMonitorOn"
+              set={set}
+              get={get}
+            />
+            <Input
+              label="visual subdivision offset"
+              _key="subdivisionOffset"
+              params={params}
+              set={set}
+              get={get}
+            />
+            <Input
+              label="spectrum analysis"
+              _key="analysisOn"
+              set={set}
+              get={get}
+            />
+            {/* Frequency resolution against time resolution, and the one knob
+                for both: the hop is a quarter of the window, so a shorter one
+                narrows the spectrogram's columns and places an attack more
+                precisely at the cost of smearing the bass end further. Global
+                rather than per-pane -- one FFT feeds every pane and the flux. */}
+            <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
+              <label>fft window</label>
+              <select
+                value={get("analysisWindow")}
+                onChange={(e) => set("analysisWindow", Number(e.target.value))}
+                title="FFT window in frames. Shorter is sharper in time, coarser in frequency"
+              >
+                {ANALYSIS_WINDOWS.map((n) => (
+                  <option key={n} value={n}>
+                    {n} ({Math.round((n / 44100) * 10000) / 10} ms)
+                  </option>
+                ))}
+              </select>
+            </div>
+            {/* The band the flux is summed over. Global rather than per-pane:
+                it's an audio-thread setting, and narrowing it onto what you're
+                listening for is what stops a bass note reading as a snare hit. */}
+            <Input
+              label="flux band low (Hz)"
+              _key="analysisBandLow"
+              params={params}
+              set={set}
+              get={get}
+              validate={(n: number) => n > 0 && n < ANALYSIS_NYQUIST}
+            />
+            <Input
+              label="flux band high (Hz)"
+              _key="analysisBandHigh"
+              params={params}
+              set={set}
+              get={get}
+              validate={(n: number) => n > 0 && n < ANALYSIS_NYQUIST}
+            />
+            {/* Peak picking. Relative to the flux's local median, so the
+                threshold means the same thing loud or quiet; the gap is what
+                stops one broad attack reporting its own shoulders. */}
+            <Input
+              label="onset threshold"
+              _key="onsetThreshold"
+              params={params}
+              set={set}
+              get={get}
+              validate={(n: number) => Number.isFinite(n) && n >= 0}
+            />
+            <Input
+              label="onset min gap (ms)"
+              _key="onsetMinGap"
+              params={params}
+              set={set}
+              get={get}
+              validate={(n: number) => Number.isFinite(n) && n >= 0 && n < 10000}
+            />
+            <Input
+              label="onset offset (ms)"
+              _key="onsetOffset"
+              params={params}
+              set={set}
+              get={get}
+              validate={(n: number) => Number.isFinite(n) && Math.abs(n) < 10000}
+            />
+          </Section>
+        </TabPanel>
+
+        <TabPanel active={panelTab === "views"}>
+          <Section label="views">
+            <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
+              <label>arrangement</label>
+              <select
+                value={`${viewCols}x${viewRows}`}
+                onChange={(e) => {
+                  const [cols, rows] = e.target.value.split("x").map(Number);
+                  setArrangement(cols, rows);
+                }}
+              >
+                {ARRANGEMENTS.map(([cols, rows]) => (
+                  <option key={`${cols}x${rows}`} value={`${cols}x${rows}`}>
+                    {cols} across x {rows} down
+                  </option>
+                ))}
+              </select>
+            </div>
+            {viewCtxs.length > 1 && (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "row",
+                  flexWrap: "wrap",
+                  gap: "2px",
+                  margin: "4px 0",
+                }}
+              >
+                {viewCtxs.map((v) => (
+                  <button
+                    key={v.index}
+                    onClick={() => setSelectedView(v.index)}
+                    style={{
+                      flex: 1,
+                      fontWeight: v.index === activeView ? "bold" : "normal",
+                      backgroundColor: v.index === activeView ? "#666" : undefined,
+                    }}
+                  >
+                    view {v.index + 1}
+                  </button>
+                ))}
+              </div>
+            )}
+            <Divider label="content" />
+            <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
+              <label>kind</label>
+              <select
+                value={viewCtxs[activeView]?.cfg.kind ?? "waveform"}
+                onChange={(e) => viewIO.set("kind", e.target.value as ViewKind)}
+                title="What the pane's vertical axis means"
+              >
+                {VIEW_KINDS.map((kind) => (
+                  <option key={kind} value={kind}>
+                    {kind}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {viewCtxs[activeView]?.cfg.kind === "spectrogram" && (
+              <SpectrogramControls
+                cfg={viewCtxs[activeView].cfg}
+                labels={channelLabels}
+                // Only the real inputs are analysed, and only the first few of
+                // them -- the buses aren't captured and have no spectrum.
+                count={Math.min(inputChannelCount, MAX_ANALYSIS_CHANNELS)}
+                set={viewIO.set}
+              />
+            )}
+            <Divider label="layout" />
+            <Input
+              label="beats per row"
+              _key="beatsPerRow"
+              params={params}
               {...viewIO}
             />
-          )}
-          <GridList
-            grids={viewCtxs[activeView]?.cfg.grids ?? []}
-            setGrids={(grids) => viewIO.set("grids", grids)}
-            params={params}
-          />
-        </Section>
-
-        <Section label="input channels">
-          <ChannelList
-            labels={channelLabels}
-            inputCount={inputChannelCount}
-            visible={get("visibleChannels")}
-            styles={get("channelStyles")}
-            pans={get("channelPans")}
-            setVisible={(next) => set("visibleChannels", next)}
-            setStyles={(next) => set("channelStyles", next)}
-            setPans={(next) => set("channelPans", next)}
-          />
-        </Section>
-
-        <Section label="misc">
-          <Input
-            label="bufferCompensation"
-            _key="bufferCompensation"
-            params={params}
-            set={set}
-            get={get}
-          />
-        </Section>
+            <Input
+              label="left margin"
+              _key="marginLeft"
+              params={params}
+              {...viewIO}
+            />
+            <Input
+              label="right margin"
+              _key="marginRight"
+              params={params}
+              {...viewIO}
+            />
+            <Divider label="drawing" />
+            <Input
+              label="visual gain"
+              _key="visualGain"
+              params={params}
+              {...viewIO}
+            />
+            <Input label="split up/down" _key="splitChannels" {...viewIO} />
+            <Input label="bar color mode" _key="barColorMode" {...viewIO} />
+            <Input
+              label="refresh at cycle end"
+              _key="refreshAtCycleEnd"
+              {...viewIO}
+            />
+            <Divider label="overlays" />
+            {viewCtxs[activeView]?.cfg.kind === "waveform" && (
+              <>
+                <Input label="show flux" _key="showFlux" {...viewIO} />
+                {viewCtxs[activeView]?.cfg.showFlux && (
+                  <Slider
+                    label="flux gain"
+                    value={viewCtxs[activeView].cfg.fluxGain}
+                    min={0.05}
+                    max={4}
+                    step={0.05}
+                    onChange={(n) => viewIO.set("fluxGain", n)}
+                    title="Multiplies the onset function before it is clamped to the row"
+                  />
+                )}
+                <Input label="show onsets" _key="showOnsets" {...viewIO} />
+              </>
+            )}
+            <Divider label="colors & grids" />
+            <RowColorList
+              colors={viewCtxs[activeView]?.cfg.rowColors ?? []}
+              setColors={(colors) => viewIO.set("rowColors", colors)}
+            />
+            {(viewCtxs[activeView]?.cfg.rowColors.length ?? 0) > 1 && (
+              <Input
+                label="row color pattern"
+                _key="rowColorPattern"
+                {...viewIO}
+              />
+            )}
+            <GridList
+              grids={viewCtxs[activeView]?.cfg.grids ?? []}
+              setGrids={(grids) => viewIO.set("grids", grids)}
+              params={params}
+            />
+          </Section>
+        </TabPanel>
         {/* <Input label="canvas height" _key= "canvasHeight" /> */}
         {/* <Input label="canvas width" _key= "canvasWidth" /> */}
       </>
