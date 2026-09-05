@@ -415,6 +415,10 @@ export const defaultJsConfig = {
   // so changing either resizes the list rather than letting the two disagree.
   viewCols: 1,
   viewRows: 1,
+  // Chained rather than simultaneous panes: instead of every pane drawing the
+  // same beats against its own ruling, the panes divide one long timeline
+  // between them, so the signal runs through pane 1's rows, then pane 2's.
+  viewsSequential: false,
 };
 
 export type RustConfig = typeof defaultRustConfig;

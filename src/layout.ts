@@ -6,6 +6,13 @@ export type Layout = {
   // Cumulative row starts, one longer than beatsPerRow.
   rowStarts: number[];
   beatsPerWindow: number;
+  // The timeline the display wraps on, and where this pane sits in it. Drawn
+  // simultaneously, every pane covers the same beats, so `cycleBeats` is the
+  // pane's own `beatsPerWindow` and `chainStart` is 0. Chained, the panes
+  // divide one longer timeline between them and a beat belongs to exactly one
+  // of them -- the others simply get no positions for it.
+  cycleBeats: number;
+  chainStart: number;
   pixelsPerBeat: number;
   marginLeft: number;
   marginRight: number;
@@ -25,9 +32,10 @@ const MAX_POSITIONS_PER_BEAT = 512;
 
 // Every place on the canvas a given beat shows up. A row is drawn as its own
 // beats plus `marginLeft` beats of lead-in and `marginRight` of lead-out, and
-// because the loop repeats, a margin wider than the loop shows the same beat
-// again once per extra loop it spans -- a 1-beat row with margins of 2 draws
-// that beat five times across the width.
+// because the timeline repeats, a margin wider than it shows the same beat
+// again once per extra cycle it spans -- a 1-beat row with margins of 2 draws
+// that beat five times across the width. Chained, the repeat is a whole cycle
+// of every pane, so a pane's margins show its neighbours' beats.
 export const getCanvasPositions = (
   layout: Layout,
   beat: number
@@ -35,7 +43,8 @@ export const getCanvasPositions = (
   const {
     beatsPerRow,
     rowStarts,
-    beatsPerWindow,
+    cycleBeats,
+    chainStart,
     pixelsPerBeat,
     marginLeft,
     marginRight,
@@ -43,21 +52,25 @@ export const getCanvasPositions = (
 
   const positions: Position[] = [];
   // Nothing sensible to draw, and the modulo below would divide by zero.
-  if (!(beatsPerWindow > 0)) return positions;
+  if (!(cycleBeats > 0)) return positions;
 
-  const b = ((beat % beatsPerWindow) + beatsPerWindow) % beatsPerWindow;
+  // Where the beat falls in the timeline, measured from this pane's start. A
+  // chained pane's slice is only part of that timeline, so `b` can land outside
+  // every row's drawn span -- which is how a beat that belongs to another pane
+  // ends up drawing nothing here.
+  const b = ((beat % cycleBeats) + cycleBeats) % cycleBeats - chainStart;
 
   for (let row = 0; row < beatsPerRow.length; row++) {
     const start = rowStarts[row];
     const length = beatsPerRow[row];
     // `d` is the beat's distance from the row's start. Sliding it by whole
     // loops gives the repeats; keep the ones inside the row's drawn span.
-    const firstLoop = Math.ceil((start - marginLeft - b) / beatsPerWindow);
+    const firstLoop = Math.ceil((start - marginLeft - b) / cycleBeats);
     const lastLoop = Math.floor(
-      (start + length + marginRight - b) / beatsPerWindow
+      (start + length + marginRight - b) / cycleBeats
     );
     for (let loop = firstLoop; loop <= lastLoop; loop++) {
-      const d = b + loop * beatsPerWindow - start;
+      const d = b + loop * cycleBeats - start;
       positions.push({
         x: (d + marginLeft) * pixelsPerBeat,
         row,

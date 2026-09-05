@@ -57,6 +57,9 @@ interface InputProps<T extends ConfigKey> {
   _key: T;
   get: (key: ConfigKey) => Config[T];
   set: (key: ConfigKey, val: Config[T]) => void;
+  // Hover text for the row. Only the checkbox reads it -- the typed fields
+  // carry a hint about their own syntax instead.
+  title?: string;
 }
 
 interface II<T> {
@@ -64,6 +67,7 @@ interface II<T> {
   _key: ConfigKey;
   get: (key: ConfigKey) => T;
   set: (key: ConfigKey, val: T) => void;
+  title?: string;
   validate?: (val: T) => boolean;
 }
 
@@ -225,8 +229,8 @@ const ParserArrayInput = ({
   );
 };
 
-const BooleanInput = ({ label, _key, get, set }: II<boolean>) => (
-  <div style={rowStyle}>
+const BooleanInput = ({ label, _key, get, set, title }: II<boolean>) => (
+  <div style={rowStyle} title={title}>
     <label>{label}</label>
     <input
       onChange={(e) => set(_key, !get(_key))}

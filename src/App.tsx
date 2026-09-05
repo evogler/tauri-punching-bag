@@ -63,6 +63,7 @@ const ARRANGEMENTS: [number, number][] = [
   [1, 2],
   [3, 1],
   [2, 2],
+  [4, 1],
 ];
 
 // Per-pane mutable draw state. Every pane needs its own: the sweep flush
@@ -410,6 +411,19 @@ const App = () => {
   const cellWidth = Math.max(1, Math.floor(get("canvasWidth") / viewCols));
   const cellHeight = Math.max(1, Math.floor(get("canvasHeight") / viewRows));
 
+  // Chained panes divide one timeline between them: pane 1 covers the beats
+  // after every earlier pane's, so the signal runs through its rows, then the
+  // next pane's. Simultaneous is the default -- every pane covering the same
+  // beats is what makes two rulings of one performance comparable.
+  const sequential = get("viewsSequential");
+  const viewWindows = get("views").map((cfg) =>
+    viewRowBeats(cfg).reduce((sum, n) => sum + n, 0)
+  );
+  const chainStarts = viewWindows.reduce(
+    (acc, n) => [...acc, acc.slice(-1)[0] + n],
+    [0]
+  );
+
   const viewCtxs: ViewCtx[] = get("views").map((cfg, index) => {
     const beatsPerRow = viewRowBeats(cfg);
     const marginLeft = exprNumber(cfg.marginLeft);
@@ -427,7 +441,9 @@ const App = () => {
       layout: {
         beatsPerRow,
         rowStarts,
-        beatsPerWindow: beatsPerRow.reduce((sum, n) => sum + n, 0),
+        beatsPerWindow: viewWindows[index],
+        cycleBeats: sequential ? chainStarts.slice(-1)[0] : viewWindows[index],
+        chainStart: sequential ? chainStarts[index] : 0,
         pixelsPerBeat: cellWidth / maxBeatsInRow,
         marginLeft,
         marginRight,
@@ -848,7 +864,7 @@ const App = () => {
   // that is the stamp being honest about when the value describes, not a lag.
   const drawFlux = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
     const { channels, beats, flux } = analysis.current;
-    const { beatsPerWindow, pixelsPerBeat } = v.layout;
+    const { beatsPerWindow, cycleBeats, pixelsPerBeat } = v.layout;
     if (!(beatsPerWindow > 0) || channels < 1 || !flux.length) return;
     const peaks = v.state.fluxPeaks;
     for (let i = 0; i < beats.length; i++) {
@@ -860,7 +876,7 @@ const App = () => {
       // A whole pixel column, like the spectrogram and unlike drawSweep's float
       // compare: at low zoom several hops share a column and the loudest has to
       // win rather than the last one overwriting the rest.
-      const column = Math.floor((beat % beatsPerWindow) * pixelsPerBeat);
+      const column = Math.floor((beat % cycleBeats) * pixelsPerBeat);
       if (column !== v.state.fluxColumn) {
         for (const { x, row, isMargin } of getCanvasPositions(v.layout, beat)) {
           drawFluxAt(ctx, v, x, row, isMargin, peaks);
@@ -875,10 +891,10 @@ const App = () => {
   // puts it up when the cycle wraps.
   const collectFlux = (v: ViewCtx) => {
     const { channels, beats, flux } = analysis.current;
-    const { beatsPerWindow, pixelsPerBeat } = v.layout;
+    const { beatsPerWindow, cycleBeats, pixelsPerBeat } = v.layout;
     if (!(beatsPerWindow > 0) || channels < 1 || !flux.length) return;
     for (let i = 0; i < beats.length; i++) {
-      const b = ((beats[i] % beatsPerWindow) + beatsPerWindow) % beatsPerWindow;
+      const b = ((beats[i] % cycleBeats) + cycleBeats) % cycleBeats;
       const column = Math.floor(b * pixelsPerBeat);
       let peaks = v.state.fluxColumns.get(column);
       if (!peaks || peaks.length !== channels) {
@@ -943,7 +959,7 @@ const App = () => {
   // the list ends up on top of the stack.
   const drawGrids = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
     const grids = v.cfg.grids;
-    const { beatsPerWindow } = v.layout;
+    const { cycleBeats } = v.layout;
     for (let i = grids.length - 1; i >= 0; i--) {
       const grid = grids[i];
       const { notes, end } = grid.subdivisions.val;
@@ -952,10 +968,10 @@ const App = () => {
       ctx.strokeStyle = grid.color;
       ctx.globalAlpha = gridAlpha(grid);
       ctx.lineWidth = 2;
-      for (let startBeat = 0; startBeat < beatsPerWindow; startBeat += end) {
+      for (let startBeat = 0; startBeat < cycleBeats; startBeat += end) {
         for (const note of notes) {
           const b = startBeat + note.time;
-          if (b >= beatsPerWindow) break;
+          if (b >= cycleBeats) break;
           for (const { x, row } of getCanvasPositions(v.layout, b)) {
             const y = row * v.rowHeight;
             ctx.beginPath();
@@ -974,7 +990,7 @@ const App = () => {
   // the newest sample always sits right at the sweep.
   const drawSweep = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
     const { channels, beats, values } = samples.current;
-    const { beatsPerWindow, pixelsPerBeat } = v.layout;
+    const { beatsPerWindow, cycleBeats, pixelsPerBeat } = v.layout;
     if (!(beatsPerWindow > 0) || channels < 1) return;
     const peaks = v.state.channelPeaks;
     for (let i = 0; i < beats.length; i++) {
@@ -985,7 +1001,7 @@ const App = () => {
       const beat = beats[i];
       // Flush once per step along the loop -- the beat's own progress, not any
       // one copy's position on screen.
-      const sweep = (beat % beatsPerWindow) * pixelsPerBeat;
+      const sweep = (beat % cycleBeats) * pixelsPerBeat;
       if (sweep !== v.state.canvasPos) {
         for (const { x, row, isMargin } of getCanvasPositions(v.layout, beat)) {
           eraseColumn(ctx, v, x, row);
@@ -1045,7 +1061,7 @@ const App = () => {
   // than the last one overwriting the rest.
   const drawSpectrogram = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
     const { channels, bins, beats, mags } = analysis.current;
-    const { beatsPerWindow, pixelsPerBeat } = v.layout;
+    const { beatsPerWindow, cycleBeats, pixelsPerBeat } = v.layout;
     if (!(beatsPerWindow > 0) || channels < 1 || bins < 1) return;
     // A device channel past what Rust analysed -- a synthetic bus, or beyond
     // the cap. Nothing to show rather than a misread of another channel.
@@ -1061,7 +1077,7 @@ const App = () => {
         if (peaks[b] === undefined || value > peaks[b]) peaks[b] = value;
       }
       const beat = beats[i];
-      const column = Math.floor((beat % beatsPerWindow) * pixelsPerBeat);
+      const column = Math.floor((beat % cycleBeats) * pixelsPerBeat);
       if (column !== v.state.canvasPos) {
         // How much of the loop this column stands for. NaN on the first hop
         // after a reset, and negative where the beat wrapped past the end of
@@ -1135,11 +1151,13 @@ const App = () => {
   // when the beat wraps, so a cycle is only ever shown complete.
   const drawWholeCycle = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
     const { channels, beats, values } = samples.current;
-    const { beatsPerWindow, pixelsPerBeat } = v.layout;
+    const { beatsPerWindow, cycleBeats, pixelsPerBeat } = v.layout;
     if (!(beatsPerWindow > 0) || channels < 1) return;
     for (let i = 0; i < beats.length; i++) {
       const beat = beats[i];
-      const b = ((beat % beatsPerWindow) + beatsPerWindow) % beatsPerWindow;
+      // Chained, this is the position in the whole timeline rather than in the
+      // pane's own slice, so every pane repaints together at one wrap.
+      const b = ((beat % cycleBeats) + cycleBeats) % cycleBeats;
       // The modulo only ever goes backwards when the beat has wrapped past the
       // end of the window, which is exactly when the finished cycle should go up.
       if (b < v.state.lastCyclePos) {
@@ -1509,6 +1527,13 @@ const App = () => {
                 ))}
               </select>
             </div>
+            <Input
+              label="chain panes"
+              _key="viewsSequential"
+              set={set}
+              get={get}
+              title="Run the signal through each pane's rows in turn instead of drawing the same beats in all of them"
+            />
             {viewCtxs.length > 1 && (
               <div
                 style={{
