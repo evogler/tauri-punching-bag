@@ -49,6 +49,8 @@ position, looper) derives from it.
 | `constants.rs` | `SAMPLE_RATE`, `MAX_INPUT_BACKLOG`, `default_config()`. |
 | `util.rs` | `beat_bisect` (which subdivision a beat falls in), `mod_add`. |
 | `analysis.rs` | The short-time FFT behind the spectrogram and the spectral flux (see below). |
+| `calibration.rs` | The round-trip latency measurement -- probe, matched filter, gates. |
+| `prefs.rs` | `audio-prefs.json`: device choice and per-pair latency. Not the config. |
 
 ### Layout of the frontend
 
@@ -369,7 +371,8 @@ The render callback in `main.rs` runs ~21×/sec with 2048 frames. Inside it:
   beat, triggers, display pushes — belongs *outside* it. Things that legitimately
   live inside: writing `channel[i]`, the mp3 read, drum sample mixing.
 - **`buffer_compensation` is in frames** (default 4330 ≈ 98 ms), hand-tuned by
-  the owner. Don't change its units.
+  the owner and since confirmed to within 3 frames by the calibration measurement
+  (see *Measuring it automatically*). Don't change its units.
 - **`beat` must stay f64 end-to-end.** It counts up from launch, so at f32 the
   gap between representable values outgrows a screen pixel after ~20 minutes and
   the waveform stops being redrawn densely enough to erase the previous pass —
@@ -507,6 +510,55 @@ pushed to the audio thread, which must never do a map lookup.
   because a device implies its own sample rate -- so a per-device frame count
   absorbs the 44.1/48 difference by itself, which is the retuning problem the
   sample-rate work left behind.
+
+#### Measuring it automatically
+
+`measure latency` in the device section plays a 20 ms swept sine, finds it in
+the input with a matched filter, and offers the frame difference.
+**`docs/calibration.md` is the long version** -- why a sweep rather than a
+click, why correlation is immune to the speaker and the room colouring the
+probe, why not the onset detector, and what each gate means.
+
+- **A sweep, not a click.** A click's energy is flat, so most of it lands where
+  a small speaker can't reproduce it. A sweep puts its energy where speakers and
+  mics are efficient, and matched filtering compresses it to a peak ~133 us
+  wide -- six frames -- against the several milliseconds a click comes back as.
+- **Correlation doesn't care that the sound comes back transformed.** The
+  speaker, the room and the mic *convolve* with the probe, and convolution does
+  not move where a signal starts. Coloration costs sharpness, not accuracy.
+- **First peak, then its apex** -- an early reflection can be louder than the
+  direct arrival, and the direct arrival is the one that answers the question.
+  The threshold crossing finds the leading edge, so climb to the top of that
+  same peak or you read ~5 frames early.
+- **Five probes, median.** One door closing gets outvoted rather than becoming
+  the answer.
+- **It refuses to answer** on low input level, a weak match, fewer than three
+  probes, or probes disagreeing by more than 5 ms -- and shows all four numbers
+  *with their thresholds* whether it passes or fails, because "too quiet" and
+  "loud but not locking" need opposite responses from the user. The result is
+  offered with an `apply` button, never applied on its own.
+- **Not the onset detector**, though it is right there. Its resolution is a hop
+  (5.8 ms), and `ONSET_CENTRE_BIAS` and `onsetOffset` were themselves calibrated
+  by ear against the drums bus -- measuring latency with an instrument whose
+  zero point is one of the unknowns is circular.
+- **Audio-thread shape**: allocated in `start_calibration`, locked once per
+  callback like the display buffers, capture handed over by `mem::take` rather
+  than copied, correlation run in the command outside the lock. It takes the
+  callback over entirely -- no drums, looper, monitor or file, since anything
+  else playing would correlate against the probe -- but still drains every input
+  channel, because `make_buffers` hands out the same queue to both ends.
+- Checked against a simulated round trip (low-passed, a louder-than-direct
+  reflection, heavy noise) at 2200/3000/4330 frames: recovered within 4-5 frames
+  each time, and silence and uncorrelated noise were both refused. Temp tests,
+  run and deleted.
+- **Verified against the real thing, 2026-09-06.** It measured 4331-4333 frames
+  where `buffer_compensation` had been hand-tuned *by ear* to 4330 -- two
+  independent methods, neither able to bias the other, agreeing within 3 frames
+  (0.07 ms). Moving the microphone a few feet back added ~100 frames, which is
+  2.27 ms, which at ~1.125 ft/ms is ~2.5 feet. That second check is the stronger
+  one: a number that tracks the microphone's position is measuring the acoustic
+  path rather than producing a plausible constant. It also retroactively
+  confirms the 4330 default.
 
 ### Looper
 

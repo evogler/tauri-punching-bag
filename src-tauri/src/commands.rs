@@ -1,13 +1,14 @@
 use crate::analysis::{BINS, MAX_ANALYSIS_CHANNELS};
+use crate::calibration::{analyze, CalibrationPhase, CalibrationResult};
 use crate::constants::{sample_rate, ANALYSIS_RESERVE_HOPS, ONSET_RESERVE, VISUAL_RESERVE_FRAMES};
 use crate::get_loop_buffer_size::get_loop_buffer_size;
 use crate::io_channels::{list_devices, ActiveDevices, AudioDeviceInfo};
 use crate::prefs::{load as load_prefs, save as save_prefs, AudioPrefs};
 use crate::read_audio_file::get_samples_from_filename;
 use crate::structs::{
-    AnalysisFrames, AnalysisOutputBuffer, BeatResetState, Config, ConfigState, DrumSamples,
-    InputChannelCount, LogState, LoopBufferState, Mp3BufferState, Payload, SampleOutputBuffer,
-    VisualSamples,
+    AnalysisFrames, AnalysisOutputBuffer, BeatResetState, CalibrationState, Config, ConfigState,
+    DrumSamples, InputChannelCount, LogState, LoopBufferState, Mp3BufferState, Payload,
+    SampleOutputBuffer, VisualSamples,
 };
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -171,6 +172,52 @@ pub fn set_audio_prefs(app_handle: tauri::AppHandle, prefs: AudioPrefs) -> Resul
 #[tauri::command]
 pub fn restart_app(app_handle: tauri::AppHandle) {
     app_handle.restart();
+}
+
+/// Begins a run. Everything it needs is allocated here, off the audio thread;
+/// the callback only indexes into it afterwards.
+#[tauri::command]
+pub fn start_calibration(state: State<CalibrationState>, channel: usize) {
+    *state.1.lock().unwrap() = CalibrationResult {
+        phase: CalibrationPhase::Running,
+        ..Default::default()
+    };
+    state.0.lock().unwrap().start(channel);
+}
+
+#[tauri::command]
+pub fn cancel_calibration(state: State<CalibrationState>) {
+    state.0.lock().unwrap().cancel();
+    *state.1.lock().unwrap() = CalibrationResult::default();
+}
+
+/// Polled by the panel while a run is in flight. When the callback signals it
+/// has finished, the capture is *swapped* out under the lock -- O(1), never a
+/// memcpy of a second of audio while the audio thread waits -- and the
+/// correlation runs here, outside it.
+#[tauri::command]
+pub fn get_calibration_status(state: State<CalibrationState>) -> CalibrationResult {
+    let taken = {
+        let mut cal = state.0.lock().unwrap();
+        if cal.finished {
+            cal.finished = false;
+            Some(cal.take_capture())
+        } else {
+            let running = cal.active;
+            let progress = cal.progress();
+            drop(cal);
+            let mut last = state.1.lock().unwrap();
+            if running {
+                last.phase = CalibrationPhase::Running;
+                last.progress = progress;
+            }
+            return last.clone();
+        }
+    };
+    let (capture, emit_at, chirp) = taken.unwrap();
+    let result = analyze(&capture, &emit_at, &chirp);
+    *state.1.lock().unwrap() = result.clone();
+    result
 }
 
 /// Decodes a file and files it under its own path, which is how a drum voice

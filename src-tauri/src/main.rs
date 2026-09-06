@@ -6,6 +6,7 @@
 mod analysis;
 mod commands;
 mod constants;
+mod calibration;
 mod get_loop_buffer_size;
 mod prefs;
 mod io_channels;
@@ -18,10 +19,12 @@ extern crate coreaudio;
 
 use crate::analysis::{Analyzer, OnsetParams, BINS, MAX_ANALYSIS_CHANNELS};
 use crate::commands::{
-    get_active_devices, get_analysis, get_audio_prefs, get_input_channel_count, get_sample_rate,
-    get_samples, list_audio_devices, load_drum_sample, reset_beat, restart_app, set_audio_prefs,
-    set_config, set_mp3_buffer,
+    cancel_calibration, get_active_devices, get_analysis, get_audio_prefs,
+    get_calibration_status, get_input_channel_count, get_sample_rate, get_samples,
+    list_audio_devices, load_drum_sample, reset_beat, restart_app, set_audio_prefs, set_config,
+    set_mp3_buffer, start_calibration,
 };
+use crate::calibration::Calibration;
 use crate::constants::{default_config, max_input_backlog, max_visual_backlog, sample_rate};
 use crate::get_loop_buffer_size::{get_loop_buffer_size, get_loop_spacing, loop_echo_count};
 use crate::io_channels::{
@@ -29,9 +32,9 @@ use crate::io_channels::{
 };
 use crate::read_audio_file::get_samples_from_filename;
 use crate::structs::{
-    AnalysisOutputBuffer, BeatResetState, BusDelay, ConfigState, DrumSamples, InputChannelCount,
-    LogState, LoopBuffer, LoopBufferState, Mp3Buffer, Mp3BufferState, SampleOutputBuffer,
-    SoundingSample,
+    AnalysisOutputBuffer, BeatResetState, BusDelay, CalibrationState, ConfigState, DrumSamples,
+    InputChannelCount, LogState, LoopBuffer, LoopBufferState, Mp3Buffer, Mp3BufferState,
+    SampleOutputBuffer, SoundingSample,
 };
 use crate::types::{Args, S};
 use crate::util::{beat_bisect, mod_add};
@@ -172,6 +175,13 @@ fn main() -> Result<(), coreaudio::Error> {
     };
     let sample_output_buffer_clone = sample_output_buffer.buffer.clone();
 
+    let calibration_arc = Arc::new(Mutex::new(Calibration::default()));
+    let calibration_result_arc = Arc::new(Mutex::new(
+        crate::calibration::CalibrationResult::default(),
+    ));
+    let calibration_state = CalibrationState(calibration_arc.clone(), calibration_result_arc.clone());
+    let calibration = calibration_arc.clone();
+
     let analysis_output_buffer = AnalysisOutputBuffer {
         buffer: Default::default(),
         drained: Default::default(),
@@ -252,6 +262,38 @@ fn main() -> Result<(), coreaudio::Error> {
                 }
             }
             return Ok(());
+        }
+
+        // Calibration takes the callback over completely. It is measuring how
+        // long the app's own sound takes to come back, so it has to be the only
+        // thing making sound -- drums, the looper or the monitor mixed in would
+        // all correlate against the probe. Locked once here, like the display
+        // buffers, never per frame.
+        {
+            let mut cal = calibration.lock().unwrap();
+            if cal.active {
+                // The frames either side of a calibration run aren't adjacent
+                // to what came before, same as a pause.
+                analyzer.reset();
+                for i in 0..num_frames {
+                    // Every channel is drained whether or not it is the one
+                    // being measured: make_buffers hands out the same queue to
+                    // both ends, so an undrained channel grows without bound
+                    // and replays the backlog afterwards.
+                    let mut measured = 0.0;
+                    for (ch, buffer) in buffers.iter_mut().enumerate() {
+                        let sample = buffer.pop_front().unwrap_or(0.0);
+                        if ch == cal.channel {
+                            measured = sample;
+                        }
+                    }
+                    let probe = cal.step(measured);
+                    for channel in data.channels_mut() {
+                        channel[i] = probe;
+                    }
+                }
+                return Ok(());
+            }
         }
 
         // Resolved once per callback. Building these per frame -- as the click
@@ -652,6 +694,7 @@ fn main() -> Result<(), coreaudio::Error> {
         .manage(log_state)
         .manage(InputChannelCount(input_channels))
         .manage(active_devices)
+        .manage(calibration_state)
         .manage(drum_samples_state)
         .invoke_handler(tauri::generate_handler![
             get_samples,
@@ -666,6 +709,9 @@ fn main() -> Result<(), coreaudio::Error> {
             set_audio_prefs,
             get_active_devices,
             restart_app,
+            start_calibration,
+            get_calibration_status,
+            cancel_calibration,
             load_drum_sample,
         ])
         .run(context)

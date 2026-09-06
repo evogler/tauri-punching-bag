@@ -35,6 +35,7 @@ import {
   VIEW_KINDS,
   ViewKind,
 } from "./config";
+import { Calibration } from "./Calibration";
 import { Input } from "./Input";
 import {
   ActiveDevices,
@@ -1543,6 +1544,11 @@ const App = () => {
               setPrefs={writeAudioPrefs}
               onOpen={refreshDevices}
               onRestart={() => invoke("restart_app").catch(() => {})}
+            />
+            <Divider label="latency" />
+            <Calibration
+              inputCount={inputChannelCount}
+              onApply={(frames) => set("bufferCompensation", numExpr(frames))}
             />
           </Section>
           <Section label="input channels">

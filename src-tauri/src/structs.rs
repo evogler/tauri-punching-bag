@@ -296,3 +296,10 @@ impl BusDelay {
         out
     }
 }
+
+/// The audio thread's calibration buffers, plus the last completed result.
+/// Locked once per callback, like the display buffers -- never per frame.
+pub struct CalibrationState(
+    pub Arc<Mutex<crate::calibration::Calibration>>,
+    pub Arc<Mutex<crate::calibration::CalibrationResult>>,
+);
