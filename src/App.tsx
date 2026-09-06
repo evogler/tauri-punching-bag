@@ -26,8 +26,9 @@ import {
   resolveJsConfig,
   resolveRustConfig,
   viewRowBeats,
+  analysisNyquist,
+  setSampleRateHz,
   ANALYSIS_BINS,
-  ANALYSIS_NYQUIST,
   ANALYSIS_WINDOWS,
   MAX_ANALYSIS_CHANNELS,
   VIEW_KINDS,
@@ -570,6 +571,7 @@ const App = () => {
 
   const mockGetArrayPos = useRef(0);
   const mockHopBeat = useRef(0);
+  // Fake data for the browser-only path; no Rust, so a nominal rate is fine.
   const beatsPerSample = 91 / 60 / 44100;
   const mockGetArray = async () => {
     const channels = Math.max(1, get("visibleChannels").length);
@@ -670,6 +672,22 @@ const App = () => {
     }
     invoke<number>("get_input_channel_count")
       .then((n) => setInputChannelCount(Math.max(1, n)))
+      .catch(() => {});
+  }, []);
+
+  // The rate Rust took from the input device. The sample stream is stamped in
+  // beats, so nothing in the draw path needs this -- it is only for the two
+  // places the UI has to name a frequency or a duration.
+  const [sampleRate, setSampleRate] = useState(44100);
+  useEffect(() => {
+    if (BROWSER_DEBUG_MODE) return;
+    invoke<number>("get_sample_rate")
+      .then((hz) => {
+        if (!(hz > 0)) return;
+        setSampleRate(hz);
+        // The validators are module-level and can't read state.
+        setSampleRateHz(hz);
+      })
       .catch(() => {});
   }, []);
 
@@ -1496,7 +1514,7 @@ const App = () => {
               >
                 {ANALYSIS_WINDOWS.map((n) => (
                   <option key={n} value={n}>
-                    {n} ({Math.round((n / 44100) * 10000) / 10} ms)
+                    {n} ({Math.round((n / sampleRate) * 10000) / 10} ms)
                   </option>
                 ))}
               </select>
@@ -1510,7 +1528,7 @@ const App = () => {
               params={params}
               set={set}
               get={get}
-              validate={(n: number) => n > 0 && n < ANALYSIS_NYQUIST}
+              validate={(n: number) => n > 0 && n < analysisNyquist()}
             />
             <Input
               label="flux band high (Hz)"
@@ -1518,7 +1536,7 @@ const App = () => {
               params={params}
               set={set}
               get={get}
-              validate={(n: number) => n > 0 && n < ANALYSIS_NYQUIST}
+              validate={(n: number) => n > 0 && n < analysisNyquist()}
             />
             {/* Peak picking. Relative to the flux's local median, so the
                 threshold means the same thing loud or quiet; the gap is what

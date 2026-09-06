@@ -17,8 +17,9 @@ npx tsc --noEmit    # typecheck
 **Run `yarn tauri build` after every change.** The owner asked for this
 explicitly. `tsc` and `react-scripts build` only cover the frontend; the Tauri
 build also compiles Rust and packages the app, and it's fast (~30s) because the
-Rust deps are already built. Two warnings are pre-existing and expected
-(`unused import: std::time::Instant`, `unused imports: AudioUnit and Error`).
+Rust deps are already built. Three warnings are pre-existing and expected
+(`unused import: std::time::Instant`, `unused imports: AudioUnit and Error`, and
+`method hop_frames is never used`).
 
 If the DMG step fails with `error running bundle_dmg.sh`, it's usually
 transient — just re-run.
@@ -376,6 +377,42 @@ The render callback in `main.rs` runs ~21×/sec with 2048 frames. Inside it:
 
 ### Input capture
 
+- **The sample rate is the input device's, not a constant.**
+  `get_input_output_channels` reads `kAudioDevicePropertyNominalSampleRate` off
+  the default input device and calls `set_sample_rate` before anything derived
+  is built; `sample_rate()` in `constants.rs` is the `OnceLock` everything else
+  reads. **AUHAL will not convert on the way in**: point it at a 48 kHz
+  microphone while asking for 44.1 kHz and it hands back zeroes -- no error, no
+  log, an input of all silence indistinguishable from a missing microphone
+  grant. That is why the constant had to go; a MacBook's built-in mic is 48 kHz
+  out of the box, so the old code only ever worked on a device already sitting
+  at 44.1. Confirmed by setting the device rate and watching the waveform go
+  flat.
+- **Output does convert, so when the two devices disagree the input wins.** The
+  render callback advances `beat` and pops one input sample per *output* frame,
+  so both sides are assumed locked to one rate. Input's rate is chosen because
+  it is the side that refuses to resample; the output unit takes the ordinary
+  "play 44.1 on a 48 kHz device" path. The disagreement is logged. Genuinely
+  separate devices still drift -- the answer there is an aggregate device, not
+  offset correction (see *Discussed but not built*).
+- **Everything sized in frames is now a fn, not a const**: `max_input_backlog()`,
+  `max_visual_backlog()` (`constants.rs`) and `max_loop_frames()`
+  (`get_loop_buffer_size.rs`). They are documented in seconds -- a quarter
+  second, one second, ten minutes -- and a const would quietly stop meaning that
+  at 48 kHz.
+- **`buffer_compensation` is still in frames, so its duration moves with the
+  rate.** 4330 frames is ~98 ms at 44.1 kHz and ~90 ms at 48 kHz. It was tuned
+  by ear at 44.1, so expect to retune it on a 48 kHz device. The units are
+  deliberately unchanged: making it milliseconds would be redefining a key that
+  restored sessions already carry, which is the `loopFeedback` trap.
+- **The frontend never sees frames.** The sample stream is stamped in beats, so
+  the whole draw path is rate-independent. Three references had leaked in and
+  are fixed: `ANALYSIS_NYQUIST` (a hard 22050 put the top 2 kHz of the flux band
+  out of reach at 48 kHz) is now `analysisNyquist()` over a module-level rate
+  fetched once via the `get_sample_rate` command, and the fft dropdown's
+  millisecond label divides by that rate. `mockGetArray`'s
+  `beatsPerSample = 91 / 60 / 44100` is left alone -- it is fake data for
+  `yarn start`, with no Rust behind it.
 - Input stream is **interleaved**, output is **non-interleaved**.
   `coreaudio-rs` returns `NonInterleavedInputOnlySupportsMono` for multi-channel
   non-interleaved input, but has no such limit interleaved. That flip is the only
@@ -804,16 +841,11 @@ one f32 a hop a channel, unclamped.
   code. Dead before any of this work.
 - A zero-length `beatsToLoop` used to panic; guarded now, but similar bare
   indexing exists elsewhere.
-- **`SAMPLE_RATE` is hard-coded at 44100** (`constants.rs:4`) and pushed straight
-  into the input stream format (`io_channels.rs:88`). The only fallback in that
-  code is on channel count, not on rate. A MacBook built-in mic defaults to
-  **48000**, so the app is pointed at a rate most Macs are not on out of the box.
-  `system_profiler SPAudioDataType` prints each device's `Current SampleRate`.
-  Whether the mismatch actually produces silence is **unverified** -- it was
-  suspected during the second-Mac debugging and never cleanly tested, because
-  the machine in question was running the wrong build the whole time. Test it
-  before fixing it: set the mic to 48k in Audio MIDI Setup and run a known-good
-  build.
+- ~~`SAMPLE_RATE` hard-coded at 44100~~ -- **fixed 2026-09-06**, adopted from
+  the input device instead. See *Input capture*. The rate is still read **once**
+  at startup: changing the device rate in Audio MIDI Setup, or switching the
+  default input device, while the app is running is not picked up and needs a
+  restart.
 
 ## State as of 2026-08-30
 
@@ -897,8 +929,13 @@ What that detour does and does not establish:
 - **Not established.** Whether ad-hoc *plus* the hardened runtime is what
   produced `taskgated invalid signature` / `Termination Reason: CODESIGNING 1`
   -- every one of those crashes was the 2023 x86_64 binary, and the current
-  build launched without needing the runtime flag dropped. Also not established:
-  the sample-rate mismatch (see Known issues), for the same reason.
+  build launched without needing the runtime flag dropped.
+- **The sample-rate bug was real after all**, and was confirmed separately once
+  the correct build was installed: at 48 kHz the waveform is flat, at 44.1 kHz
+  it draws. Fixed the same day -- see *Input capture*. Nothing about the fix has
+  been heard yet on a 48 kHz device beyond "input arrives"; in particular
+  `buffer_compensation` was tuned by ear at 44.1 kHz and its duration is ~8 ms
+  shorter at 48 kHz, so the visual alignment there is unverified.
 - On a **managed work Mac** the app could not be launched at all. An MDM profile
   or EDR agent enforcing notarization is the likely reason; Homebrew is
   unaffected because CLI binaries do not go through LaunchServices. Not worth

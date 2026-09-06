@@ -17,10 +17,10 @@ extern crate coreaudio;
 
 use crate::analysis::{Analyzer, OnsetParams, BINS, MAX_ANALYSIS_CHANNELS};
 use crate::commands::{
-    get_analysis, get_input_channel_count, get_samples, load_drum_sample, reset_beat, set_config,
-    set_mp3_buffer,
+    get_analysis, get_input_channel_count, get_sample_rate, get_samples, load_drum_sample,
+    reset_beat, set_config, set_mp3_buffer,
 };
-use crate::constants::{default_config, MAX_INPUT_BACKLOG, MAX_VISUAL_BACKLOG, SAMPLE_RATE};
+use crate::constants::{default_config, max_input_backlog, max_visual_backlog, sample_rate};
 use crate::get_loop_buffer_size::{get_loop_buffer_size, get_loop_spacing, loop_echo_count};
 use crate::io_channels::{get_input_output_channels, make_buffers, start_input_audio_unit};
 use crate::read_audio_file::get_samples_from_filename;
@@ -140,7 +140,7 @@ fn main() -> Result<(), coreaudio::Error> {
     let mut bus_delay = BusDelay::new();
     // The FFT planner and its scratch space are built here, once, so the
     // callback only ever runs the transform.
-    let mut analyzer = Analyzer::new(SAMPLE_RATE);
+    let mut analyzer = Analyzer::new(sample_rate());
 
     let mut click_sound_counter: i32 = 0;
     let mut rng = rand::thread_rng();
@@ -197,13 +197,13 @@ fn main() -> Result<(), coreaudio::Error> {
         // callback ever falls behind the input one. Also trims the startup gap,
         // since the input unit is started before this one.
         for buffer in buffers.iter_mut() {
-            let excess = buffer.len().saturating_sub(MAX_INPUT_BACKLOG);
+            let excess = buffer.len().saturating_sub(max_input_backlog());
             buffer.drain(..excess);
         }
 
         let config = config1.lock().unwrap();
         let mut loop_buffer = loop_buffer_clone.lock().unwrap();
-        let beats_per_sample: f64 = config.bpm / SAMPLE_RATE / 60f64;
+        let beats_per_sample: f64 = config.bpm / sample_rate() / 60f64;
         let mut mp3 = mp3.lock().unwrap();
 
         if should_reset_beat.load(std::sync::atomic::Ordering::Relaxed) {
@@ -293,8 +293,8 @@ fn main() -> Result<(), coreaudio::Error> {
         // Milliseconds to frames once per callback, for the same reason.
         let onset_params = OnsetParams {
             threshold: config.onset_threshold.max(0.0) as f32,
-            min_gap_frames: (config.onset_min_gap.max(0.0) / 1000.0 * SAMPLE_RATE) as usize,
-            offset_frames: config.onset_offset / 1000.0 * SAMPLE_RATE,
+            min_gap_frames: (config.onset_min_gap.max(0.0) / 1000.0 * sample_rate()) as usize,
+            offset_frames: config.onset_offset / 1000.0 * sample_rate(),
         };
 
         let loop_spacing = get_loop_spacing(&config);
@@ -581,7 +581,7 @@ fn main() -> Result<(), coreaudio::Error> {
                 // and eventually push the callback back into the allocator.
                 // Dropping the newest frames leaves a gap the display catches up
                 // from in one poll, which beats stalling the audio thread.
-                if state_vec.beats.len() < MAX_VISUAL_BACKLOG {
+                if state_vec.beats.len() < max_visual_backlog() {
                     state_vec.beats.push(visual_beat);
                     for &ch in config.visible_channels.iter() {
                         // Channels past the input count are the synthetic buses, in
@@ -640,6 +640,7 @@ fn main() -> Result<(), coreaudio::Error> {
             reset_beat,
             set_mp3_buffer,
             get_input_channel_count,
+            get_sample_rate,
             load_drum_sample,
         ])
         .run(context)

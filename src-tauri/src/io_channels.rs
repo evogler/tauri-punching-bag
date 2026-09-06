@@ -1,6 +1,6 @@
 extern crate coreaudio;
 
-use crate::constants::{SAMPLE_FORMAT, SAMPLE_RATE};
+use crate::constants::{sample_rate, set_sample_rate, DEFAULT_SAMPLE_RATE, SAMPLE_FORMAT};
 use crate::structs::Buffers;
 use crate::types::{InputArgs, S};
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
@@ -55,6 +55,33 @@ pub fn get_device_input_channels(device_id: AudioDeviceID) -> usize {
     }
 }
 
+/// The rate a device is actually running at. Core Audio calls this the
+/// *nominal* rate; it is the one the hardware is clocked to right now, which is
+/// what Audio MIDI Setup shows and what the user can change underneath us.
+pub fn get_device_sample_rate(device_id: AudioDeviceID) -> Option<f64> {
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyNominalSampleRate,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementWildcard,
+    };
+    let mut rate: f64 = 0.0;
+    let mut data_size = std::mem::size_of::<f64>() as u32;
+    unsafe {
+        let status = AudioObjectGetPropertyData(
+            device_id,
+            &property_address as *const _,
+            0,
+            null(),
+            &mut data_size as *mut _,
+            &mut rate as *mut _ as *mut _,
+        );
+        if status != kAudioHardwareNoError as i32 || !(rate > 0.0) {
+            return None;
+        }
+    }
+    Some(rate)
+}
+
 pub fn get_input_output_channels() -> Result<(AudioUnit, AudioUnit, usize, Vec<String>), Error> {
     let devices = get_audio_device_ids();
     devices.unwrap().iter().for_each(|d| {
@@ -63,11 +90,37 @@ pub fn get_input_output_channels() -> Result<(AudioUnit, AudioUnit, usize, Vec<S
     });
 
     let input_device_id = get_default_device_id(true).unwrap();
+    let output_device_id = get_default_device_id(false).unwrap();
     let input_channels = get_device_input_channels(input_device_id).max(1);
     println!("input device offers {} channel(s)", input_channels);
+
+    // Take the input device's rate rather than imposing one. AUHAL will not
+    // convert on the way in: point it at a 48 kHz microphone while asking for
+    // 44.1 kHz and it returns zeroes, silently. Everything downstream --
+    // beats_per_sample, the loop buffer, the analyzer -- is derived from this,
+    // so it has to be settled before any of them are built.
+    let device_rate = get_device_sample_rate(input_device_id).unwrap_or(DEFAULT_SAMPLE_RATE);
+    set_sample_rate(device_rate);
+    let out_device_rate = get_device_sample_rate(output_device_id).unwrap_or(device_rate);
+    println!(
+        "input device rate {} Hz, output device rate {} Hz",
+        device_rate, out_device_rate
+    );
+    if (out_device_rate - device_rate).abs() > f64::EPSILON {
+        // One rate has to win: the render callback advances `beat` and pops one
+        // input sample per *output* frame, so the two sides are assumed locked.
+        // Input wins because it is the side that refuses to convert; AUHAL does
+        // resample on the way out, which is the ordinary "play 44.1 on a 48 kHz
+        // device" path. Separate devices still drift -- see the aggregate-device
+        // note in CLAUDE.md.
+        println!(
+            "input and output devices disagree on rate; running at {} Hz and letting the output unit convert",
+            device_rate
+        );
+    }
+
     let mut input_audio_unit = audio_unit_from_device_id(input_device_id, true)?;
-    let mut output_audio_unit =
-        audio_unit_from_device_id(get_default_device_id(false).unwrap(), false)?;
+    let mut output_audio_unit = audio_unit_from_device_id(output_device_id, false)?;
 
     // input_audio_unit.set_property(id, scope, elem, maybe_data);
 
@@ -85,7 +138,7 @@ pub fn get_input_output_channels() -> Result<(AudioUnit, AudioUnit, usize, Vec<S
     // non-interleaved caps input at one channel. Interleaved packs every channel
     // into that one buffer, which is what lets us capture more than one.
     let make_in_format = |channels: u32| StreamFormat {
-        sample_rate: SAMPLE_RATE,
+        sample_rate: sample_rate(),
         sample_format: SAMPLE_FORMAT,
         flags: format_flag | LinearPcmFlags::IS_PACKED,
         channels,
@@ -93,7 +146,7 @@ pub fn get_input_output_channels() -> Result<(AudioUnit, AudioUnit, usize, Vec<S
     let in_stream_format = make_in_format(input_channels as u32);
 
     let out_stream_format = StreamFormat {
-        sample_rate: SAMPLE_RATE,
+        sample_rate: sample_rate(),
         sample_format: SAMPLE_FORMAT,
         flags: format_flag | LinearPcmFlags::IS_PACKED | LinearPcmFlags::IS_NON_INTERLEAVED,
         // you can change this to 1

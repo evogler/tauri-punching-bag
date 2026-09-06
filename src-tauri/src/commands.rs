@@ -1,5 +1,5 @@
 use crate::analysis::{BINS, MAX_ANALYSIS_CHANNELS};
-use crate::constants::{ANALYSIS_RESERVE_HOPS, ONSET_RESERVE, VISUAL_RESERVE_FRAMES};
+use crate::constants::{sample_rate, ANALYSIS_RESERVE_HOPS, ONSET_RESERVE, VISUAL_RESERVE_FRAMES};
 use crate::get_loop_buffer_size::get_loop_buffer_size;
 use crate::read_audio_file::get_samples_from_filename;
 use crate::structs::{
@@ -117,6 +117,15 @@ pub fn get_analysis(state: State<AnalysisOutputBuffer>) -> Result<AnalysisFrames
 #[tauri::command]
 pub fn get_input_channel_count(state: State<InputChannelCount>) -> usize {
     state.0
+}
+
+/// The rate the input device is running at, adopted at startup. The frontend
+/// works in beats and never needs this to draw -- it is for the two places that
+/// have to name a frequency or a duration in the UI: the Nyquist ceiling on the
+/// flux band inputs and the millisecond label on the fft window dropdown.
+#[tauri::command]
+pub fn get_sample_rate() -> f64 {
+    sample_rate()
 }
 
 /// Decodes a file and files it under its own path, which is how a drum voice

@@ -382,9 +382,17 @@ export const VIEW_KINDS: ViewKind[] = ["waveform", "spectrogram"];
 // rather than plumbed across because it only bounds the channel picker here.
 export const MAX_ANALYSIS_CHANNELS = 4;
 
-// Half SAMPLE_RATE in src-tauri/src/constants.rs. Duplicated rather than
-// plumbed across because it only bounds the band inputs here.
-export const ANALYSIS_NYQUIST = 22050;
+// The rate Rust adopted from the input device, fetched once at startup. Not a
+// constant: a MacBook's built-in mic runs at 48 kHz, and a hard-coded 22050
+// ceiling would put the top 2 kHz of the band out of reach on most Macs.
+// Module level rather than passed down because the validators below are pure
+// functions the input components call with no React context to read from.
+let sampleRateHz = 44100;
+export const getSampleRateHz = () => sampleRateHz;
+export const analysisNyquist = () => sampleRateHz / 2;
+export const setSampleRateHz = (hz: number) => {
+  if (Number.isFinite(hz) && hz > 0) sampleRateHz = hz;
+};
 
 // How many bins Rust groups the spectrum into. Duplicated rather than plumbed
 // across because the stream says its own `bins` -- this is only the fallback
@@ -572,7 +580,7 @@ const resolveView = (view: ViewConfig, params: Params): ViewConfig => ({
 // A band edge past Nyquist describes no bin at all; Rust falls back to the full
 // range rather than reporting nothing, which would read as the flux being
 // broken. Rejecting here is the honest place to say so.
-const inBand = (n: number) => Number.isFinite(n) && n > 0 && n < ANALYSIS_NYQUIST;
+const inBand = (n: number) => Number.isFinite(n) && n > 0 && n < analysisNyquist();
 
 const RUST_EXPR_FIELDS: {
   key: RustExprKey;
