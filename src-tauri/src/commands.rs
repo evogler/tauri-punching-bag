@@ -1,6 +1,8 @@
 use crate::analysis::{BINS, MAX_ANALYSIS_CHANNELS};
 use crate::constants::{sample_rate, ANALYSIS_RESERVE_HOPS, ONSET_RESERVE, VISUAL_RESERVE_FRAMES};
 use crate::get_loop_buffer_size::get_loop_buffer_size;
+use crate::io_channels::{list_devices, ActiveDevices, AudioDeviceInfo};
+use crate::prefs::{load as load_prefs, save as save_prefs, AudioPrefs};
 use crate::read_audio_file::get_samples_from_filename;
 use crate::structs::{
     AnalysisFrames, AnalysisOutputBuffer, BeatResetState, Config, ConfigState, DrumSamples,
@@ -126,6 +128,49 @@ pub fn get_input_channel_count(state: State<InputChannelCount>) -> usize {
 #[tauri::command]
 pub fn get_sample_rate() -> f64 {
     sample_rate()
+}
+
+/// Everything Core Audio will tell us about the devices on this machine, for
+/// the picker. Re-enumerated on each call rather than cached, so plugging an
+/// interface in and reopening the dropdown finds it.
+#[tauri::command]
+pub fn list_audio_devices() -> Vec<AudioDeviceInfo> {
+    list_devices()
+}
+
+/// Which devices are actually open, which can differ from what was asked for --
+/// see `ActiveDevices::input_fell_back`.
+#[tauri::command]
+pub fn get_active_devices(state: State<ActiveDevices>) -> ActiveDevices {
+    state.inner().clone()
+}
+
+fn prefs_dir(app_handle: &tauri::AppHandle) -> std::path::PathBuf {
+    tauri::api::path::app_config_dir(&app_handle.config())
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
+#[tauri::command]
+pub fn get_audio_prefs(app_handle: tauri::AppHandle) -> AudioPrefs {
+    load_prefs(&prefs_dir(&app_handle))
+}
+
+/// Written whenever the panel changes a device or a compensation. Takes the
+/// whole object rather than a field so the file is never a partial write of a
+/// state the UI never showed.
+#[tauri::command]
+pub fn set_audio_prefs(app_handle: tauri::AppHandle, prefs: AudioPrefs) -> Result<(), String> {
+    save_prefs(&prefs_dir(&app_handle), &prefs)
+}
+
+/// Device changes only take effect at startup: the render closure owns every
+/// per-channel buffer by value, so swapping a device under it would mean
+/// putting all of that behind a lock the audio thread could wait on. Relaunch
+/// instead. `restart` reads Info.plist, so the *bundle* comes back and keeps
+/// its microphone grant.
+#[tauri::command]
+pub fn restart_app(app_handle: tauri::AppHandle) {
+    app_handle.restart();
 }
 
 /// Decodes a file and files it under its own path, which is how a drum voice

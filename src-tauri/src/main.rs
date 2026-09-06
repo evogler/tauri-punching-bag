@@ -7,6 +7,7 @@ mod analysis;
 mod commands;
 mod constants;
 mod get_loop_buffer_size;
+mod prefs;
 mod io_channels;
 mod read_audio_file;
 mod structs;
@@ -17,12 +18,15 @@ extern crate coreaudio;
 
 use crate::analysis::{Analyzer, OnsetParams, BINS, MAX_ANALYSIS_CHANNELS};
 use crate::commands::{
-    get_analysis, get_input_channel_count, get_sample_rate, get_samples, load_drum_sample,
-    reset_beat, set_config, set_mp3_buffer,
+    get_active_devices, get_analysis, get_audio_prefs, get_input_channel_count, get_sample_rate,
+    get_samples, list_audio_devices, load_drum_sample, reset_beat, restart_app, set_audio_prefs,
+    set_config, set_mp3_buffer,
 };
 use crate::constants::{default_config, max_input_backlog, max_visual_backlog, sample_rate};
 use crate::get_loop_buffer_size::{get_loop_buffer_size, get_loop_spacing, loop_echo_count};
-use crate::io_channels::{get_input_output_channels, make_buffers, start_input_audio_unit};
+use crate::io_channels::{
+    get_input_output_channels, make_buffers, start_input_audio_unit, watch_device_changes,
+};
 use crate::read_audio_file::get_samples_from_filename;
 use crate::structs::{
     AnalysisOutputBuffer, BeatResetState, BusDelay, ConfigState, DrumSamples, InputChannelCount,
@@ -128,8 +132,19 @@ fn main() -> Result<(), coreaudio::Error> {
     let mut tap_gains: Vec<f32> = vec![];
 
     // setup audio
-    let (mut input_audio_unit, mut output_audio_unit, input_channels, io_log) =
-        get_input_output_channels().unwrap();
+    // Device choice is read from disk, not from the config: the units are opened
+    // before any window exists, so localStorage is unreachable here.
+    let prefs_dir = tauri::api::path::app_config_dir(context.config())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let audio_prefs = prefs::load(&prefs_dir);
+    let setup = get_input_output_channels(&audio_prefs).unwrap();
+    let (mut input_audio_unit, mut output_audio_unit, input_channels, io_log) = (
+        setup.input_unit,
+        setup.output_unit,
+        setup.input_channels,
+        setup.log,
+    );
+    let active_devices = setup.active;
     let buffers = make_buffers(input_channels);
     let consumers = buffers.consumers.clone();
     // Reused every frame so the audio callback never allocates.
@@ -613,6 +628,10 @@ fn main() -> Result<(), coreaudio::Error> {
     let context = tauri::generate_context!();
 
     tauri::Builder::default()
+        .setup(|app| {
+            watch_device_changes(app.handle());
+            Ok(())
+        })
         .menu(menu_with_restart(&context.package_info().name))
         .on_menu_event(|event| {
             if event.menu_item_id() == RESTART_MENU_ID {
@@ -632,6 +651,7 @@ fn main() -> Result<(), coreaudio::Error> {
         .manage(should_reset_beat_state)
         .manage(log_state)
         .manage(InputChannelCount(input_channels))
+        .manage(active_devices)
         .manage(drum_samples_state)
         .invoke_handler(tauri::generate_handler![
             get_samples,
@@ -641,6 +661,11 @@ fn main() -> Result<(), coreaudio::Error> {
             set_mp3_buffer,
             get_input_channel_count,
             get_sample_rate,
+            list_audio_devices,
+            get_audio_prefs,
+            set_audio_prefs,
+            get_active_devices,
+            restart_app,
             load_drum_sample,
         ])
         .run(context)

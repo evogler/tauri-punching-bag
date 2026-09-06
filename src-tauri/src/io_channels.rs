@@ -1,6 +1,7 @@
 extern crate coreaudio;
 
 use crate::constants::{sample_rate, set_sample_rate, DEFAULT_SAMPLE_RATE, SAMPLE_FORMAT};
+use crate::prefs::AudioPrefs;
 use crate::structs::Buffers;
 use crate::types::{InputArgs, S};
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
@@ -11,7 +12,10 @@ use coreaudio::audio_unit::macos_helpers::{
 use coreaudio::audio_unit::{AudioUnit, Element, SampleFormat, Scope, StreamFormat};
 use coreaudio::sys::*;
 use coreaudio::Error;
+use serde::Serialize;
 use std::collections::VecDeque;
+use std::ffi::CStr;
+use std::os::raw::c_char;
 use std::ptr::null;
 use std::sync::{Arc, Mutex};
 
@@ -82,15 +86,204 @@ pub fn get_device_sample_rate(device_id: AudioDeviceID) -> Option<f64> {
     Some(rate)
 }
 
-pub fn get_input_output_channels() -> Result<(AudioUnit, AudioUnit, usize, Vec<String>), Error> {
+/// A device's persistent identifier. `AudioDeviceID` is a runtime handle --
+/// reassigned across reboots and on replug -- and names are not unique (two of
+/// the same interface are indistinguishable), so the UID is the only thing safe
+/// to write to disk. `coreaudio-rs` doesn't expose it; this is the same
+/// property read as `get_device_name`, which returns a CFString rather than a
+/// number.
+pub fn get_device_uid(device_id: AudioDeviceID) -> Option<String> {
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyDeviceUID,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMaster,
+    };
+    let uid_ref: CFStringRef = null();
+    let data_size = std::mem::size_of::<CFStringRef>();
+    unsafe {
+        let status = AudioObjectGetPropertyData(
+            device_id,
+            &property_address as *const _,
+            0,
+            null(),
+            &data_size as *const _ as *mut _,
+            &uid_ref as *const _ as *mut _,
+        );
+        if status != kAudioHardwareNoError as i32 || uid_ref.is_null() {
+            return None;
+        }
+        // CFStringGetCStringPtr can return null for strings that aren't already
+        // in the requested encoding, so copy rather than trusting the pointer.
+        let mut buf = [0 as c_char; 256];
+        let ok = CFStringGetCString(
+            uid_ref,
+            buf.as_mut_ptr(),
+            buf.len() as _,
+            kCFStringEncodingUTF8,
+        );
+        if ok == 0 {
+            return None;
+        }
+        Some(CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned())
+    }
+}
+
+/// What the device picker shows. `input_channels` is 0 for output-only devices,
+/// which is how the frontend filters the input list.
+#[derive(Serialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioDeviceInfo {
+    pub uid: String,
+    pub name: String,
+    pub input_channels: usize,
+    pub sample_rate: f64,
+    pub is_default_input: bool,
+    pub is_default_output: bool,
+}
+
+pub fn list_devices() -> Vec<AudioDeviceInfo> {
+    let default_in = get_default_device_id(true);
+    let default_out = get_default_device_id(false);
+    get_audio_device_ids()
+        .unwrap_or_default()
+        .into_iter()
+        // A device with no UID cannot be persisted, so it cannot be offered.
+        .filter_map(|id| {
+            get_device_uid(id).map(|uid| AudioDeviceInfo {
+                uid,
+                name: get_device_name(id).unwrap_or_else(|_| "unknown".to_string()),
+                input_channels: get_device_input_channels(id),
+                sample_rate: get_device_sample_rate(id).unwrap_or(0.0),
+                is_default_input: Some(id) == default_in,
+                is_default_output: Some(id) == default_out,
+            })
+        })
+        .collect()
+}
+
+/// Which devices the process actually opened, which is not always which ones
+/// were asked for -- an interface can be unplugged between runs. The frontend
+/// shows this rather than the preference so a silent fallback to the built-in
+/// mic is visible instead of mysterious.
+#[derive(Serialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveDevices {
+    pub input_uid: String,
+    pub input_name: String,
+    pub output_uid: String,
+    pub output_name: String,
+    /// A saved device was named and could not be found.
+    pub input_fell_back: bool,
+    pub output_fell_back: bool,
+}
+
+/// Resolve a saved UID back to a live device. Returns None when nothing
+/// matches, which the caller turns into "use the system default".
+fn device_for_uid(uid: &str) -> Option<AudioDeviceID> {
+    if uid.is_empty() {
+        return None;
+    }
+    get_audio_device_ids()
+        .unwrap_or_default()
+        .into_iter()
+        .find(|id| get_device_uid(*id).as_deref() == Some(uid))
+}
+
+/// Emitted when the set of devices changes. The picker re-enumerates on this
+/// rather than on a timer, so plugging an interface in while the app is running
+/// shows up in the dropdown without the user having to know to look again.
+pub const DEVICES_CHANGED_EVENT: &str = "devices-changed";
+
+/// Core Audio's own notification that a device appeared or went away. Runs on a
+/// Core Audio thread -- *not* the render thread, and it only emits a Tauri
+/// event, so there is nothing here that could stall audio.
+extern "C" fn devices_changed_listener(
+    _object: AudioObjectID,
+    _count: u32,
+    _addresses: *const AudioObjectPropertyAddress,
+    context: *mut std::ffi::c_void,
+) -> OSStatus {
+    unsafe {
+        if let Some(app) = (context as *const tauri::AppHandle).as_ref() {
+            use tauri::Manager;
+            let _ = app.emit_all(DEVICES_CHANGED_EVENT, ());
+        }
+    }
+    kAudioHardwareNoError as OSStatus
+}
+
+/// Registers the listener for the lifetime of the process. The `AppHandle` is
+/// deliberately leaked: Core Audio holds the pointer until the listener is
+/// removed, and it never is -- there is no unregister path because the only
+/// time this stops mattering is at exit.
+pub fn watch_device_changes(app: tauri::AppHandle) {
+    let property_address = AudioObjectPropertyAddress {
+        mSelector: kAudioHardwarePropertyDevices,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMaster,
+    };
+    let context = Box::into_raw(Box::new(app)) as *mut std::ffi::c_void;
+    let status = unsafe {
+        AudioObjectAddPropertyListener(
+            kAudioObjectSystemObject,
+            &property_address as *const _,
+            Some(devices_changed_listener),
+            context,
+        )
+    };
+    if status != kAudioHardwareNoError as i32 {
+        // Not fatal: the picker still refreshes when it is opened and when the
+        // window regains focus, which covers the common "plug in, click back
+        // into the app" path on its own.
+        println!("could not watch for device changes ({})", status);
+    }
+}
+
+/// Everything audio setup produces. A struct rather than a tuple because it
+/// grew a fifth member and the call site was getting hard to read.
+pub struct AudioSetup {
+    pub input_unit: AudioUnit,
+    pub output_unit: AudioUnit,
+    pub input_channels: usize,
+    pub log: Vec<String>,
+    pub active: ActiveDevices,
+}
+
+pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Error> {
     let devices = get_audio_device_ids();
     devices.unwrap().iter().for_each(|d| {
         println!("device: {:?}", get_device_name(*d));
         println!("{:?}", get_supported_physical_stream_formats(*d));
     });
 
-    let input_device_id = get_default_device_id(true).unwrap();
-    let output_device_id = get_default_device_id(false).unwrap();
+    // A saved device that is no longer present falls back to the system default
+    // rather than refusing to start -- but it says so, and `ActiveDevices`
+    // carries the fact to the panel. Recording from the built-in mic while the
+    // user believes their interface is selected is exactly the kind of silent
+    // wrong answer that wastes an afternoon.
+    let default_input_id = get_default_device_id(true).unwrap();
+    let default_output_id = get_default_device_id(false).unwrap();
+    let requested_input = device_for_uid(&prefs.input_uid);
+    let requested_output = device_for_uid(&prefs.output_uid);
+    let input_fell_back = !prefs.input_uid.is_empty() && requested_input.is_none();
+    let output_fell_back = !prefs.output_uid.is_empty() && requested_output.is_none();
+    if input_fell_back {
+        println!("saved input device {} not found, using default", prefs.input_uid);
+    }
+    if output_fell_back {
+        println!("saved output device {} not found, using default", prefs.output_uid);
+    }
+    let input_device_id = requested_input.unwrap_or(default_input_id);
+    let output_device_id = requested_output.unwrap_or(default_output_id);
+    let active = ActiveDevices {
+        input_uid: get_device_uid(input_device_id).unwrap_or_default(),
+        input_name: get_device_name(input_device_id).unwrap_or_else(|_| "unknown".to_string()),
+        output_uid: get_device_uid(output_device_id).unwrap_or_default(),
+        output_name: get_device_name(output_device_id).unwrap_or_else(|_| "unknown".to_string()),
+        input_fell_back,
+        output_fell_back,
+    };
+    println!("using input {:?}, output {:?}", active.input_name, active.output_name);
     let input_channels = get_device_input_channels(input_device_id).max(1);
     println!("input device offers {} channel(s)", input_channels);
 
@@ -190,12 +383,13 @@ pub fn get_input_output_channels() -> Result<(AudioUnit, AudioUnit, usize, Vec<S
     input_audio_unit.set_property(id, Scope::Output, Element::Input, Some(&buffer_size))?;
     output_audio_unit.set_property(id, Scope::Input, Element::Output, Some(&buffer_size))?;
 
-    Ok((
-        input_audio_unit,
-        output_audio_unit,
+    Ok(AudioSetup {
+        input_unit: input_audio_unit,
+        output_unit: output_audio_unit,
         input_channels,
-        result_log,
-    ))
+        log: result_log,
+        active,
+    })
 }
 
 pub fn start_input_audio_unit(

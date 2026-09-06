@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api";
 import {
   defaultRustConfig,
@@ -27,6 +27,7 @@ import {
   resolveRustConfig,
   viewRowBeats,
   analysisNyquist,
+  numExpr,
   setSampleRateHz,
   ANALYSIS_BINS,
   ANALYSIS_WINDOWS,
@@ -35,6 +36,16 @@ import {
   ViewKind,
 } from "./config";
 import { Input } from "./Input";
+import {
+  ActiveDevices,
+  AudioDeviceInfo,
+  AudioPrefs,
+  DEVICES_CHANGED_EVENT,
+  DevicePicker,
+  emptyPrefs,
+  pairCompensation,
+  withPairCompensation,
+} from "./DevicePicker";
 import { appWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { SlidingDivision } from "./SlidingDivision";
@@ -690,6 +701,74 @@ const App = () => {
       })
       .catch(() => {});
   }, []);
+
+  // Device choice and per-device latency live in a prefs file rather than the
+  // config: Rust has to read the device before any window exists, and a preset
+  // carrying a UID or someone else's measurement would be noise on another
+  // machine.
+  const [audioDevices, setAudioDevices] = useState<AudioDeviceInfo[]>([]);
+  const [audioPrefs, setAudioPrefs] = useState<AudioPrefs>(emptyPrefs());
+  const [activeDevices, setActiveDevices] = useState<ActiveDevices | null>(null);
+  // Re-enumerated rather than cached: an interface plugged in after launch has
+  // to appear without a relaunch, which is the whole point of a picker.
+  const refreshDevices = useCallback(() => {
+    if (BROWSER_DEBUG_MODE) return;
+    invoke<AudioDeviceInfo[]>("list_audio_devices")
+      .then(setAudioDevices)
+      .catch(() => {});
+    invoke<ActiveDevices>("get_active_devices")
+      .then(setActiveDevices)
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    refreshDevices();
+    if (BROWSER_DEBUG_MODE) return;
+    invoke<AudioPrefs>("get_audio_prefs")
+      .then((p) => setAudioPrefs({ ...emptyPrefs(), ...p }))
+      .catch(() => {});
+    // Core Audio tells us when a device appears or goes away, so the list is
+    // current without polling. Focus is the belt-and-braces path: plugging
+    // something in usually means clicking back into the app straight after,
+    // and it also covers the listener failing to register.
+    const unlisten = listen(DEVICES_CHANGED_EVENT, () => refreshDevices());
+    window.addEventListener("focus", refreshDevices);
+    return () => {
+      unlisten.then((f) => f()).catch(() => {});
+      window.removeEventListener("focus", refreshDevices);
+    };
+  }, [refreshDevices]);
+
+  const writeAudioPrefs = (next: AudioPrefs) => {
+    setAudioPrefs(next);
+    if (BROWSER_DEBUG_MODE) return;
+    invoke("set_audio_prefs", { prefs: next }).catch(() => {});
+  };
+
+  // The stored compensation for whatever device actually opened wins over the
+  // restored session, once -- the session is the same on every machine, this
+  // number is not. A ref rather than state because applying it must not depend
+  // on having applied it.
+  const appliedCompRef = useRef(false);
+  useEffect(() => {
+    if (appliedCompRef.current || !activeDevices) return;
+    appliedCompRef.current = true;
+    const stored = pairCompensation(audioPrefs, activeDevices);
+    if (typeof stored !== "number" || !Number.isFinite(stored)) return;
+    if (stored === exprNumber(get("bufferCompensation"))) return;
+    set("bufferCompensation", numExpr(stored));
+  }, [activeDevices, audioPrefs]);
+
+  // ...and edits flow back, so the next launch on this device starts there.
+  // Guarded on equality, and on having applied first, so it can neither loop
+  // nor overwrite a saved value with the default before it has been read.
+  const activeCompensation = exprNumber(get("bufferCompensation"));
+  useEffect(() => {
+    if (!appliedCompRef.current || !activeDevices) return;
+    if (pairCompensation(audioPrefs, activeDevices) === activeCompensation) return;
+    writeAudioPrefs(
+      withPairCompensation(audioPrefs, activeDevices, activeCompensation)
+    );
+  }, [activeCompensation, activeDevices, audioPrefs]);
 
   // The synthetic buses ride along after the real inputs, so each can be shown,
   // coloured and split against them like any other channel. Order has to match
@@ -1454,6 +1533,16 @@ const App = () => {
               _key="audioMonitorOn"
               set={set}
               get={get}
+            />
+          </Section>
+          <Section label="device">
+            <DevicePicker
+              devices={audioDevices}
+              active={activeDevices}
+              prefs={audioPrefs}
+              setPrefs={writeAudioPrefs}
+              onOpen={refreshDevices}
+              onRestart={() => invoke("restart_app").catch(() => {})}
             />
           </Section>
           <Section label="input channels">

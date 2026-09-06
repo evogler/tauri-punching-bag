@@ -427,6 +427,87 @@ The render callback in `main.rs` runs ~21×/sec with 2048 frames. Inside it:
   `MAX_INPUT_BACKLOG` (11,025 = 0.25 s) caps it. The pause path drains and
   discards rather than returning early.
 
+### Device selection, and the third store
+
+The input and output devices are chosen in the panel (signal tab → *device*) and
+applied **at the next launch**, not live. `restart_app` is the button; ⌘⇧R is
+the same thing from the menu.
+
+- **Not hot-swappable, on purpose.** `set_render_callback` at `main.rs:188` is a
+  `move` closure that *owns* `input_frame`, `loop_visual`, `analyzer`,
+  `bus_delay`, `drum_last_beats`, `tap_gains` and the consumer queues -- all of
+  them sized from `input_channels`. Swapping a device means resizing every one
+  of them from outside the callback, which means a lock the audio thread can
+  wait on. That is precisely the hazard `DrainSizes` and the pre-sized swap
+  buffers exist to remove. A two-second relaunch is the cheaper trade.
+- **There is now a third store, and it is not the config.** `prefs.rs` writes
+  `audio-prefs.json` in the app config dir. The config describes the music and
+  the picture; this file describes the hardware in front of it. Two reasons it
+  cannot be a config key: the device is opened before any window exists, so
+  localStorage is unreachable at that point; and presets travel between machines,
+  where a device UID or someone else's latency figure is noise. The panel still
+  owns the editing -- the frontend writes through `set_audio_prefs` on every
+  change, so the file mirrors what the UI shows rather than being a second thing
+  to keep in sync.
+- **Devices are keyed by UID.** `AudioDeviceID` is a runtime handle, reassigned
+  across reboots and on replug; names are not unique, since two of the same
+  interface are indistinguishable. `get_device_uid` reads
+  `kAudioDevicePropertyDeviceUID`, a CFString rather than a number, cribbed from
+  `get_device_name` in `macos_helpers.rs`. A device with no readable UID is
+  filtered out of the picker -- it cannot be persisted, so it cannot be offered.
+- **A saved device that is gone falls back to the system default and says so.**
+  `ActiveDevices` carries `input_fell_back` / `output_fell_back` and the panel
+  prints it in red next to what is actually running. Silently recording from the
+  built-in mic while the user believes their interface is selected is the exact
+  shape of the bug that cost a day on 2026-09-06 -- an app that looks fine and
+  is listening to the wrong thing.
+- **The list refreshes on Core Audio's own notification**, not on a timer.
+  `watch_device_changes` registers a listener on
+  `kAudioHardwarePropertyDevices` and emits `devices-changed`; the picker
+  re-enumerates on it, so an interface plugged in after launch appears without a
+  relaunch. The listener runs on a Core Audio thread -- not the render thread --
+  and only emits a Tauri event, so it cannot stall audio. The `AppHandle` handed
+  to it is deliberately leaked, because Core Audio holds the pointer for as long
+  as the listener is registered and it never is unregistered.
+  Two cheaper paths back it up in case the registration fails: window focus
+  (plugging something in usually means clicking back into the app) and
+  `onMouseDown` on the dropdown itself, which fires before the popup opens.
+- `get_input_output_channels` now takes `&AudioPrefs` and returns an
+  `AudioSetup` struct rather than a 4-tuple, which had run out of room.
+
+#### Per-device latency compensation
+
+`pairCompensations: { input uid -> output uid -> frames }` in the same file.
+`buffer_compensation` in the config is unchanged -- one number, in frames,
+pushed to the audio thread, which must never do a map lookup.
+
+- **Keyed by the device *pair*, not the input alone.** What the number
+  compensates for is a round trip: the click leaves at frame F, reaches your
+  ears at F + L_out, you play in time with what you *hear*, so you hit at
+  F + L_out, and the mic hands those frames over at F + L_out + L_in. Both
+  halves are in it, which is why swapping headphones for the interface's own
+  output changes the answer -- and why the auto-calibration in item 3, which
+  measures exactly that round trip, has somewhere correct to write its result.
+- Nested rather than a joined `"in|out"` key so the file stays readable by hand,
+  and **named `pairCompensations` rather than reusing `compensations`**, which
+  was input-only for one build. serde drops an unknown field, so a file written
+  before this reverts to the default instead of being reinterpreted with
+  different semantics. Rename rather than redefine -- the config rule applies
+  here too.
+
+- **Applied once, over the restored session.** The session is the same on every
+  machine; this number is not, so on mount the stored value for whatever device
+  actually opened wins. A `useRef` guard rather than state, because applying it
+  must not depend on having applied it.
+- **Written back on change**, guarded on equality *and* on having applied first,
+  so it can neither loop nor overwrite a saved measurement with the default
+  before that measurement has been read.
+- **Frames, not milliseconds.** Partly because that is the unit the key has
+  always been in and redefining it is the `loopFeedback` trap, and partly
+  because a device implies its own sample rate -- so a per-device frame count
+  absorbs the 44.1/48 difference by itself, which is the retuning problem the
+  sample-rate work left behind.
+
 ### Looper
 
 One buffer **per input channel**, sharing a position, advancing once per frame.
