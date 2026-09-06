@@ -1,4 +1,4 @@
-import { ChannelStyle, channelPan, channelStyle } from "./config";
+import { ChannelStyle, channelGain, channelPan, channelStyle } from "./config";
 
 const rowStyle: React.CSSProperties = {
   display: "flex",
@@ -32,19 +32,37 @@ const withPanAt = (pans: number[], index: number, next: number) => {
   return out;
 };
 
+// The same again for the display trim, padded with 1 rather than 0 -- the
+// neutral value here is "unchanged", not "silent".
+const withGainAt = (gains: number[], index: number, next: number) => {
+  const out = gains.slice();
+  while (out.length <= index) out.push(1);
+  out[index] = next;
+  return out;
+};
+
+// Wide enough to lift a quiet mic into the same row as a hot line, and to pull
+// a loud one back. 1 is neutral, and double-clicking returns to it.
+const MAX_CHANNEL_GAIN = 4;
+
 const ChannelRow = ({
   label,
   style,
   pan,
+  gain,
   onStyle,
   onPan,
+  onGain,
 }: {
   label: string;
   style: ChannelStyle;
   // Absent for anything that isn't a real input -- the drum bus isn't routed.
   pan?: number;
+  // Present for every channel, buses included: it only affects the picture.
+  gain: number;
   onStyle: (next: ChannelStyle) => void;
   onPan: (next: number) => void;
+  onGain: (next: number) => void;
 }) => (
   <div style={rowStyle}>
     <label style={{ width: "3.5em" }}>{label}</label>
@@ -70,6 +88,17 @@ const ChannelRow = ({
       onChange={(e) => onStyle({ ...style, alpha: parseFloat(e.target.value) })}
       title={`${label} opacity ${Math.round(style.alpha * 100)}%`}
       style={{ flex: 1, minWidth: 0 }}
+    />
+    <input
+      type="range"
+      min={0}
+      max={MAX_CHANNEL_GAIN}
+      step={0.05}
+      value={gain}
+      onChange={(e) => onGain(parseFloat(e.target.value))}
+      onDoubleClick={() => onGain(1)}
+      title={`${label} display gain: x${gain} (double-click to reset)`}
+      style={{ width: "5em" }}
     />
     {pan === undefined ? (
       <span style={{ width: "5em" }} />
@@ -97,13 +126,17 @@ export const ChannelList = ({
   inputCount,
   styles,
   pans,
+  gains,
   setStyles,
   setPans,
+  setGains,
 }: {
   // How many of `labels` are real inputs. Only those can be panned.
   inputCount: number;
   pans: number[];
   setPans: (next: number[]) => void;
+  gains: number[];
+  setGains: (next: number[]) => void;
   // One per selectable channel, in device order. Anything past the device's
   // input channels is a synthetic bus -- the drums, then the click.
   labels: string[];
@@ -112,14 +145,31 @@ export const ChannelList = ({
 }) => {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+      <div
+        style={{
+          ...rowStyle,
+          fontSize: "10px",
+          color: "#999",
+          textTransform: "uppercase",
+          letterSpacing: "0.5px",
+        }}
+      >
+        <span style={{ width: "3.5em" }} />
+        <span style={{ width: "2em" }}>col</span>
+        <span style={{ flex: 1, minWidth: 0 }}>opacity</span>
+        <span style={{ width: "5em" }}>gain</span>
+        <span style={{ width: "5em" }}>pan</span>
+      </div>
       {labels.map((label, index) => (
         <ChannelRow
           key={index}
           label={label}
           style={channelStyle(styles, index)}
           pan={index < inputCount ? channelPan(pans, index) : undefined}
+          gain={channelGain(gains, index)}
           onStyle={(next) => setStyles(withStyleAt(styles, index, next))}
           onPan={(next) => setPans(withPanAt(pans, index, next))}
+          onGain={(next) => setGains(withGainAt(gains, index, next))}
         />
       ))}
 

@@ -479,6 +479,12 @@ ask for, and exists only to tell the callback what to pack.
   widening draws nothing rather than misreading a neighbour.
 - `splitChannels` splits by position *within the pane's own list*, so two panes
   showing different pairs each split their own.
+- **`channelGains` is a per-channel display trim**, sparse and 1 where unset,
+  multiplied into the pane's own `visualGain` so a quiet mic and a hot line can
+  share a row. Display only -- unlike the pans it never reaches the audio
+  thread -- and it applies to the synthetic buses too. Waveform only: the flux
+  and the spectrogram have their own gains, and the flux is a normalised dB
+  measure that a level trim would say nothing about.
 - **A session written before this has no per-pane lists**, so `normalizeView`
   seeds every pane from the old global `visibleChannels` — including the
   pre-views path, where `defaultViewConfig()`'s own `channels: [0]` would

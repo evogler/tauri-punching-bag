@@ -11,6 +11,7 @@ import {
   gridAlpha,
   ChannelStyle,
   channelStyle,
+  channelGain,
   unionChannels,
   BUILT_IN_DRUMS,
   rowColorFor,
@@ -821,6 +822,13 @@ const App = () => {
     channelStyle(get("channelStyles"), channel);
   const channelStyles = channelLabels.map((_, channel) => styleFor(channel));
 
+  // The per-channel display trim, multiplied into the pane's own visual gain.
+  // Waveform only: the flux and the spectrogram have their own gains, and the
+  // flux is a normalised dB measure that a level trim would say nothing about.
+  const channelGains = channelLabels.map((_, channel) =>
+    channelGain(get("channelGains"), channel)
+  );
+
   // The pane's own channels, so the split is by position *within this pane*.
   // Two panes showing different channels each split their own pair.
   const halfFor = (v: ViewCtx, index: number): "both" | "up" | "down" =>
@@ -844,7 +852,7 @@ const App = () => {
         v,
         x,
         row,
-        Math.min(1, peaks[slot] * v.visualGain),
+        Math.min(1, peaks[slot] * v.visualGain * channelGains[channel]),
         style,
         isMargin,
         halfFor(v, i)
@@ -1436,8 +1444,10 @@ const App = () => {
               inputCount={inputChannelCount}
               styles={get("channelStyles")}
               pans={get("channelPans")}
+              gains={get("channelGains")}
               setStyles={(next) => set("channelStyles", next)}
               setPans={(next) => set("channelPans", next)}
+              setGains={(next) => set("channelGains", next)}
             />
           </Section>
           <Section label="latency">

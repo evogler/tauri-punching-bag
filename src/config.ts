@@ -64,6 +64,10 @@ export const BUILT_IN_DRUMS = ["ride"];
 
 export const channelPan = (pans: number[], index: number) => pans[index] ?? 0;
 
+// A per-channel trim on the pane's `visualGain`, so a quiet mic and a hot line
+// can share a row. Sparse and 1 where unset, like the pans are 0.
+export const channelGain = (gains: number[], index: number) => gains[index] ?? 1;
+
 export const drumLabel = (path: string) =>
   BUILT_IN_DRUMS.includes(path) ? path : path.split("/").pop() || path;
 
@@ -428,6 +432,11 @@ export const defaultJsConfig = {
   views: [defaultViewConfig()] as ViewConfig[],
   // The pane arrangement. `views.length` is held equal to viewCols * viewRows,
   // so changing either resizes the list rather than letting the two disagree.
+  // Per-channel display trim, multiplied into the pane's own `visualGain`.
+  // Display only, so unlike the pans it never reaches the audio thread, and it
+  // applies to every channel including the synthetic buses. Sparse: a channel
+  // with no entry draws at 1.
+  channelGains: [] as number[],
   viewCols: 1,
   viewRows: 1,
   // Chained rather than simultaneous panes: instead of every pane drawing the
