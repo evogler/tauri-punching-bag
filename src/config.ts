@@ -303,6 +303,11 @@ export type ViewConfig = {
   // "1, 2x3" syntax as beatsPerRow. Only consulted when `rowColors` has more
   // than one entry; empty means every row takes the first color.
   rowColorPattern: number[];
+  // The same, for the lower half of a split row. One palette, two patterns, so
+  // the two channels in a split pane can be told apart while both still mark
+  // the beat. Empty means the lower half reads `rowColorPattern` like the
+  // upper one, which is how every pane behaved before this existed.
+  rowColorPatternDown: number[];
   // Draw the spectral flux over the waveform, one bar per pixel column, in
   // each visible input channel's own colour. It arrives on the analysis stream
   // rather than the sample stream, so it is a second pass over the pane -- see
@@ -331,12 +336,22 @@ export type ViewConfig = {
 // the row list repeats down the pane -- with `0.25x16` rows and "1,2x3" that
 // lands color 1 on exactly the rows that start a beat.
 export const rowColorFor = (
-  { rowColors, rowColorPattern }: ViewConfig,
-  row: number
+  { rowColors, rowColorPattern, rowColorPatternDown }: ViewConfig,
+  row: number,
+  // Which half of a split row this is. The two halves are different channels,
+  // so they can read the palette through different patterns -- "1,2x3" above
+  // and "3,4x7" below picks two families out of one list.
+  half: "both" | "up" | "down" = "both"
 ): string | null => {
   if (!rowColors.length) return null;
-  if (!rowColorPattern.length) return rowColors[0];
-  const pick = Math.round(rowColorPattern[row % rowColorPattern.length]);
+  // An empty down pattern means the halves agree, which is what every pane did
+  // before the lower half could differ.
+  const pattern =
+    half === "down" && rowColorPatternDown?.length
+      ? rowColorPatternDown
+      : rowColorPattern;
+  if (!pattern.length) return rowColors[0];
+  const pick = Math.round(pattern[row % pattern.length]);
   // 1-based, and wrapped rather than clamped -- the same way drum `gains`
   // cycles, so a number past the end of the list comes back round to the start
   // instead of erroring or silently sticking on the last color.
@@ -406,6 +421,7 @@ export const defaultViewConfig = (): ViewConfig => ({
   refreshAtCycleEnd: false,
   rowColors: [],
   rowColorPattern: [],
+  rowColorPatternDown: [],
   showFlux: false,
   fluxGain: 0.3,
   showOnsets: false,

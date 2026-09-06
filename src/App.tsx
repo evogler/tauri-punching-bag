@@ -796,7 +796,7 @@ const App = () => {
       ctx.moveTo(x, y);
       ctx.lineTo(x, y + height);
     } else {
-      ctx.strokeStyle = rowColorFor(v.cfg, row) ?? style.color;
+      ctx.strokeStyle = rowColorFor(v.cfg, row, half) ?? style.color;
       const top = half === "down" ? 0.5 : 0.5 - 0.5 * val;
       const bottom = half === "up" ? 0.5 : 0.5 + 0.5 * val;
       ctx.moveTo(x, y + top * height);
@@ -1688,11 +1688,28 @@ const App = () => {
               setColors={(colors) => viewIO.set("rowColors", colors)}
             />
             {(viewCtxs[activeView]?.cfg.rowColors.length ?? 0) > 1 && (
-              <Input
-                label="row color pattern"
-                _key="rowColorPattern"
-                {...viewIO}
-              />
+              <>
+                <Input
+                  label={
+                    viewCtxs[activeView]?.cfg.splitChannels
+                      ? "row color pattern (up)"
+                      : "row color pattern"
+                  }
+                  _key="rowColorPattern"
+                  {...viewIO}
+                />
+                {/* The halves are different channels, so one palette read
+                    through two patterns tells them apart without giving up the
+                    row marking. Empty means the lower half reads the pattern
+                    above it. */}
+                {viewCtxs[activeView]?.cfg.splitChannels && (
+                  <Input
+                    label="row color pattern (down)"
+                    _key="rowColorPatternDown"
+                    {...viewIO}
+                  />
+                )}
+              </>
             )}
             <GridList
               grids={viewCtxs[activeView]?.cfg.grids ?? []}

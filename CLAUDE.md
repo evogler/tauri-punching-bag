@@ -412,9 +412,20 @@ takes which, 1-based, in the same `parseNumberList` syntax as `beatsPerRow`.
 - An index past the end of the colour list **wraps**, so deleting a colour can't
   leave the pattern reading `undefined`.
 - **Row colour overrides the channel colour**, so with several channels visible
-  in one pane they all draw in the row's colour. `splitChannels` still tells
-  them apart by position. `barColorMode` still wins over both -- it encodes
-  amplitude as brightness, so a hue would have nothing to say.
+  in one pane they all draw in the row's colour. `barColorMode` still wins over
+  both -- it encodes amplitude as brightness, so a hue would have nothing to
+  say.
+- **A split row can read the palette through two patterns.**
+  `rowColorPatternDown` is the lower half's, and empty -- the default -- means
+  it reads `rowColorPattern` like the upper half, which is how panes behaved
+  before it existed. One palette rather than two lists: with `1,2x3` above and
+  `3,4x7` below, the two channels come out of different parts of the same
+  colours and both still mark the beat. `rowColorFor` takes the half, and
+  `"both"` (an unsplit row) reads the upper pattern.
+- Like `rowColorPattern`, it **cannot be typed back to empty** --
+  `parseNumberList` rejects an empty list. Setting it to the same text as the
+  upper pattern is the equivalent, and turning `splitChannels` off ignores it
+  entirely.
 
 `getCanvasPositions(layout, beat)` in `layout.ts` returns **every** place a beat
 appears on screen. Each row draws its own beats plus `marginLeft` beats of lead-in
