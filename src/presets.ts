@@ -106,12 +106,19 @@ const wrapList = (val: unknown, fallback: NumberListExpr): NumberListExpr => {
 
 // Merging over the defaults is what lets a view saved by an older build pick up
 // keys added since, the same way the top-level config already worked.
-const normalizeView = (view: unknown): ViewConfig => {
-  const base = defaultViewConfig();
+const normalizeView = (
+  view: unknown,
+  // What the session's channels were when every pane shared one list. A view
+  // saved before the split has none of its own, and defaulting it to channel 0
+  // would quietly drop whatever was on screen.
+  legacyChannels: number[]
+): ViewConfig => {
+  const base = { ...defaultViewConfig(), channels: legacyChannels };
   if (typeof view !== "object" || view === null) return base;
   const merged = { ...base, ...(view as Partial<ViewConfig>) };
   return {
     ...merged,
+    channels: Array.isArray(merged.channels) ? merged.channels : base.channels,
     beatsPerRow: wrapList(merged.beatsPerRow, base.beatsPerRow),
     marginLeft: wrapNumber(merged.marginLeft, base.marginLeft),
     marginRight: wrapNumber(merged.marginRight, base.marginRight),
@@ -121,7 +128,10 @@ const normalizeView = (view: unknown): ViewConfig => {
 
 // Folds a pre-views js config into one view, then squares the list up with the
 // arrangement so `views.length === viewCols * viewRows` always holds.
-const migrateViews = (js: Record<string, unknown>): Record<string, unknown> => {
+const migrateViews = (
+  js: Record<string, unknown>,
+  legacyChannels: number[]
+): Record<string, unknown> => {
   const out = { ...js };
 
   if (!Array.isArray(out.views)) {
@@ -129,12 +139,14 @@ const migrateViews = (js: Record<string, unknown>): Record<string, unknown> => {
     for (const key of LEGACY_VIEW_KEYS) {
       if (key in out) (legacy as Record<string, unknown>)[key] = out[key];
     }
-    out.views = [{ ...defaultViewConfig(), ...legacy }];
+    out.views = [{ ...defaultViewConfig(), channels: legacyChannels, ...legacy }];
     out.viewCols = 1;
     out.viewRows = 1;
   }
 
-  const views = (out.views as unknown[]).map(normalizeView);
+  const views = (out.views as unknown[]).map((v) =>
+    normalizeView(v, legacyChannels)
+  );
   const cols = clampSide(out.viewCols);
   const rows = clampSide(out.viewRows);
   const wanted = cols * rows;
@@ -179,13 +191,19 @@ export const makePreset = (
 const sanitizePreset = (preset: unknown): Preset | null => {
   if (typeof preset !== "object" || preset === null) return null;
   const { rust, js } = preset as Record<string, unknown>;
+  const rustOut = migrateRust(
+    typeof rust === "object" && rust !== null
+      ? (rust as Record<string, unknown>)
+      : {}
+  );
+  // The panes' channel lists are migrated from the rust side's, which is where
+  // channel visibility lived before it became per-pane.
+  const legacyChannels = Array.isArray(rustOut.visibleChannels)
+    ? (rustOut.visibleChannels as number[])
+    : defaultRustConfig.visibleChannels;
   return {
     rust: pickKnownKeys<Partial<RustConfig>>(
-      migrateRust(
-        typeof rust === "object" && rust !== null
-          ? (rust as Record<string, unknown>)
-          : {}
-      ),
+      rustOut,
       isRustConfigKey,
       TRANSIENT_RUST_KEYS
     ),
@@ -193,7 +211,8 @@ const sanitizePreset = (preset: unknown): Preset | null => {
       migrateViews(
         typeof js === "object" && js !== null
           ? (js as Record<string, unknown>)
-          : {}
+          : {},
+        legacyChannels
       ),
       isJsConfigKey,
       TRANSIENT_JS_KEYS

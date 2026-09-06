@@ -105,6 +105,32 @@ Rules that will bite you:
   removed keys are dropped. A restored session pushes one `set_config` on mount,
   because Rust boots from its own `default_config()`.
 
+## The panel, the shortcuts and the menu
+
+- **The panel is four tabs** -- sound, signal, visual, views -- with the
+  transport, `parameters` and the preset bar pinned above them. Parameters are
+  pinned rather than tabbed because you edit `n` while looking at a field that
+  reads `bar/n x n`.
+- **Inactive tabs are hidden, not unmounted** (`TabPanel` sets
+  `display: none`). `Input` holds the text you are typing in local state and an
+  expression is invalid for most of the time it takes to type, so unmounting
+  would throw a half-written field away on every tab switch. Every section
+  rendered on every render before tabs existed, so this costs nothing new.
+- **Which tab is open is plain React state, not a config key** -- transient UI,
+  kept out of presets and the session on purpose.
+- `Divider` is the labelled hairline that groups settings inside one Section.
+- **⌘P pauses, ⌘L toggles looping.** One `keydown` listener, registered once and
+  reaching the current `set`/`get` through a ref -- those are new closures every
+  render, so depending on them would rebuild the listener each time. Both are
+  taken unconditionally, text fields included: neither is a text-editing key.
+- **The app menu carries Restart** (⌘⇧R), added to `Menu::os_default` rather
+  than to a menu built from scratch -- building one drops Edit, and with it
+  cut/copy/paste in every text field in the panel. `AppHandle::restart` reads
+  Info.plist on macOS, so the *bundle* comes back rather than the bare binary,
+  which matters because only the bundle can hold the microphone grant. The
+  session is written to local storage on every config change, so settings
+  survive the relaunch; `paused` doesn't, being transient.
+
 ## Parameters and expressions
 
 `parameters: {name, value}[]` in `defaultJsConfig` is a global list of named
@@ -340,6 +366,22 @@ per-pane, held in `views: ViewConfig[]`.
   config. `migrateViews` folds them into `views[0]` *before* `pickKnownKeys`
   runs, since that drops keys it doesn't recognise -- without it an upgrade
   would silently reset someone's rows and grids.
+- **`viewsSequential` chains the panes instead of overlaying them.** Off, every
+  pane covers the same beats against its own ruling -- the reason panes exist.
+  On, the panes divide one long timeline: pane *k* covers the beats after every
+  earlier pane's, so the signal runs through pane 1's rows, then pane 2's.
+  `Layout` carries `cycleBeats` (what the display wraps on) and `chainStart`
+  (where this pane sits in it); simultaneous is `cycleBeats = beatsPerWindow,
+  chainStart = 0`, which is the pre-chain arithmetic exactly. Everything else
+  followed from those two fields: `getCanvasPositions` subtracts `chainStart`
+  and a beat belonging to another pane yields no positions, so an inactive pane
+  simply stops being drawn over and holds its last pass. Margins bleed across
+  the pane boundary and grids tile the whole timeline, both because the timeline
+  is what repeats. `chainStart` is derived from the panes' own lengths, never a
+  setting.
+- **A beat exactly on a row boundary draws twice** -- dim at the end of the row
+  above, solid at the start of the row below. Long-standing (the loop bound is
+  inclusive at the right edge); chaining extends it to the pane boundary.
 - **One `requestAnimationFrame` loop, in `App`.** It draws every pane and then
   drains the sample batch **once**, after all of them have read it. `Canvas.tsx`
   used to own the loop and clear the buffer itself; with more than one pane that
@@ -402,7 +444,7 @@ to `drum_last_beats.resize`. Audio is untouched by this; it is display-only.
 
 ### Channels
 
-`visibleChannels` holds *device channel indices*, and indices past the input count
+Channels are named by *device channel index*, and indices past the input count
 are **synthetic buses**, in the order the frontend labels them:
 
 ```
@@ -411,12 +453,36 @@ are **synthetic buses**, in the order the frontend labels them:
 ```
 
 The frontend's `channelLabels` order **must** match how `main.rs` fills them.
-Only real inputs are pannable — the buses aren't routed. `splitChannels` draws
-even slots above the row centre and odd slots below (designed for exactly 2).
+Only real inputs are pannable — the buses aren't routed.
 
 The sample stream is flattened — `{channels, beats, values}`, one beat per frame
 and `channels` values after it, read as `values[i * channels + c]`. Flattened
 rather than a Vec-of-Vecs so the audio callback never allocates per frame.
+
+**Which channels a pane draws is per-pane** (`views[i].channels`), and
+`visibleChannels` is no longer a setting: it is the *union* of what the panes
+ask for, and exists only to tell the callback what to pack.
+
+- **Everything user-facing is indexed by device channel.** The pane's list, the
+  colours (`channelStyles`, global, so a channel looks the same everywhere), the
+  pans, `spectrogramChannel`, and the flux and onset streams all agree. Only the
+  sample stream is in packed order, and `streamSlots[channel]` is the one place
+  that translates. Before this there were two conventions and `drawFluxAt` was
+  where they collided.
+- **The union is pushed from an effect**, guarded on equality, rather than from
+  each of the five places the panes can change (a per-pane edit, the
+  arrangement, a preset, the restored session, a pane being dropped). It cannot
+  loop: the union is a pure function of `views` and the push is a fixed point.
+  This is the one pane setting that reaches the audio thread at all.
+- **A channel a pane wants that isn't packed yet reads `undefined` and is
+  skipped**, so the frame or two between adding a channel and the stream
+  widening draws nothing rather than misreading a neighbour.
+- `splitChannels` splits by position *within the pane's own list*, so two panes
+  showing different pairs each split their own.
+- **A session written before this has no per-pane lists**, so `normalizeView`
+  seeds every pane from the old global `visibleChannels` — including the
+  pre-views path, where `defaultViewConfig()`'s own `channels: [0]` would
+  otherwise win and quietly reset what was on screen.
 
 ### Drums
 
@@ -668,6 +734,23 @@ Still unchecked on the views work: that a restored pre-views session comes back
 with its old rows and grids intact, and that switching arrangement doesn't leave
 stale pixels in a pane.
 
+### 2026-09-05
+
+The panel tabs, ⌘P/⌘L, chained panes, the 4x1 arrangement, per-pane channels and
+the Restart menu item are all new. The owner has seen the tabs and chaining in
+the real app; nothing else here has been used yet.
+
+Checked by temp test (run, then deleted): chained geometry, including that
+simultaneous panes are position-for-position identical to the pre-chain
+implementation, that a beat is owned by exactly one pane, and that the wrap and
+the boundary margins behave; and the channel migration, including a pre-views
+session and a pane that chose its own channels.
+
+Not checked: that Restart actually relaunches with audio (an ad-hoc signature
+changes every build, so TCC may treat the relaunch as a new app), and that a
+pane showing only the drums bus draws what you'd expect -- the buses have no
+spectrum, so flux and onsets stay empty there by design.
+
 ## Discussed but not built
 
 - **Per-channel latency offsets.** Wanted, low priority — the owner isn't
@@ -686,12 +769,6 @@ stale pixels in a pane.
   (a new note on one string while another sustains needs frequency-domain work),
   and the amplitude envelope is genuinely informative for sustain and volume.
 - Per-channel loop buffers exist now, but per-channel *input gain* does not.
-- **Per-view channel selection.** The one item from the views work that isn't
-  frontend-only. `visibleChannels` is a *Rust* key -- it decides what the
-  callback packs into the flattened stream -- and `visibleStyles[slot]` assumes
-  stream slot order equals `visibleChannels` order. Doing it per-pane means Rust
-  sending the union and the frontend carrying a slot -> device-channel map so
-  each pane can pick its subset.
 - **High-passing the display signal.** Transients are HF-rich and steady tone is
   LF-dominant, so a high-pass before the `.abs()` in `main.rs` would lift attacks
   out of the picture; at the zoom levels in use (~3.6 samples per pixel column at

@@ -11,6 +11,7 @@ import {
   gridAlpha,
   ChannelStyle,
   channelStyle,
+  unionChannels,
   BUILT_IN_DRUMS,
   rowColorFor,
   ViewConfig,
@@ -44,6 +45,7 @@ import { Slider } from "./Slider";
 import { ParameterList } from "./ParameterList";
 import { Layout, getCanvasPositions } from "./layout";
 import { ChannelList } from "./ChannelList";
+import { ChannelPicker } from "./ChannelPicker";
 import { DrumList, SampleStatus, makeDrumVoice } from "./DrumList";
 import { open as openFileDialog } from "@tauri-apps/api/dialog";
 
@@ -384,6 +386,9 @@ const App = () => {
   type ViewCtx = {
     index: number;
     cfg: ViewConfig;
+    // Device channel indices this pane draws. Looked up in `streamSlots` for
+    // the sample stream and used directly for the analysis stream.
+    channels: number[];
     layout: Layout;
     visualGain: number;
     rowHeight: number;
@@ -438,6 +443,7 @@ const App = () => {
     return {
       index,
       cfg,
+      channels: cfg.channels,
       layout: {
         beatsPerRow,
         rowStarts,
@@ -702,6 +708,22 @@ const App = () => {
     writeSession(makePreset(rustConfig, jsConfig));
   }, [rustConfig, jsConfig]);
 
+  // The one pane setting that has to reach the audio thread: the callback packs
+  // the union of what the panes ask for, so adding a channel to a pane has to
+  // push. An effect rather than a call in every mutation site because the panes
+  // change from five of them -- a per-pane edit, the arrangement, a preset, the
+  // restored session -- and a missed one would leave Rust packing the wrong
+  // set. It can't loop: the union is a pure function of `views`, and the
+  // equality guard makes the push a fixed point.
+  const wantedKey = unionChannels(jsConfig.views).join(",");
+  const packedKey = rustConfig.visibleChannels.join(",");
+  useEffect(() => {
+    if (wantedKey === packedKey) return;
+    updateRustConfig({
+      visibleChannels: wantedKey ? wantedKey.split(",").map(Number) : [],
+    });
+  }, [wantedKey, packedKey]);
+
   // Covers both adding a sample and coming back to one a restored session
   // referred to.
   useEffect(() => {
@@ -783,15 +805,26 @@ const App = () => {
     ctx.globalAlpha = 1;
   };
 
-  // Resolved once per render: the style for each *visible* channel, in the order
-  // Rust packs them into the stream. Shared by every pane, so a channel keeps
-  // its colour wherever you happen to be looking at it.
-  const visibleStyles = get("visibleChannels").map((channel) =>
-    channelStyle(get("channelStyles"), channel)
-  );
+  // Where each *device* channel sits in the sample stream. Rust packs the union
+  // of what the panes ask for, in device order, so a pane finds its own
+  // channels by looking them up here rather than by assuming stream order is
+  // its own. A channel a pane wants but the stream hasn't caught up with yet
+  // reads `undefined` and is skipped for a frame.
+  const streamSlots: number[] = [];
+  get("visibleChannels").forEach((channel, slot) => {
+    streamSlots[channel] = slot;
+  });
 
-  const halfFor = (v: ViewCtx, slot: number): "both" | "up" | "down" =>
-    !v.cfg.splitChannels ? "both" : slot % 2 === 0 ? "up" : "down";
+  // Styles are global and indexed by device channel, so a channel keeps its
+  // colour in every pane. Resolved once per render rather than per column.
+  const styleFor = (channel: number) =>
+    channelStyle(get("channelStyles"), channel);
+  const channelStyles = channelLabels.map((_, channel) => styleFor(channel));
+
+  // The pane's own channels, so the split is by position *within this pane*.
+  // Two panes showing different channels each split their own pair.
+  const halfFor = (v: ViewCtx, index: number): "both" | "up" | "down" =>
+    !v.cfg.splitChannels ? "both" : index % 2 === 0 ? "up" : "down";
 
   const drawChannelsAt = (
     ctx: CanvasRenderingContext2D,
@@ -801,9 +834,11 @@ const App = () => {
     isMargin: boolean,
     peaks: number[]
   ) => {
-    for (let slot = 0; slot < peaks.length; slot++) {
-      const style = visibleStyles[slot];
-      if (!style) continue;
+    for (let i = 0; i < v.channels.length; i++) {
+      const channel = v.channels[i];
+      const slot = streamSlots[channel];
+      const style = channelStyles[channel];
+      if (slot === undefined || peaks[slot] === undefined || !style) continue;
       drawChannel(
         ctx,
         v,
@@ -812,16 +847,15 @@ const App = () => {
         Math.min(1, peaks[slot] * v.visualGain),
         style,
         isMargin,
-        halfFor(v, slot)
+        halfFor(v, i)
       );
     }
   };
 
-  // The flux is per *device* input channel, in device order, so it is indexed by
-  // what's in `visibleChannels` rather than by the slot -- unlike the sample
-  // stream, which Rust packs in `visibleChannels` order. A slot pointing at a
-  // synthetic bus has no entry and is skipped: the buses aren't captured, so
-  // there is no spectrum to difference.
+  // The flux is per *device* input channel, which is how the pane's own channel
+  // list reads too -- so unlike the sample stream there is no slot lookup here.
+  // A channel pointing at a synthetic bus has no entry and is skipped: the
+  // buses aren't captured, so there is no spectrum to difference.
   const drawFluxAt = (
     ctx: CanvasRenderingContext2D,
     v: ViewCtx,
@@ -830,10 +864,10 @@ const App = () => {
     isMargin: boolean,
     peaks: number[]
   ) => {
-    const visible = get("visibleChannels");
-    for (let slot = 0; slot < visible.length; slot++) {
-      const value = peaks[visible[slot]];
-      const style = visibleStyles[slot];
+    for (let i = 0; i < v.channels.length; i++) {
+      const channel = v.channels[i];
+      const value = peaks[channel];
+      const style = channelStyles[channel];
       if (value === undefined || !style) continue;
       drawChannel(
         ctx,
@@ -843,7 +877,7 @@ const App = () => {
         Math.min(1, value * v.cfg.fluxGain),
         style,
         isMargin,
-        halfFor(v, slot)
+        halfFor(v, i)
       );
     }
   };
@@ -921,16 +955,15 @@ const App = () => {
     isMargin: boolean,
     mark: OnsetMark
   ) => {
-    const visible = get("visibleChannels");
-    const slot = visible.indexOf(mark.channel);
-    const style = visibleStyles[slot];
-    if (slot < 0 || !style) return;
+    const index = v.channels.indexOf(mark.channel);
+    const style = channelStyles[mark.channel];
+    if (index < 0 || !style) return;
     const y = row * v.rowHeight;
     const height = v.rowHeight - 1;
     const tick = Math.max(3, height * ONSET_TICK);
     // In split mode the tick sits on the edge its channel's waveform grows
     // from, so two channels' onsets stay told apart.
-    const top = halfFor(v, slot) === "down" ? y + height - tick : y;
+    const top = halfFor(v, index) === "down" ? y + height - tick : y;
     ctx.globalAlpha = style.alpha * (isMargin ? 0.55 : 1);
     ctx.fillStyle = style.color;
     ctx.fillRect(x - 1, top, 2, tick);
@@ -1401,10 +1434,8 @@ const App = () => {
             <ChannelList
               labels={channelLabels}
               inputCount={inputChannelCount}
-              visible={get("visibleChannels")}
               styles={get("channelStyles")}
               pans={get("channelPans")}
-              setVisible={(next) => set("visibleChannels", next)}
               setStyles={(next) => set("channelStyles", next)}
               setPans={(next) => set("channelPans", next)}
             />
@@ -1560,6 +1591,12 @@ const App = () => {
               </div>
             )}
             <Divider label="content" />
+            <ChannelPicker
+              labels={channelLabels}
+              styles={get("channelStyles")}
+              channels={viewCtxs[activeView]?.cfg.channels ?? []}
+              setChannels={(next) => viewIO.set("channels", next)}
+            />
             <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
               <label>kind</label>
               <select

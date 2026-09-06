@@ -33,32 +33,20 @@ const withPanAt = (pans: number[], index: number, next: number) => {
 };
 
 const ChannelRow = ({
-  index,
   label,
-  shown,
   style,
   pan,
-  onToggle,
   onStyle,
   onPan,
 }: {
-  index: number;
   label: string;
-  shown: boolean;
   style: ChannelStyle;
   // Absent for anything that isn't a real input -- the drum bus isn't routed.
   pan?: number;
-  onToggle: () => void;
   onStyle: (next: ChannelStyle) => void;
   onPan: (next: number) => void;
 }) => (
-  <div style={{ ...rowStyle, opacity: shown ? 1 : 0.45 }}>
-    <input
-      type="checkbox"
-      checked={shown}
-      onChange={onToggle}
-      title={shown ? `Hide ${label}` : `Show ${label}`}
-    />
+  <div style={rowStyle}>
     <label style={{ width: "3.5em" }}>{label}</label>
     <input
       type="color"
@@ -101,13 +89,14 @@ const ChannelRow = ({
   </div>
 );
 
+// A channel's identity rather than its visibility: the colour it draws in
+// everywhere and, for a real input, where it sits in the stereo field. Which
+// pane shows it is chosen per pane -- see ChannelPicker.
 export const ChannelList = ({
   labels,
   inputCount,
-  visible,
   styles,
   pans,
-  setVisible,
   setStyles,
   setPans,
 }: {
@@ -115,34 +104,20 @@ export const ChannelList = ({
   inputCount: number;
   pans: number[];
   setPans: (next: number[]) => void;
-  // One per selectable channel, in stream order. Anything past the device's
-  // input channels is a synthetic bus -- the drums.
+  // One per selectable channel, in device order. Anything past the device's
+  // input channels is a synthetic bus -- the drums, then the click.
   labels: string[];
-  visible: number[];
   styles: ChannelStyle[];
-  setVisible: (next: number[]) => void;
   setStyles: (next: ChannelStyle[]) => void;
 }) => {
-  const toggle = (index: number) =>
-    setVisible(
-      visible.includes(index)
-        ? visible.filter((i) => i !== index)
-        : // Kept in device order, since that's the order they're drawn in and
-          // the order the up/down split assigns from.
-          [...visible, index].sort((a, b) => a - b)
-    );
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
       {labels.map((label, index) => (
         <ChannelRow
           key={index}
-          index={index}
           label={label}
-          shown={visible.includes(index)}
           style={channelStyle(styles, index)}
           pan={index < inputCount ? channelPan(pans, index) : undefined}
-          onToggle={() => toggle(index)}
           onStyle={(next) => setStyles(withStyleAt(styles, index, next))}
           onPan={(next) => setPans(withPanAt(pans, index, next))}
         />

@@ -159,7 +159,9 @@ export const defaultRustConfig = {
   // drums bus, whose trigger times the callback knows exactly.
   onsetOffset: numExpr(0),
   paused: false,
-  // Which input channels get sent to the display, by device channel index.
+  // Which channels the callback packs into the sample stream, by device channel
+  // index. Derived from the panes rather than set directly -- see
+  // `unionChannels`; a pane picks its own channels and this follows.
   visibleChannels: [0] as number[],
   // Stereo position per input channel, -1 hard left to 1 hard right. Sparse:
   // a channel with no entry sits centred.
@@ -266,6 +268,12 @@ export type ViewConfig = {
   // What the y axis of the pane means: amplitude, or frequency. Everything
   // else -- rows, margins, grids, the sweep -- is shared between the two.
   kind: ViewKind;
+  // Which channels this pane draws, as *device* channel indices (inputs first,
+  // then the synthetic drum and click buses). Per-pane, so one pane can watch
+  // the drums while another watches what you played. The union of every pane's
+  // list is what Rust is asked to pack into the sample stream, which is the
+  // only part of this that reaches the audio thread.
+  channels: number[];
   // Which *device* input channel the spectrogram shows. The analysis stream
   // carries the input channels in device order (up to Rust's cap), not the
   // `visibleChannels` subset, so this indexes it directly.
@@ -333,6 +341,12 @@ export const rowColorFor = (
   return rowColors[i];
 };
 
+// What Rust is asked to send: every channel some pane wants, in device order.
+// Derived rather than set, so the panes are the only place channel visibility
+// is chosen -- `visibleChannels` is left as a transport detail.
+export const unionChannels = (views: ViewConfig[]): number[] =>
+  Array.from(new Set(views.flatMap((v) => v.channels))).sort((a, b) => a - b);
+
 // A pane with no rows would divide by zero on the way to a row height.
 // `parseNumberList` rejects an empty list, so this only catches a hand-edited
 // or half-migrated session.
@@ -365,6 +379,7 @@ export const ANALYSIS_WINDOWS = [256, 512, 1024, 2048, 4096];
 
 export const defaultViewConfig = (): ViewConfig => ({
   kind: "waveform",
+  channels: [0],
   spectrogramChannel: 0,
   spectrogramGain: 1,
   spectrogramFloor: 0.15,
