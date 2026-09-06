@@ -20,7 +20,7 @@ use crate::commands::{
     get_analysis, get_input_channel_count, get_samples, load_drum_sample, reset_beat, set_config,
     set_mp3_buffer,
 };
-use crate::constants::{default_config, MAX_INPUT_BACKLOG, SAMPLE_RATE};
+use crate::constants::{default_config, MAX_INPUT_BACKLOG, MAX_VISUAL_BACKLOG, SAMPLE_RATE};
 use crate::get_loop_buffer_size::{get_loop_buffer_size, get_loop_spacing, loop_echo_count};
 use crate::io_channels::{get_input_output_channels, make_buffers, start_input_audio_unit};
 use crate::read_audio_file::get_samples_from_filename;
@@ -32,12 +32,12 @@ use crate::structs::{
 use crate::types::{Args, S};
 use crate::util::{beat_bisect, mod_add};
 use rand::Rng;
-use tauri::{CustomMenuItem, Manager, Menu, MenuEntry, MenuItem};
 use std::{
     collections::HashMap,
     sync::atomic::AtomicBool,
     sync::{Arc, Mutex},
 };
+use tauri::{CustomMenuItem, Manager, Menu, MenuEntry, MenuItem};
 
 // Restarting is the quickest way out of a wedged audio device -- the render
 // callback and the input stream are set up once, at launch, so there is no
@@ -153,11 +153,13 @@ fn main() -> Result<(), coreaudio::Error> {
 
     let sample_output_buffer = SampleOutputBuffer {
         buffer: Default::default(),
+        drained: Default::default(),
     };
     let sample_output_buffer_clone = sample_output_buffer.buffer.clone();
 
     let analysis_output_buffer = AnalysisOutputBuffer {
         buffer: Default::default(),
+        drained: Default::default(),
     };
     let analysis_output_buffer_clone = analysis_output_buffer.buffer.clone();
 
@@ -352,8 +354,7 @@ fn main() -> Result<(), coreaudio::Error> {
                     monitor_out[1] += sample * right;
                 }
 
-                let visual_beat =
-                    beat - (config.buffer_compensation as f64) * beats_per_sample;
+                let visual_beat = beat - (config.buffer_compensation as f64) * beats_per_sample;
 
                 // Per frame, not per output channel -- this advances the ring.
                 if let Some(frames) = analysis_out.as_deref_mut() {
@@ -367,12 +368,10 @@ fn main() -> Result<(), coreaudio::Error> {
                         // 0.25x16 and 140bpm with the default 1024, and reads
                         // as the FFT being wrong rather than the stamp.
                         frames.beats.push(
-                            visual_beat
-                                - (analyzer.window_len() as f64 / 2.0) * beats_per_sample,
+                            visual_beat - (analyzer.window_len() as f64 / 2.0) * beats_per_sample,
                         );
                         analyzer.note_hop_beat(
-                            visual_beat
-                                - (analyzer.window_len() as f64 / 2.0) * beats_per_sample,
+                            visual_beat - (analyzer.window_len() as f64 / 2.0) * beats_per_sample,
                         );
                         for ch in 0..analyzer.channels() {
                             let flux = analyzer.analyze_into(ch, &mut frames.mags, flux_band);
@@ -424,8 +423,7 @@ fn main() -> Result<(), coreaudio::Error> {
                                 // rather than indexing past the end.
                                 let back = ((k + 1) * loop_spacing) % loop_len;
                                 visual_sum += buf[(p + loop_len - back) % loop_len] * gain;
-                                audio_sum +=
-                                    buf[(audio_from + loop_len - back) % loop_len] * gain;
+                                audio_sum += buf[(audio_from + loop_len - back) % loop_len] * gain;
                             }
                             loop_visual[ch] = visual_sum;
                             let (left, right) = pan_gains[ch];
@@ -476,8 +474,7 @@ fn main() -> Result<(), coreaudio::Error> {
                         // Subtracting the shift reads the rhythm from earlier in
                         // the cycle, which is what puts the part later. Negative
                         // beats are fine -- beat_bisect floors into the cycle.
-                        let hit =
-                            beat_bisect(&voice_times[v], beat + offset_beats - voice.shift);
+                        let hit = beat_bisect(&voice_times[v], beat + offset_beats - voice.shift);
                         if drum_last_beats[v] == isize::MIN {
                             drum_last_beats[v] = hit;
                         } else if hit != drum_last_beats[v] {
@@ -579,22 +576,29 @@ fn main() -> Result<(), coreaudio::Error> {
                 // sounded on, not the one the input stamp is shifted to.
                 let [drum_visual, click_visual] = bus_delay.push([drum_frame, click_frame]);
 
-                state_vec.beats.push(visual_beat);
-                for &ch in config.visible_channels.iter() {
-                    // Channels past the input count are the synthetic buses, in
-                    // the order the frontend labels them: drums, then click.
-                    let value = if ch < input_frame.len() {
-                        let mut v = loop_visual[ch];
-                        if config.visual_monitor_on {
-                            v += input_frame[ch];
-                        }
-                        v
-                    } else if ch == input_frame.len() {
-                        drum_visual
-                    } else {
-                        click_visual
-                    };
-                    state_vec.values.push(value.abs());
+                // A wedged frontend must not be able to grow this without bound:
+                // it would cost memory, make the next drain's reserve enormous,
+                // and eventually push the callback back into the allocator.
+                // Dropping the newest frames leaves a gap the display catches up
+                // from in one poll, which beats stalling the audio thread.
+                if state_vec.beats.len() < MAX_VISUAL_BACKLOG {
+                    state_vec.beats.push(visual_beat);
+                    for &ch in config.visible_channels.iter() {
+                        // Channels past the input count are the synthetic buses, in
+                        // the order the frontend labels them: drums, then click.
+                        let value = if ch < input_frame.len() {
+                            let mut v = loop_visual[ch];
+                            if config.visual_monitor_on {
+                                v += input_frame[ch];
+                            }
+                            v
+                        } else if ch == input_frame.len() {
+                            drum_visual
+                        } else {
+                            click_visual
+                        };
+                        state_vec.values.push(value.abs());
+                    }
                 }
 
                 beat += beats_per_sample;

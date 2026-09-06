@@ -1,3 +1,5 @@
+use crate::analysis::{BINS, MAX_ANALYSIS_CHANNELS};
+use crate::constants::{ANALYSIS_RESERVE_HOPS, ONSET_RESERVE, VISUAL_RESERVE_FRAMES};
 use crate::get_loop_buffer_size::get_loop_buffer_size;
 use crate::read_audio_file::get_samples_from_filename;
 use crate::structs::{
@@ -5,6 +7,7 @@ use crate::structs::{
     InputChannelCount, LogState, LoopBufferState, Mp3BufferState, Payload, SampleOutputBuffer,
     VisualSamples,
 };
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::{Manager, State};
 
@@ -29,17 +32,41 @@ pub fn set_mp3_buffer(app_handle: tauri::AppHandle, filename: String) {
 
 #[tauri::command]
 pub fn get_samples(state: State<SampleOutputBuffer>) -> Result<VisualSamples, String> {
+    // Allocated *before* the lock, from what the last drain took: the callback
+    // holds this mutex for its whole run, so anything done inside it is time the
+    // audio thread waits. Leaving `mem::take`'s zero-capacity vectors behind
+    // made the callback itself grow them from nothing every drain, which is an
+    // allocation on the audio thread and got worse per channel a pane added.
+    let mut spare = spare_vecs(&state.drained);
     if let Ok(mut samples) = state.buffer.lock() {
-        // Hand over the collected vectors and leave empty ones behind, so the
-        // audio callback isn't blocked copying them.
+        // Hand over the collected vectors and leave the pre-sized ones behind,
+        // so the audio callback isn't blocked copying them.
+        std::mem::swap(&mut samples.beats, &mut spare.0);
+        std::mem::swap(&mut samples.values, &mut spare.1);
+        state.drained.beats.store(spare.0.len(), Ordering::Relaxed);
+        state.drained.values.store(spare.1.len(), Ordering::Relaxed);
         return Ok(VisualSamples {
             channels: samples.channels,
-            beats: std::mem::take(&mut samples.beats),
-            values: std::mem::take(&mut samples.values),
+            beats: spare.0,
+            values: spare.1,
         });
     } else {
         return Err("get_samples failed.".into());
     }
+}
+
+/// Twice the last drain, floored at what one exchange can plausibly need --
+/// enough that the callback never has to grow the vector, and self-adjusting
+/// when a pane adds a channel.
+fn reserve_for(last: &std::sync::atomic::AtomicUsize, floor: usize) -> usize {
+    (last.load(Ordering::Relaxed) * 2).max(floor)
+}
+
+fn spare_vecs(drained: &crate::structs::DrainSizes) -> (Vec<f64>, Vec<f32>) {
+    (
+        Vec::with_capacity(reserve_for(&drained.beats, VISUAL_RESERVE_FRAMES)),
+        Vec::with_capacity(reserve_for(&drained.values, VISUAL_RESERVE_FRAMES)),
+    )
 }
 
 /// The spectrogram stream, drained exactly the way `get_samples` is: hand the
@@ -48,14 +75,39 @@ pub fn get_samples(state: State<SampleOutputBuffer>) -> Result<VisualSamples, St
 /// anything analysis does.
 #[tauri::command]
 pub fn get_analysis(state: State<AnalysisOutputBuffer>) -> Result<AnalysisFrames, String> {
+    // Same reasoning as get_samples: sized before the lock so the callback
+    // never grows these itself. Smaller per drain -- a hop rather than a frame
+    // -- but pushed from the same thread.
+    let hops = reserve_for(&state.drained.beats, ANALYSIS_RESERVE_HOPS);
+    let mut spare_beats = Vec::with_capacity(hops);
+    let mut spare_mags = Vec::with_capacity(reserve_for(
+        &state.drained.values,
+        ANALYSIS_RESERVE_HOPS * BINS,
+    ));
+    // Both follow the hop count rather than a counter of their own: `flux` is
+    // exactly one f32 a hop a channel, and onsets are sparse.
+    let mut spare_flux = Vec::with_capacity(hops * MAX_ANALYSIS_CHANNELS);
+    let mut spare_onsets = Vec::with_capacity(ONSET_RESERVE);
     if let Ok(mut frames) = state.buffer.lock() {
+        std::mem::swap(&mut frames.beats, &mut spare_beats);
+        std::mem::swap(&mut frames.mags, &mut spare_mags);
+        std::mem::swap(&mut frames.flux, &mut spare_flux);
+        std::mem::swap(&mut frames.onsets, &mut spare_onsets);
+        state
+            .drained
+            .beats
+            .store(spare_beats.len(), Ordering::Relaxed);
+        state
+            .drained
+            .values
+            .store(spare_mags.len(), Ordering::Relaxed);
         return Ok(AnalysisFrames {
             channels: frames.channels,
             bins: frames.bins,
-            beats: std::mem::take(&mut frames.beats),
-            mags: std::mem::take(&mut frames.mags),
-            onsets: std::mem::take(&mut frames.onsets),
-            flux: std::mem::take(&mut frames.flux),
+            beats: spare_beats,
+            mags: spare_mags,
+            onsets: spare_onsets,
+            flux: spare_flux,
         });
     } else {
         return Err("get_analysis failed.".into());
@@ -74,7 +126,10 @@ pub fn get_input_channel_count(state: State<InputChannelCount>) -> usize {
 pub fn load_drum_sample(state: State<DrumSamples>, path: String) -> Result<usize, String> {
     let samples = get_samples_from_filename(&path)?;
     let len = samples.len();
-    let mut map = state.0.lock().map_err(|_| "sample map poisoned".to_string())?;
+    let mut map = state
+        .0
+        .lock()
+        .map_err(|_| "sample map poisoned".to_string())?;
     map.insert(path, Arc::new(samples));
     Ok(len)
 }

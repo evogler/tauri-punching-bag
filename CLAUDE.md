@@ -267,10 +267,98 @@ Still outstanding, and the reason other machines are hard:
   changing any of the above, `tccutil reset Microphone com.vogler.dev` is what
   makes the prompt appear again.
 
+### Installing on a second Mac
+
+**Two DMGs sit in the build tree and only one of them is real.**
+
+| Path | What it is |
+|---|---|
+| `bundle/dmg/tauri-punching-bag_0.1.0_aarch64.dmg` | the release artifact -- ship this one |
+| `bundle/macos/rw.tauri-punching-bag_0.1.0_x64.dmg` | a read-write scratch image the bundler left behind, dated **March 2023**, `x86_64` |
+
+A rebuild does not clean the `rw.` one up, so it sits in the tree looking like a
+build output indefinitely. Shipping it by mistake produced an app that first
+refused to launch and then, once launched, captured nothing -- no microphone
+prompt, no entry in Privacy & Security, silence with nothing in any log. Every
+one of those symptoms is *also* what a correct build looks like when Gatekeeper,
+TCC, or the sample rate is wrong, which is why it survived several rounds of
+plausible fixes aimed at the wrong thing.
+
+**Identify the artifact before debugging anything else.** One command settles it:
+
+```
+codesign -dvvv /Applications/tauri-punching-bag.app
+```
+
+- `Format=... (x86_64)` -- wrong DMG. Current builds are `arm64`.
+- `Info.plist entries=17` -- wrong DMG. A build carrying the microphone key has 27.
+- `CodeDirectory v=20400` -- wrong DMG; current is `v=20500`.
+
+Without a terminal, 7 MB versus 36 MB is the same check.
+
+**The install recipe that works**, once the artifact is right:
+
+```
+rm -rf /Applications/tauri-punching-bag.app          # never merge onto an old one
+xattr -dr com.apple.quarantine <the>.dmg             # if the image itself won't mount
+ditto -R /Volumes/tauri-punching-bag/tauri-punching-bag.app \
+         /Applications/tauri-punching-bag.app        # ditto, not a Finder drag
+xattr -dr com.apple.quarantine /Applications/tauri-punching-bag.app
+open /Applications/tauri-punching-bag.app            # then Open Anyway, possibly twice
+```
+
+On macOS 15 the escape hatch is **System Settings → Privacy & Security → Open
+Anyway**, which only appears *after* a launch has been refused; right-click →
+Open no longer works. Expect to use it more than once.
+
+**Three things look like failures and are not.** All three were chased here:
+
+- `com.apple.provenance` surviving `xattr -dr` -- a different, system-restricted
+  attribute that Gatekeeper does not read. Only `com.apple.quarantine` matters.
+- `unable to initialize qtn_proc` and `putting executable into provenance` in
+  the log -- what syspolicyd prints for a file with *no* quarantine attribute.
+  They mean the removal worked.
+- `spctl -a` reporting `rejected` -- expected for anything ad-hoc and
+  un-notarized, and unrelated to whether the signature is valid. `codesign
+  -vvv --deep --strict` is the question worth asking; it reports `valid on
+  disk` for a good ad-hoc bundle.
+
+**A self-signed certificate is a free stable identity**, and is worth reaching
+for before the Developer ID if the only goal is running the app on a machine you
+control. Keychain Access → Certificate Assistant → Create a Certificate, with
+**Identity Type: Self Signed Root** and **Certificate Type: Code Signing**, then
+`codesign --force --options runtime --entitlements Entitlements.plist --sign
+"<name>"`. `Warning: unable to build chain to self-signed root` is expected and
+the signature still lands -- `Signature size=` in `codesign -dvvv` is how you
+tell a real signature from `Signature=adhoc`. It does nothing for Gatekeeper,
+but unlike ad-hoc it gives TCC something durable to key a grant to, so the
+microphone permission survives a rebuild.
+
+Two Keychain Access details that waste time: `security find-identity -v -p
+codesigning` hides untrusted certificates, so check without `-v` before
+concluding the certificate does not exist; and Get Info on the *private key*
+shows only Attributes and Access Control -- the Trust pane is on the
+**certificate**, the parent row under My Certificates.
+
 ## Audio thread rules
 
 The render callback in `main.rs` runs ~21×/sec with 2048 frames. Inside it:
 
+- **Never allocate at all, per frame or per callback.** The display buffers
+  were the exception and stopped being one: `get_samples` used `mem::take`,
+  which leaves a vector with *no capacity* behind, so the callback grew both
+  from zero on every drain -- ~20 reallocations and a copy of the whole batch,
+  on the audio thread, scaling with how many channels the panes ask for. It now
+  swaps in vectors sized *before* the lock is taken, from what the last drain
+  took (`DrainSizes`, atomics deliberately outside the mutex so the sizing
+  can't itself make the callback wait). `MAX_VISUAL_BACKLOG` caps the buffer at
+  a second so a wedged frontend can't grow it -- and with it the next reserve --
+  without bound. The audio thread waiting on the allocator while the IPC thread
+  holds it is the classic way a synthesised part comes out late; the whole
+  point is that it never gets there.
+- **The callback holds both display mutexes for its entire run**, so a drain
+  only happens between callbacks. Everything the commands do inside the lock is
+  therefore O(1) by construction -- a swap, never a copy or an allocation.
 - **Never allocate per frame.** Rhythm time-vectors, pan gains, and drum sample
   lookups are all resolved *once per callback* into locals. The click's times
   array used to be `.collect()`ed inside the per-frame, per-channel loop — about
@@ -716,6 +804,16 @@ one f32 a hop a channel, unclamped.
   code. Dead before any of this work.
 - A zero-length `beatsToLoop` used to panic; guarded now, but similar bare
   indexing exists elsewhere.
+- **`SAMPLE_RATE` is hard-coded at 44100** (`constants.rs:4`) and pushed straight
+  into the input stream format (`io_channels.rs:88`). The only fallback in that
+  code is on channel count, not on rate. A MacBook built-in mic defaults to
+  **48000**, so the app is pointed at a rate most Macs are not on out of the box.
+  `system_profiler SPAudioDataType` prints each device's `Current SampleRate`.
+  Whether the mismatch actually produces silence is **unverified** -- it was
+  suspected during the second-Mac debugging and never cleanly tested, because
+  the machine in question was running the wrong build the whole time. Test it
+  before fixing it: set the mic to 48k in Audio MIDI Setup and run a known-good
+  build.
 
 ## State as of 2026-08-30
 
@@ -743,9 +841,8 @@ that both line up with the grid, are not.
 
 The macOS `Info.plist` and entitlements fix is committed (`documentation &
 permissions`) and was verified against a real build with `plutil` and
-`codesign`, but **nobody has confirmed the microphone prompt actually appears
-yet** -- that needs `tccutil reset Microphone com.vogler.dev` and a launch of
-the bundled app.
+`codesign`. **Confirmed working 2026-09-06** on a second Mac: the prompt
+appears and the bundle captures on its own grant (see the 2026-09-06 note).
 
 Still unchecked on the views work: that a restored pre-views session comes back
 with its old rows and grids intact, and that switching arrangement doesn't leave
@@ -763,10 +860,50 @@ implementation, that a beat is owned by exactly one pane, and that the wrap and
 the boundary margins behave; and the channel migration, including a pre-views
 session and a pane that chose its own channels.
 
+The audio-thread allocation fix (`DrainSizes`, `MAX_VISUAL_BACKLOG`) was found
+while chasing an occasional late drum hit, but **that symptom turned out to
+happen in other applications too**, so it was a system-wide glitch and this
+fix is not known to have changed anything audible. It stands on its own: the
+callback really was calling the allocator every drain, and the cost really did
+scale with the channels the panes ask for. Don't read it as a cure.
+
 Not checked: that Restart actually relaunches with audio (an ad-hoc signature
 changes every build, so TCC may treat the relaunch as a new app), and that a
 pane showing only the drums bus draws what you'd expect -- the buses have no
 spectrum, so flux and onsets stay empty there by design.
+
+### 2026-09-06
+
+The bundle was installed and run on a **second Mac** for the first time. It
+launches, prompts for the microphone, and captures -- so the `Info.plist` and
+entitlements work end to end, which had been unverified since they were written.
+
+Getting there took a long detour, and the cause was mundane: the DMG that was
+shipped over was `bundle/macos/rw.tauri-punching-bag_0.1.0_x64.dmg`, an Intel
+scratch image from **March 2023**. It predates `NSMicrophoneUsageDescription`
+entirely, so it behaved exactly like the original bug -- silence, no prompt, no
+Privacy & Security entry -- while every diagnosis was aimed at the current
+build's Gatekeeper, TCC and sample-rate behaviour. `codesign -dvvv` names the
+architecture and the `Info.plist` entry count in one line and would have caught
+it immediately; see **Installing on a second Mac**.
+
+What that detour does and does not establish:
+
+- **Established.** The install recipe (`ditto`, strip quarantine, Open Anyway,
+  possibly twice) works on an unmanaged Mac. `codesign -vvv --deep --strict`
+  reports the shipped bundle valid on another machine, so the DMG transports the
+  signature intact. A self-signed code-signing certificate is a usable free
+  alternative to ad-hoc.
+- **Not established.** Whether ad-hoc *plus* the hardened runtime is what
+  produced `taskgated invalid signature` / `Termination Reason: CODESIGNING 1`
+  -- every one of those crashes was the 2023 x86_64 binary, and the current
+  build launched without needing the runtime flag dropped. Also not established:
+  the sample-rate mismatch (see Known issues), for the same reason.
+- On a **managed work Mac** the app could not be launched at all. An MDM profile
+  or EDR agent enforcing notarization is the likely reason; Homebrew is
+  unaffected because CLI binaries do not go through LaunchServices. Not worth
+  working around -- a notarized Developer ID build is the answer, if IT's policy
+  is the standard one rather than an allowlist.
 
 ## Discussed but not built
 

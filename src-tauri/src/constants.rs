@@ -12,6 +12,27 @@ pub const SAMPLE_FORMAT: SampleFormat = SampleFormat::F32;
 // samples it normally holds, so this never fires in normal running.
 pub const MAX_INPUT_BACKLOG: usize = 11_025;
 
+/// Frames of *display* backlog the callback will hold before it stops pushing.
+/// Only reachable if the frontend stops draining -- a wedged UI shouldn't be
+/// able to grow the buffer without bound, and with it the capacity the next
+/// drain reserves. One second, drained in a single poll once the UI recovers.
+pub const MAX_VISUAL_BACKLOG: usize = 44_100;
+
+/// What a drain leaves behind for the callback to fill. The callback holds the
+/// buffer's lock for its whole run, so a drain always gets at least one
+/// callback's worth (2048 frames); twice that is the headroom that keeps the
+/// audio thread from ever having to grow the vector itself.
+pub const VISUAL_RESERVE_FRAMES: usize = 4096;
+
+/// The same for the analysis stream, in hops. A hop is 64 frames at the
+/// shortest window, so one callback is at most 32 of them; this is generous
+/// without reserving a frame-sized vector for a hop-sized stream.
+pub const ANALYSIS_RESERVE_HOPS: usize = 256;
+
+/// Onsets are sparse -- a handful a batch at most -- so this is a flat reserve
+/// rather than anything derived.
+pub const ONSET_RESERVE: usize = 64;
+
 // Every echo needs a whole loop of history behind it, so the buffer grows with
 // this. 16 echoes of 4 beats at 91bpm is ~30MB across four channels, which is
 // about as far as it's worth going.

@@ -607,5 +607,3 @@ fn fill_log_bin_edges(edges: &mut Vec<usize>, sample_rate: f64, window: usize) {
         last = bin;
     }
 }
-
-

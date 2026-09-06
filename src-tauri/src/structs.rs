@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     collections::VecDeque,
-    sync::atomic::AtomicBool,
+    sync::atomic::{AtomicBool, AtomicUsize},
     sync::{Arc, Mutex},
 };
 pub struct BeatResetState(pub Arc<AtomicBool>);
@@ -29,8 +29,31 @@ pub struct VisualSamples {
     pub values: Vec<f32>,
 }
 
+/// The lengths the last drain took, kept *outside* the mutex so `get_samples`
+/// can size the replacement vectors before it takes the lock. The point is that
+/// the audio callback never reaches for the allocator: `mem::take` leaves a
+/// vector with no capacity behind, and the callback would then grow it from
+/// zero every drain -- a cost that scales with how many channels the panes ask
+/// for, and that lands on the one thread that cannot afford to wait on a malloc
+/// the IPC thread happens to be holding.
+pub struct DrainSizes {
+    pub beats: AtomicUsize,
+    pub values: AtomicUsize,
+}
+
+impl Default for DrainSizes {
+    fn default() -> Self {
+        Self {
+            beats: AtomicUsize::new(0),
+            values: AtomicUsize::new(0),
+        }
+    }
+}
+
+#[derive(Default)]
 pub struct SampleOutputBuffer {
     pub buffer: Arc<Mutex<VisualSamples>>,
+    pub drained: Arc<DrainSizes>,
 }
 
 // The spectrogram stream. A second stream and a second command rather than
@@ -78,8 +101,11 @@ pub struct Onset {
     pub strength: f32,
 }
 
+#[derive(Default)]
 pub struct AnalysisOutputBuffer {
     pub buffer: Arc<Mutex<AnalysisFrames>>,
+    /// `beats` and `mags`; `flux` follows the hop count and `onsets` are sparse.
+    pub drained: Arc<DrainSizes>,
 }
 
 /// How many input channels the capture device actually gave us.
