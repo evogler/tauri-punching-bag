@@ -337,6 +337,16 @@ fn main() -> Result<(), coreaudio::Error> {
         // Positive is *earlier*, i.e. further into the file, matching a drum
         // voice's offset.
         let file_offset_frames = config.file_offset_ms / 1000.0 * sample_rate();
+        // The segment to cycle over, in the file's own beats. Off -- or asked
+        // for backwards, or with no length in beats to measure against -- it is
+        // the whole file, which is the same arithmetic with different numbers.
+        let repeat_len = config.file_repeat_end - config.file_repeat_start;
+        let (file_from, file_cycle) =
+            if config.file_repeat_on && repeat_len > 0.0 && repeat_len.is_finite() {
+                (config.file_repeat_start, repeat_len)
+            } else {
+                (0.0, config.file_beats)
+            };
         // Capped because a 16-input interface would otherwise cost 16 FFTs a
         // hop to look at one channel. Zero when analysis is off, which drops
         // the ring and stops any work happening at all.
@@ -577,9 +587,14 @@ fn main() -> Result<(), coreaudio::Error> {
                 let mut file_frame = [0.0 as S; 2];
                 if file_on {
                     let pos = if config.file_beats > 0.0 {
-                        let phase = (beat - config.file_shift).rem_euclid(config.file_beats)
-                            / config.file_beats;
-                        phase * file_frames as f64
+                        // Where in the segment we are, then where that is in the
+                        // file. The second wrap is what lets a segment cross the
+                        // file's end -- 14..18 of a 16-beat file is the last two
+                        // beats and then the first two, which is how you loop a
+                        // pickup.
+                        let phase = (beat - config.file_shift).rem_euclid(file_cycle);
+                        let file_beat = (file_from + phase).rem_euclid(config.file_beats);
+                        file_beat / config.file_beats * file_frames as f64
                     } else {
                         // Length undeclared: free-run at the file's natural
                         // rate, locked to nothing. Advanced once per *frame*

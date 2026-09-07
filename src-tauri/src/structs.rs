@@ -187,6 +187,14 @@ pub struct Config {
     /// Musical rotation, in beats: which beat of the grid the file's start
     /// lands on. Tempo-independent, like a drum voice's `shift`.
     pub file_shift: f64,
+    /// A-B repeat: play `file_repeat_start`..`file_repeat_end` of the file,
+    /// in the file's own beats, over and over. Off, the segment is the whole
+    /// file, which is the same arithmetic with different numbers. Needs
+    /// `file_beats` -- a position in beats means nothing until the file's
+    /// length in beats has been declared.
+    pub file_repeat_on: bool,
+    pub file_repeat_start: f64,
+    pub file_repeat_end: f64,
     pub visual_monitor_on: bool,
     pub audio_monitor_on: bool,
     pub buffer_compensation: usize,

@@ -73,6 +73,8 @@ const RUST_EXPR_KEYS: RustExprKey[] = [
   "fileBeats",
   "fileOffsetMs",
   "fileShift",
+  "fileRepeatStart",
+  "fileRepeatEnd",
 ];
 
 // Keeps what was typed -- so the field still shows it, and still goes red --

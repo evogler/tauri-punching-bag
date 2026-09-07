@@ -141,7 +141,9 @@ export type RustExprKey =
   | "fileVolume"
   | "fileBeats"
   | "fileOffsetMs"
-  | "fileShift";
+  | "fileShift"
+  | "fileRepeatStart"
+  | "fileRepeatEnd";
 
 export const defaultRustConfig = {
 	audioInGain: numExpr(1.0),
@@ -213,6 +215,13 @@ export const defaultRustConfig = {
   // Musical rotation in beats: which beat the file's start lands on.
   // Tempo-independent, like a drum voice's shift.
   fileShift: numExpr(0),
+  // A-B repeat: cycle over `fileRepeatStart`..`fileRepeatEnd` of the file, in
+  // the file's own beats, instead of the whole of it. Needs `fileBeats` -- a
+  // position in beats means nothing until the length in beats is declared. A
+  // segment may cross the file's end (14..18 of 16 beats), which loops a pickup.
+  fileRepeatOn: false,
+  fileRepeatStart: numExpr(0),
+  fileRepeatEnd: numExpr(4),
   audioSubdivisions: {
     inputText: "2:1",
     val: {
@@ -746,6 +755,12 @@ const RUST_EXPR_FIELDS: {
   { key: "fileBeats", validate: (n) => Number.isFinite(n) && n >= 0 && n < 100000 },
   { key: "fileOffsetMs", validate: (n) => Number.isFinite(n) && Math.abs(n) < 100000 },
   { key: "fileShift", validate: (n) => Number.isFinite(n) && Math.abs(n) < 100000 },
+  // Either end may sit past the file's length -- the segment wraps -- so these
+  // are bounded rather than clamped to `fileBeats`. A backwards or zero-length
+  // segment falls back to the whole file in the callback rather than being
+  // refused here, since it's a state you pass through while typing the other end.
+  { key: "fileRepeatStart", validate: (n) => Number.isFinite(n) && Math.abs(n) < 100000 },
+  { key: "fileRepeatEnd", validate: (n) => Number.isFinite(n) && Math.abs(n) < 100000 },
   { key: "audioInGain", validate: (n) => n >= 0 },
   { key: "bufferCompensation", validate: (n) => n >= 0 },
   { key: "analysisBandLow", validate: inBand },

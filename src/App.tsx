@@ -93,6 +93,19 @@ const fileDescription = (info: FileInfo, bpm: number) => {
   return parts.join(" · ");
 };
 
+// Says what the segment will actually do, including the two ways it quietly
+// won't: a length in beats is what makes a position in beats mean anything, and
+// a backwards segment falls back to the whole file rather than being refused
+// while you're still typing the other end.
+const repeatDescription = (a: number, b: number, fileBeats: number) => {
+  if (!(fileBeats > 0)) return "⚠ needs `file beats` — playing the whole file";
+  if (!(b > a)) return "⚠ b must be past a — playing the whole file";
+  const wraps = a < 0 || b > fileBeats;
+  return `${b - a} beats of the file, repeating every ${b - a}${
+    wraps ? ", wrapping past its end" : ""
+  }`;
+};
+
 // What the sweep paints over old samples with. The whole-cycle refresh clears to
 // the same thing, so both modes sit on the same background.
 const WAVEFORM_BACKGROUND = "#222222";
@@ -1684,6 +1697,31 @@ const App = () => {
               set={set}
               get={get}
             />
+            <Divider label="a–b repeat" />
+            <Input label="repeat a–b" _key="fileRepeatOn" set={set} get={get} />
+            <Input
+              label="a (beats)"
+              _key="fileRepeatStart"
+              params={params}
+              set={set}
+              get={get}
+            />
+            <Input
+              label="b (beats)"
+              _key="fileRepeatEnd"
+              params={params}
+              set={set}
+              get={get}
+            />
+            {get("fileRepeatOn") && (
+              <div style={{ opacity: 0.8, fontSize: "0.9em" }}>
+                {repeatDescription(
+                  exprNumber(get("fileRepeatStart")),
+                  exprNumber(get("fileRepeatEnd")),
+                  exprNumber(get("fileBeats"))
+                )}
+              </div>
+            )}
           </Section>
         </TabPanel>
 

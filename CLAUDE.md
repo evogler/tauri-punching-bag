@@ -909,6 +909,24 @@ against your own playing like any other channel.
   was the only thing that ever aligned the two clocks. Now the file is locked to
   the beat by construction, so restarting the clock to line a file up is neither
   needed nor wanted mid-practice.
+- **A-B repeat is the same formula with a different cycle.** `fileRepeatOn`
+  plus `fileRepeatStart`/`fileRepeatEnd`, in the *file's* beats, cycles over
+  that segment instead of the whole file; off, the segment is `0..fileBeats`,
+  which is the pre-existing arithmetic exactly (checked position-for-position).
+  The segment repeats on **its own length**, so a 3-beat A-B against a 4-beat
+  grid deliberately walks around the bar rather than resetting -- the same
+  choice drum `gains` and `rowColorPattern` make.
+- **The segment may cross the file's end.** There are two wraps: the phase into
+  the segment, then the resulting file beat into the file. So `14..18` of a
+  16-beat file is the last two beats followed by the first two, which is how you
+  loop a pickup. Nothing can index outside the buffer -- checked by sweeping
+  50 beats either side of zero for segments that are negative, wrapping, tiny
+  and entirely past the end.
+- **A backwards or zero-length segment falls back to the whole file** rather
+  than being refused, because it's a state you pass through while typing the
+  other end. Same for A-B with no `fileBeats`: a position in beats means
+  nothing until a length in beats has been declared, and the panel says so
+  rather than silently doing nothing.
 - **`filePath` lives in the js config** so a session comes back with its file
   loaded -- Rust holds decoded samples and not the path, so the frontend pushes
   it back through `set_mp3_buffer` once on mount. `set_mp3_buffer` returns a
