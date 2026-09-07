@@ -7,6 +7,7 @@ mod analysis;
 mod commands;
 mod constants;
 mod calibration;
+mod filter;
 mod get_loop_buffer_size;
 mod prefs;
 mod io_channels;
@@ -27,6 +28,7 @@ use crate::commands::{
 };
 use crate::calibration::Calibration;
 use crate::constants::{default_config, max_input_backlog, max_visual_backlog, sample_rate};
+use crate::filter::HighPass;
 use crate::get_loop_buffer_size::{get_loop_buffer_size, get_loop_spacing, loop_echo_count};
 use crate::io_channels::{
     get_input_output_channels, make_buffers, start_input_audio_unit, watch_device_changes,
@@ -150,8 +152,20 @@ fn main() -> Result<(), coreaudio::Error> {
     let buffers = make_buffers(input_channels);
     let consumers = buffers.consumers.clone();
     // Reused every frame so the audio callback never allocates.
+    // Three views of the same instant: what the device gave us, what the
+    // picture is drawn from, and what is sounded. They differ only when the
+    // high pass is on -- see the filter module.
+    let mut input_raw = vec![0f32; input_channels];
     let mut input_frame = vec![0f32; input_channels];
+    let mut input_audio = vec![0f32; input_channels];
     let mut loop_visual = vec![0f32; input_channels];
+    // One filter for the live signal and one for the looper's summed echoes.
+    // Sized here rather than per callback because a device change needs a
+    // relaunch anyway, so the channel count cannot move under them.
+    let mut input_high_pass: Vec<HighPass> =
+        (0..input_channels).map(|_| HighPass::new()).collect();
+    let mut loop_high_pass: Vec<HighPass> =
+        (0..input_channels).map(|_| HighPass::new()).collect();
     // The drums and the click are generated here rather than captured, so they
     // have to be held back to land on the same visual beat as the input.
     let mut bus_delay = BusDelay::new();
@@ -333,6 +347,19 @@ fn main() -> Result<(), coreaudio::Error> {
         drum_last_beats.resize(config.drums.len(), isize::MIN);
         bus_delay.resize(config.buffer_compensation);
 
+        // Coefficients once per callback, never per frame -- and hoisted here
+        // for the same reason the pan gains are.
+        let high_pass_on = config.high_pass_on;
+        // Only meaningful with the filter on at all, so it is folded in once
+        // rather than checked twice in the frame loop.
+        let high_pass_audio = high_pass_on && config.high_pass_audio;
+        // The buffer holds whatever is *sounded*, so when the audio is left dry
+        // the picture's echoes have to be filtered on the way out instead.
+        let high_pass_echoes = high_pass_on && !config.high_pass_audio;
+        for hp in input_high_pass.iter_mut().chain(loop_high_pass.iter_mut()) {
+            hp.set_cutoff(config.high_pass_hz, sample_rate());
+        }
+
         // Resolved once per callback like everything else the frame loop needs.
         // The buffer is already interleaved stereo at the device rate, so a
         // frame is two values and no conversion happens down here.
@@ -423,18 +450,30 @@ fn main() -> Result<(), coreaudio::Error> {
                 // is what lets a channel sit anywhere in the stereo field.
                 let mut monitor_out: [S; 2] = [0.0, 0.0];
                 for ch in 0..input_frame.len() {
-                    let sample = buffers[ch].pop_front().unwrap_or(0.0) * config.audio_in_gain;
-                    input_frame[ch] = sample;
+                    let raw = buffers[ch].pop_front().unwrap_or(0.0) * config.audio_in_gain;
+                    // Run whether or not it is switched on, so the state can
+                    // never be stale: turning the filter on mid-phrase would
+                    // otherwise start it from silence and put a step into both
+                    // the picture and, if the audio is following, the sound.
+                    let filtered = input_high_pass[ch].process(raw);
+                    input_raw[ch] = raw;
+                    input_frame[ch] = if high_pass_on { filtered } else { raw };
+                    let audio = if high_pass_audio { filtered } else { raw };
+                    input_audio[ch] = audio;
                     let (left, right) = pan_gains[ch];
-                    monitor_out[0] += sample * left;
-                    monitor_out[1] += sample * right;
+                    monitor_out[0] += audio * left;
+                    monitor_out[1] += audio * right;
                 }
 
                 let visual_beat = beat - (config.buffer_compensation as f64) * beats_per_sample;
 
                 // Per frame, not per output channel -- this advances the ring.
                 if let Some(frames) = analysis_out.as_deref_mut() {
-                    if analyzer.push(&input_frame) {
+                    // Deliberately the raw signal: the flux has its own band
+                    // limits in `analysisBandLow`/`analysisBandHigh`, done
+                    // properly in the frequency domain, and filtering twice
+                    // would make its normalisation describe something else.
+                    if analyzer.push(&input_raw) {
                         // The hop that just completed describes the window
                         // centred half a window behind this frame, so its stamp
                         // is this frame's visual beat less that half window --
@@ -508,10 +547,22 @@ fn main() -> Result<(), coreaudio::Error> {
                             // A plain history -- every repeat comes from a tap,
                             // so nothing is mixed back in here.
                             loop_buffer.channels[ch][p] =
-                                input_frame.get(ch).copied().unwrap_or(0.0);
+                                input_audio.get(ch).copied().unwrap_or(0.0);
                         } else {
                             loop_visual[ch] = 0.0;
                             loop_buffer.channels[ch][p] = 0.0;
+                        }
+                        // Filtering the summed echoes is *exactly* equivalent to
+                        // having filtered them before they were stored: the
+                        // filter is linear and time-invariant and the taps are
+                        // plain delays, so H(sum g*x[n-d]) = sum g*(Hx)[n-d].
+                        // That equivalence is what lets the buffer hold the
+                        // sounded signal while the picture still shows the
+                        // filtered one. Run unconditionally, like the live
+                        // filter and for the same reason.
+                        let echoes = loop_high_pass[ch].process(loop_visual[ch]);
+                        if high_pass_echoes {
+                            loop_visual[ch] = echoes;
                         }
                     }
                     loop_buffer.pos = (p + 1) % loop_len;

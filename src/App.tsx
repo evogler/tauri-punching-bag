@@ -2112,6 +2112,36 @@ const App = () => {
           <Section label="gain">
             <Input label="input gain" _key="audioInGain" params={params} set={set} get={get} />
           </Section>
+          <Section label="high pass">
+            <Input
+              label="high pass"
+              _key="highPassOn"
+              set={set}
+              get={get}
+              title="Tilt the picture toward the high end, so note starts stand out of the fundamental"
+            />
+            <Input
+              label="cutoff (Hz)"
+              _key="highPassHz"
+              params={params}
+              set={set}
+              get={get}
+            />
+            <Input
+              label="filter the sound too"
+              _key="highPassAudio"
+              set={set}
+              get={get}
+              title="Also filter the monitor and what the looper records, so you can hear what the picture is showing"
+            />
+            <div style={{ color: "#aaa", fontSize: "0.8em" }}>
+              {!get("highPassOn")
+                ? "Off -- the picture is drawn from the input as it arrives."
+                : get("highPassAudio")
+                ? "12 dB/octave, on the picture and on the sound."
+                : "12 dB/octave, on the picture only. The looper still records dry."}
+            </div>
+          </Section>
           <Section label="looping">
             <Input label="looping (⌘L)" _key="loopingOn" set={set} get={get} />
             <Input label="beatsToLoop" _key="beatsToLoop" params={params} set={set} get={get} />

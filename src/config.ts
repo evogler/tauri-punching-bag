@@ -159,6 +159,7 @@ export type RustExprKey =
   | "clickVolume"
   | "clickShift"
   | "audioInGain"
+  | "highPassHz"
   | "bufferCompensation"
   | "analysisBandLow"
   | "analysisBandHigh"
@@ -174,6 +175,15 @@ export type RustExprKey =
 
 export const defaultRustConfig = {
 	audioInGain: numExpr(1.0),
+  // A high pass over the input, for the picture rather than the sound: the
+  // waveform is drawn nearly raw at the zoom levels in use, so tilting it
+  // toward the high end shows note starts instead of cycles of the
+  // fundamental. See src-tauri/src/filter.rs for why it is two poles.
+  highPassOn: false,
+  highPassHz: numExpr(800),
+  // Also filter what is heard -- the monitor and what the looper records -- so
+  // the filter can be auditioned rather than only looked at.
+  highPassAudio: false,
   audioMonitorOn: false,
   beatsToLoop: numExpr(4),
   // How many times a phrase comes back, one `beatsToLoop` apart each time.
@@ -884,6 +894,9 @@ const RUST_EXPR_FIELDS: {
   { key: "fileRepeatStart", validate: (n) => Number.isFinite(n) && Math.abs(n) < 100000 },
   { key: "fileRepeatEnd", validate: (n) => Number.isFinite(n) && Math.abs(n) < 100000 },
   { key: "audioInGain", validate: (n) => n >= 0 },
+  // Nothing above Nyquist describes a frequency, and both degenerate answers
+  // are safe in the callback anyway -- this is the honest place to say so.
+  { key: "highPassHz", validate: inBand },
   { key: "bufferCompensation", validate: (n) => n >= 0 },
   { key: "analysisBandLow", validate: inBand },
   { key: "analysisBandHigh", validate: inBand },

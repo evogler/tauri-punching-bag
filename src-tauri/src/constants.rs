@@ -81,6 +81,11 @@ pub fn default_config() -> Config {
         loop_echoes: 1.0,
         loop_echo_gain: 1.0,
         audio_in_gain: 1.0,
+        high_pass_on: false,
+        // Ten times a low guitar string, which is about where a second pole has
+        // put the fundamental far enough down to stop dominating the picture.
+        high_pass_hz: 800.0,
+        high_pass_audio: false,
         looping_on: false,
         click_on: true,
         click_toggle: false,

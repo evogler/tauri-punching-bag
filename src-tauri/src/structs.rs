@@ -177,6 +177,18 @@ pub struct Config {
     // 0 over this default and doing exactly that.
     pub loop_echo_gain: f64,
     pub audio_in_gain: f32,
+    /// High pass over the input, for the picture rather than the sound: at the
+    /// zoom levels in use the waveform is drawn nearly raw, so tilting it
+    /// toward the high end shows note starts instead of cycles of the
+    /// fundamental. See `filter.rs`.
+    pub high_pass_on: bool,
+    /// Cutoff in Hz. Both degenerate answers are safe -- see `set_cutoff`.
+    pub high_pass_hz: f64,
+    /// Also filter what is *sounded* -- the monitor and what the looper
+    /// records -- so the filter can be heard rather than only seen. Off, the
+    /// looper keeps recording the dry signal and the picture's echoes are
+    /// filtered on the way out instead.
+    pub high_pass_audio: bool,
     pub looping_on: bool,
     pub click_on: bool,
     pub click_toggle: bool,

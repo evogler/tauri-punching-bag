@@ -49,6 +49,7 @@ position, looper) derives from it.
 | `constants.rs` | `SAMPLE_RATE`, `MAX_INPUT_BACKLOG`, `default_config()`. |
 | `util.rs` | `beat_bisect` (which subdivision a beat falls in), `mod_add`. |
 | `analysis.rs` | The short-time FFT behind the spectrogram and the spectral flux (see below). |
+| `filter.rs` | The high pass over the input. Pure logic, no Core Audio. |
 | `calibration.rs` | The round-trip latency measurement -- probe, matched filter, gates. |
 | `stretch.rs` | WSOLA time stretching for the file player, and the off-thread render that applies it. |
 | `prefs.rs` | `audio-prefs.json`: device choice and per-pair latency. Not the config. |
@@ -518,6 +519,62 @@ The render callback in `main.rs` runs ~21×/sec with 2048 frames. Inside it:
   gap between representable values outgrows a screen pixel after ~20 minutes and
   the waveform stops being redrawn densely enough to erase the previous pass —
   ghost trails. Fixed once; don't reintroduce a cast.
+
+### The high pass
+
+`highPassOn` / `highPassHz` / `highPassAudio`, in the Rust config, applied per
+*input channel* in the callback. The waveform is drawn nearly raw at the zoom
+levels in use -- a few samples to a pixel column -- so the slow humps on screen
+are cycles of a note's fundamental rather than its envelope. Transients are
+broadband and a sustained note is not, so tilting the picture toward the high
+end shows where notes *start*. This is the first stage of onset detection, so
+it isn't throwaway work.
+
+- **Per input, not per view.** The sample stream is packed once per frame for
+  every pane, so a per-pane filter would need one filter state per channel per
+  pane and a stream per pane to carry the results. It is also a property of the
+  signal rather than of a ruling.
+- **Two poles, and the order is arithmetic rather than taste.** A note's
+  fundamental commonly sits 20-30 dB above the transient content of the same
+  note, so a single pole at ten times the fundamental buys ~20 dB and the humps
+  still win. The second pole buys another 20. Measured at an 800 Hz cutoff,
+  against the passband: -3.0 dB at 800, -17.6 at 200, -32.1 at 82 -- a guitar's
+  low E, well under its own attacks.
+- **`x - lowpass(x)`, not a biquad.** One state variable per pole, one
+  coefficient, and it cannot go unstable for any `k` in 0..1 -- which matters
+  because the cutoff is an expression the user is halfway through typing. Both
+  degenerate answers are safe *in the callback*, independent of any frontend
+  validation: a nonsense cutoff gives `k = 0` and passes the signal through, and
+  a cutoff past Nyquist gives `k = 1` and removes everything. Neither can
+  produce a NaN.
+- **`POLE_SCALE` is why the label means what it says.** Two identical one-poles
+  are each 3 dB down at their own corner, so putting both at the requested
+  frequency lands the pair 6 dB down there -- and `analysisBandLow`, two
+  controls away, is in honest Hz. Each pole is set to `f * sqrt(sqrt(2) - 1)`
+  instead, which puts the *pair* at -3 dB where the label says. Verified by
+  measuring the response at three cutoffs.
+- **The passband is flat but sits ~0.65 dB down**, because the complement of a
+  *discrete* one-pole lowpass is not quite the ideal one-pole highpass. A level
+  offset, not a tilt, so every figure above is quoted against it.
+- **Both filters run whether or not the switch is on.** Turning the filter on
+  mid-phrase would otherwise start it from silence and put a step into the
+  picture, and into the sound if the audio is following.
+- **The analyzer is deliberately left on the raw signal.** The flux already has
+  `analysisBandLow` / `analysisBandHigh`, done properly in the frequency domain;
+  filtering twice would make its normalisation describe something else.
+- **`highPassAudio` filters the monitor and what the looper records**, so the
+  filter can be heard rather than only looked at. Three frames per sample exist
+  for this -- `input_raw` (the analyzer), `input_frame` (the picture) and
+  `input_audio` (the sound) -- and they differ only while the filter is on.
+- **The looper is the awkward part, and LTI is what resolves it.** One buffer
+  serves both the echo *audio* and the echo *picture*, so with the audio left
+  dry the buffer holds an unfiltered signal that the picture still needs
+  filtered. A second filter over the summed echoes is *exactly* equivalent to
+  having filtered before storage -- the filter is linear and time-invariant and
+  the taps are plain delays, so `H(Σ g·x[n-d]) = Σ g·(Hx)[n-d]`. Simulation-
+  checked to within 1e-4 over three taps. The alternative, a second loop buffer,
+  costs up to 30 MB; storing the filtered signal instead would change what the
+  looper sounds like without being asked.
 
 ### Input capture
 
@@ -1713,6 +1770,16 @@ had never read it), every parameter now showing what it resolves to rather than
 only the randoms, `range` taking an optional step, and `yarn tauri` going
 through `scripts/tauri.mjs` so a successful build sweeps stale disk images.
 
+The **high pass** (see its own section) is new and unheard and unseen. Checked
+by temp test in Rust (run, then deleted): the passband is flat within 0.25 dB,
+the labelled cutoff really is the 3 dB point at 200/800/3000 Hz, the asymptotic
+slope is 12 dB/octave, DC is gone entirely, a nonsense cutoff passes the signal
+rather than silencing it and produces no NaN, a cutoff past Nyquist removes
+everything without blowing up, and filtering the summed echoes matches filtering
+before storage to within 1e-4. What no test can say is whether 800 Hz is a
+useful default, or whether the filtered picture is easier to play against than
+the raw one.
+
 ## Discussed but not built
 
 - **An iOS / iPadOS port.** Wanted eventually, iPad first. Doable, and the code
@@ -1851,16 +1918,12 @@ through `scripts/tauri.mjs` so a successful build sweeps stale disk images.
 - **Decimated sample transport.** Send per-block peaks from Rust instead of raw
   samples. The frontend already reduces to per-pixel peaks, so the picture is
   identical for ~8× less JSON. Worth doing before going past a few channels.
-- **Onset detection.** Deliberately deferred — hard for pitched instruments
-  (a new note on one string while another sustains needs frequency-domain work),
-  and the amplitude envelope is genuinely informative for sustain and volume.
+- **Onset detection for pitched instruments.** The picker in *Onsets* is built
+  and drawing; what it does not do is hear a new note on one string while
+  another sustains, which needs more frequency-domain work than a single flux
+  curve. The amplitude envelope stays worth drawing either way -- it is what
+  says something about sustain and volume.
 - Per-channel loop buffers exist now, but per-channel *input gain* does not.
-- **High-passing the display signal.** Transients are HF-rich and steady tone is
-  LF-dominant, so a high-pass before the `.abs()` in `main.rs` would lift attacks
-  out of the picture; at the zoom levels in use (~3.6 samples per pixel column at
-  `0.25x16` and 140bpm) the waveform is drawn nearly raw, so the slow humps are
-  cycles of the fundamental rather than note envelopes. Deferred with onset
-  detection, whose first stage this is -- not throwaway work when it happens.
 
 ## Conventions
 

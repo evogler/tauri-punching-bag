@@ -66,6 +66,7 @@ const RUST_EXPR_KEYS: RustExprKey[] = [
   "clickVolume",
   "clickShift",
   "audioInGain",
+  "highPassHz",
   "bufferCompensation",
   "analysisBandLow",
   "analysisBandHigh",
