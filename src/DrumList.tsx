@@ -1,7 +1,11 @@
-import { DrumVoice, drumGains, drumLabel, drumShift } from "./config";
+import {
+  DrumVoice,
+  drumGainsText,
+  drumLabel,
+  drumShift,
+} from "./config";
 import {
   Params,
-  formatNumberList,
   parseNumberList,
   resolveRhythmText,
 } from "./expression";
@@ -19,7 +23,7 @@ export const makeDrumVoice = (path: string): DrumVoice => ({
   volume: 1,
   offset: 0,
   shift: 0,
-  gains: [1],
+  gains: { inputText: "1", val: [1] },
   rhythm: {
     inputText: DEFAULT_RHYTHM,
     val: parser2.parse(DEFAULT_RHYTHM),
@@ -52,17 +56,18 @@ const DrumRow = ({
   });
   const [offsetProps, setOffsetText] = useFocusedValue(voice.offset);
   const [shiftProps, setShiftText] = useFocusedValue(drumShift(voice));
-  const [gainsProps, setGainsText] = useFocusedValue(drumGains(voice), {
-    toString: (val) => formatNumberList(val as number[]),
+  const [gainsProps, setGainsText] = useFocusedValue(drumGainsText(voice), {
+    toString: (x) => x as string,
   });
   const parser = voice.rhythm.type === "parser1" ? parser1 : parser2;
   // Bare parameter names, same as the grid rhythms -- the grammar does the
-  // arithmetic. `resolveRustConfig` re-parses this when a parameter changes;
-  // the offset, shift and gains beside it are plain numbers and are not in that
-  // walk, so they stay literal on purpose.
+  // arithmetic. `resolveRustConfig` re-parses this when a parameter changes, as
+  // it does the gains beside it; the offset and shift are plain numbers and are
+  // not in that walk, so they stay literal on purpose.
   const parseRhythm = (text: string) =>
     parser.parse(resolveRhythmText(text, params));
   const rhythmInvalid = !accepts(() => parseRhythm(rhythmProps.value));
+  const gainsInvalid = !accepts(() => parseNumberList(gainsProps.value, params));
   const failed = status === "error";
 
   return (
@@ -111,13 +116,17 @@ const DrumRow = ({
           const text = e.target.value;
           setGainsText(text);
           // Same contract as the rhythm field: half-typed text just doesn't
-          // commit, rather than clearing what's playing.
+          // commit, rather than clearing what's playing. The text is kept
+          // alongside the values so a parameter change can re-resolve it.
           try {
-            onChange({ ...voice, gains: parseNumberList(text) });
+            onChange({
+              ...voice,
+              gains: { inputText: text, val: parseNumberList(text, params) },
+            });
           } catch (e) {}
         }}
-        title="Gain per hit, cycled -- e.g. 1,0.5 or 1,0.6x3. Multiplies the volume slider"
-        style={{ flex: 1, minWidth: 0 }}
+        title="Gain per hit, cycled -- e.g. 1,0.5 or 1,0.6x3. Parameters and arithmetic allowed. Multiplies the volume slider"
+        style={{ flex: 1, minWidth: 0, ...invalidBorder(gainsInvalid) }}
       />
       <input
         {...shiftProps}

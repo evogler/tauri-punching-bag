@@ -2474,6 +2474,7 @@ const App = () => {
                       : "row color pattern"
                   }
                   _key="rowColorPattern"
+                  params={params}
                   {...viewIO}
                 />
                 {/* The halves are different channels, so one palette read
@@ -2484,6 +2485,7 @@ const App = () => {
                   <Input
                     label="row color pattern (down)"
                     _key="rowColorPatternDown"
+                    params={params}
                     {...viewIO}
                   />
                 )}

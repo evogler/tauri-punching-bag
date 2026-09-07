@@ -134,11 +134,19 @@ const wrapNumber = (val: unknown, fallback: NumberExpr): NumberExpr => {
     : fallback;
 };
 
-const wrapList = (val: unknown, fallback: NumberListExpr): NumberListExpr => {
+// The fallback is widened because the row colour patterns are declared as
+// `NumberListExpr | number[]` -- the bare-array branch a pre-expression session
+// lands on -- so a *default* can arrive as either shape too.
+const wrapList = (
+  val: unknown,
+  fallback: NumberListExpr | number[]
+): NumberListExpr => {
   if (Array.isArray(val))
     return { inputText: formatNumberList(val as number[]), val };
-  return typeof val === "object" && val !== null && "val" in val
-    ? (val as NumberListExpr)
+  if (typeof val === "object" && val !== null && "val" in val)
+    return val as NumberListExpr;
+  return Array.isArray(fallback)
+    ? { inputText: formatNumberList(fallback), val: fallback }
     : fallback;
 };
 
@@ -158,6 +166,11 @@ const normalizeView = (
     ...merged,
     channels: Array.isArray(merged.channels) ? merged.channels : base.channels,
     beatsPerRow: wrapList(merged.beatsPerRow, base.beatsPerRow),
+    rowColorPattern: wrapList(merged.rowColorPattern, base.rowColorPattern),
+    rowColorPatternDown: wrapList(
+      merged.rowColorPatternDown,
+      base.rowColorPatternDown
+    ),
     marginLeft: wrapNumber(merged.marginLeft, base.marginLeft),
     marginRight: wrapNumber(merged.marginRight, base.marginRight),
     visualGain: wrapNumber(merged.visualGain, base.visualGain),

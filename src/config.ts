@@ -54,15 +54,39 @@ export type DrumVoice = {
   /// `volume`. Length is independent of the rhythm's, so a list that doesn't
   /// divide evenly drifts in and out of phase with it. Optional for the same
   /// reason as `shift` -- read it through drumGains.
-  gains?: number[];
+  ///
+  /// Expression-backed, unlike `offset` and `shift`: `resolveRustConfig` walks
+  /// it, so a parameter change re-resolves it rather than leaving `val` stale
+  /// in the one config nothing on this side re-reads. The bare-array branch is
+  /// what a session written before that looks like.
+  gains?: NumberListExpr | number[];
   rhythm: Rhythm;
 };
 
 export const drumShift = (voice: DrumVoice) =>
   typeof voice.shift === "number" ? voice.shift : 0;
 
-export const drumGains = (voice: DrumVoice) =>
-  voice.gains && voice.gains.length ? voice.gains : [1];
+export const drumGains = (voice: DrumVoice) => {
+  const vals = voice.gains ? exprList(voice.gains) : [];
+  return vals.length ? vals : [1];
+};
+
+// What the field shows: the text as typed where there is one, so `bar/n x n`
+// survives a render, and the formatted values otherwise.
+export const drumGainsText = (voice: DrumVoice): string =>
+  voice.gains && !Array.isArray(voice.gains)
+    ? voice.gains.inputText
+    : formatNumberList(drumGains(voice));
+
+// A gains list saved before it took expressions. Wrapped rather than renamed,
+// for the reason `normalizeView` wraps `beatsPerRow`: a rename would throw away
+// every saved drum part.
+export const normalizeGains = (
+  gains: NumberListExpr | number[]
+): NumberListExpr =>
+  Array.isArray(gains)
+    ? { inputText: formatNumberList(gains), val: gains }
+    : gains;
 
 export const BUILT_IN_DRUMS = ["ride"];
 
@@ -247,7 +271,7 @@ export const defaultRustConfig = {
       volume: 1,
       offset: 0,
       shift: 0,
-      gains: [1],
+      gains: { inputText: "1", val: [1] },
       rhythm: {
         inputText: "2:1",
         val: { notes: [{ time: 0 }, { time: 0.5 }], start: 0, end: 1 },
@@ -362,14 +386,16 @@ export type ViewConfig = {
   // pane did before this existed.
   rowColors: string[];
   // Which row takes which color, 1-based and cycled by row index, in the same
-  // "1, 2x3" syntax as beatsPerRow. Only consulted when `rowColors` has more
-  // than one entry; empty means every row takes the first color.
-  rowColorPattern: number[];
+  // "1, 2x3" syntax as beatsPerRow -- parameters and arithmetic included, since
+  // `resolveView` walks it. Only consulted when `rowColors` has more than one
+  // entry; empty means every row takes the first color. The bare-array branch
+  // is a session written before it took expressions.
+  rowColorPattern: NumberListExpr | number[];
   // The same, for the lower half of a split row. One palette, two patterns, so
   // the two channels in a split pane can be told apart while both still mark
   // the beat. Empty means the lower half reads `rowColorPattern` like the
   // upper one, which is how every pane behaved before this existed.
-  rowColorPatternDown: number[];
+  rowColorPatternDown: NumberListExpr | number[];
   // Draw the spectral flux over the waveform, one bar per pixel column, in
   // each visible input channel's own colour. It arrives on the analysis stream
   // rather than the sample stream, so it is a second pass over the pane -- see
@@ -408,10 +434,8 @@ export const rowColorFor = (
   if (!rowColors.length) return null;
   // An empty down pattern means the halves agree, which is what every pane did
   // before the lower half could differ.
-  const pattern =
-    half === "down" && rowColorPatternDown?.length
-      ? rowColorPatternDown
-      : rowColorPattern;
+  const down = exprList(rowColorPatternDown ?? []);
+  const pattern = half === "down" && down.length ? down : exprList(rowColorPattern ?? []);
   if (!pattern.length) return rowColors[0];
   const pick = Math.round(pattern[row % pattern.length]);
   // 1-based, and wrapped rather than clamped -- the same way drum `gains`
@@ -490,8 +514,8 @@ export const defaultViewConfig = (): ViewConfig => ({
   barColorMode: false,
   refreshAtCycleEnd: false,
   rowColors: [],
-  rowColorPattern: [],
-  rowColorPatternDown: [],
+  rowColorPattern: { inputText: "", val: [] },
+  rowColorPatternDown: { inputText: "", val: [] },
   showFlux: false,
   fluxGain: 0.3,
   showOnsets: false,
@@ -792,9 +816,24 @@ const resolveRhythm = (rhythm: Rhythm, params: Params): Rhythm => {
   }
 };
 
+// A list field that may still be a bare array, from a session written before it
+// took expressions. Wrapped rather than renamed, so saved palettes survive --
+// the same trade `normalizeView` makes for `beatsPerRow`.
+const asListExpr = (field: NumberListExpr | number[]): NumberListExpr =>
+  Array.isArray(field)
+    ? { inputText: formatNumberList(field), val: field }
+    : field;
+
 const resolveView = (view: ViewConfig, params: Params): ViewConfig => ({
   ...view,
   beatsPerRow: resolveList(view.beatsPerRow, params),
+  // In the walk, which is what lets them take expressions at all: the draw loop
+  // reads `val` directly and nothing re-parses the text on its own.
+  rowColorPattern: resolveList(asListExpr(view.rowColorPattern), params),
+  rowColorPatternDown: resolveList(
+    asListExpr(view.rowColorPatternDown),
+    params
+  ),
   marginLeft: resolveNumber(view.marginLeft, params),
   marginRight: resolveNumber(view.marginRight, params),
   visualGain: resolveNumber(view.visualGain, params),
@@ -863,6 +902,12 @@ export const resolveRustConfig = (
   out.drums = rust.drums.map((d) => ({
     ...d,
     rhythm: resolveRhythm(d.rhythm, params),
+    // Being in this walk is the prerequisite for taking an expression at all:
+    // nothing in the frontend reads a drum voice's gains, so without it a
+    // parameter change would leave the old numbers sounding indefinitely.
+    // `offset` and `shift` are still literals precisely because they aren't
+    // here -- add them before making them expression-backed, not after.
+    gains: d.gains ? resolveList(normalizeGains(d.gains), params) : d.gains,
   }));
   return out as RustConfig;
 };

@@ -283,11 +283,24 @@ keeping the last good value. Deliberately not a scripting language.
   `chooser` isn't mistaken for a roll. `choose` and `range` join `x`, `min`,
   `max`, `round` and the sound letters as reserved parameter names, and are
   skipped by `referencedNames` like the other functions.
-- **Drum `offset`, `shift` and `gains` are deliberately still literals.** They're
-  nested in the drums array and not in the re-resolution walk, so an expression
-  there would silently go stale on a parameter change. Add them to
-  `resolveRustConfig` first, then make them expression-backed -- not the other
-  way round.
+- **Drum `gains` takes expressions; `offset` and `shift` still don't.** The rule
+  is the same one as before -- a nested field may only take an expression once
+  it is in `resolveRustConfig`'s walk, or a parameter change leaves `val` stale
+  in the one config nothing on this side re-reads. `gains` was added to that
+  walk and then made expression-backed, in that order. `offset` and `shift`
+  aren't in it, so they stay literal: add them first, then change them.
+- **Gains went `number[]` -> `NumberListExpr | number[]`**, which is the
+  `beatsPerRow` shape change again and is handled the same way -- `normalizeGains`
+  wraps a bare array rather than renaming the key, so every saved drum part
+  survives. Unusually, the migration needs no entry in `migrateRust`: the
+  wrapping happens inside `resolveRustConfig`, which every path into the config
+  already runs (startup, `setParameters`, `loadPreset`), and `exprList` in
+  `drumGains` covers anything that slips past. `unwrapValues` was already
+  recursive for the nested rhythm, so Rust still receives a plain `Vec<f64>` and
+  is untouched.
+- `drumGains` is the values, `drumGainsText` is what the field shows -- the text
+  as typed where there is one, so `1, g x k` survives a render instead of being
+  reformatted into its current numbers.
 
 ## Rhythm syntax
 
@@ -981,6 +994,12 @@ what sits between the panes -- the frame rather than the signal.
 takes which, 1-based, in the same `parseNumberList` syntax as `beatsPerRow`.
 `rowColorFor` in `config.ts` resolves them, next to `gridAlpha` and `drumGains`.
 
+- **Both patterns are expression-backed**, so `1, 2x(n-1)` puts a beat marker
+  every `n` rows and follows a parameter change. They are in `resolveView`'s
+  walk, which is the prerequisite (see *Parameters and expressions*); the widened
+  `NumberListExpr | number[]` and `normalizeView`'s `wrapList` are how a saved
+  palette survives the shape change. `rowColorFor` reads both through
+  `exprList`, so a bare array that reaches it anyway still colours.
 - **The pattern is cycled by row index, not stretched over the rows.** Like drum
   `gains`, a pattern that doesn't divide the row count drifts rather than
   resetting. That's the point: `0.25x16` rows with `"1,2x3"` puts colour 1 on
@@ -1004,7 +1023,9 @@ takes which, 1-based, in the same `parseNumberList` syntax as `beatsPerRow`.
   colours and both still mark the beat. `rowColorFor` takes the half, and
   `"both"` (an unsplit row) reads the upper pattern.
 - Like `rowColorPattern`, it **cannot be typed back to empty** --
-  `parseNumberList` rejects an empty list. Setting it to the same text as the
+  `parseNumberList` rejects an empty list, which is also why an empty pattern
+  field shows a red border in a pane that has colours but no pattern yet. The
+  value is right (every row takes colour 1); only the border is misleading. Setting it to the same text as the
   upper pattern is the equivalent, and turning `splitChannels` off ignores it
   entirely.
 
@@ -1614,7 +1635,7 @@ rather than using all of it, and the static waveform with hand-drawn beat
 markers. The static waveform is v2 by decision -- a long file is the open
 question there, and per-pixel peaks of a whole one is the wrong first answer.
 
-### 2026-09-07: random parameters
+### 2026-09-07: random parameters, and expressions in drum gains
 
 `choose` / `range`, the per-row 🎲, reroll-all and ⌘R are new and **nobody has
 clicked any of it**. Covered by temp tests (run, then deleted): `choose` only
@@ -1630,6 +1651,24 @@ bundle rather than being eaten, whether a rerolled tempo or rhythm pushes to the
 audio thread as promptly as a typed one does, and whether the roll being sticky
 across a session restore is what you want in practice or whether you'd rather it
 rolled fresh at launch.
+
+Drum `gains` becoming expression-backed is unheard too. Checked by temp test
+(run, then deleted): a pre-expression bare array still reads and is wrapped on
+the way through the resolve walk, an expression re-resolves on every parameter
+change, a list parameter stands where a group would, a parameter going away
+keeps the last good gains *and* the typed text, absent gains stay absent and
+read as unity, an empty list can never be committed, and the rhythm beside it is
+untouched. What no test says is whether `1, g x k` with a rolled `g` is a
+musically useful thing to have or just a noisy one.
+
+`rowColorPattern` / `rowColorPatternDown` took expressions in the same pass and
+by the same two steps. Temp-tested (run, then deleted): a pre-expression bare
+array still colours and is wrapped by the walk, `1, 2x(n-1)` follows `n` in both
+directions, the down pattern resolves independently of the upper one, an empty
+down pattern still means the halves agree, an empty pattern still paints every
+row the first colour, no colours still falls back to the channel's, a vanished
+parameter keeps the last good pattern *and* the text, and an index past the
+palette still wraps.
 
 ## Discussed but not built
 
