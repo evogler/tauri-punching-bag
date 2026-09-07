@@ -250,10 +250,17 @@ keeping the last good value. Deliberately not a scripting language.
   explicitly, and `migrateRust` does the same for the Rust-side keys. Wrapped
   rather than renamed, so saved layouts and tempos survive.
 - **A parameter can be a roll**: `choose(1,2,3)` picks one of the values,
-  `range(1,3)` picks a number between them. They are functions in
+  `range(1,3)` picks a number between them, and `range(1,3,0.25)` picks one of
+  the multiples of the step -- a tempo in whole bpm, a shift in 16ths. They are functions in
   `expression.ts` like `min`/`max`/`round`, except that they take an `Rng`
   argument rather than reaching for `Math.random` -- which is what puts *when* a
   roll happens under the caller's control.
+- **A stepped `range` draws uniformly over the steps that fit**, rather than
+  rounding a continuous draw: rounding gives the two ends half the weight of
+  everything between them, which is visible in a set as small as `range(1,3,1)`.
+  A step that doesn't divide the span stops short rather than overshooting the
+  high end, and the result is put through `toPrecision(12)`, since a tempo of
+  `1.3000000000000003` reads as a bug wherever it is printed.
 - **A roll is sticky, and that is the whole design.** The random parameter's
   stored `value` **is** its value: `resolveParameters` does not evaluate the
   text at all unless asked to roll. Everything here is re-resolved on every

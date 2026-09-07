@@ -35,17 +35,29 @@ const FUNCTIONS: Record<string, (args: number[]) => number> = {
 export type Rng = () => number;
 
 // `choose(1,2,3)` picks one of the values; `range(1,3)` picks a number between
-// them. They take the rng as an argument so that *when* a roll happens is the
-// caller's decision -- a roll is sticky until something asks for another one,
-// and `resolveParameters` is where that is decided. Evaluating these on every
+// them, and `range(1,3,0.25)` picks one of the multiples of the step. They take
+// the rng as an argument so that *when* a roll happens is the caller's
+// decision -- a roll is sticky until something asks for another one, and
+// `resolveParameters` is where that is decided. Evaluating these on every
 // resolve would re-roll them on every keystroke instead.
 const RANDOM_FUNCTIONS: Record<string, (args: number[], rng: Rng) => number> = {
   choose: (args, rng) =>
     // Math.random() never returns 1, but a caller-supplied rng might.
     args[Math.min(args.length - 1, Math.floor(rng() * args.length))],
-  range: (args, rng) => {
-    if (args.length !== 2) throw new Error("range takes two arguments");
-    return args[0] + rng() * (args[1] - args[0]);
+  range: ([lo, hi, step, ...extra], rng) => {
+    if (hi === undefined || extra.length)
+      throw new Error("range takes two arguments, or three with a step");
+    if (step === undefined) return lo + rng() * (hi - lo);
+    if (!(step > 0)) throw new Error("range step must be positive");
+    // Uniform over the steps that *fit*, rather than rounding a continuous
+    // draw -- rounding gives the two ends half the weight of everything
+    // between them, which is visible in a list as short as `range(1,3,1)`.
+    const steps = Math.floor((hi - lo) / step);
+    if (!(steps >= 0)) throw new Error("range is backwards");
+    const k = Math.min(steps, Math.floor(rng() * (steps + 1)));
+    // `1 + 3*0.1` is 1.3000000000000003, and a gain or a tempo carrying that
+    // reads as a bug wherever it is printed.
+    return Number((lo + k * step).toPrecision(12));
   },
 };
 

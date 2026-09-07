@@ -101,7 +101,7 @@ const ParameterRow = ({
           // reported. `value` is left alone so the last good one survives.
           if (accepts(inputText)) onChange({ ...parameter, inputText });
         }}
-        title={`Value of ${parameter.name}. A number, a list like ".6,.4", an expression over the other parameters, or a roll: "choose(1,2,3)", "range(1,3)"`}
+        title={`Value of ${parameter.name}. A number, a list like ".6,.4", an expression over the other parameters, or a roll: "choose(1,2,3)", "range(1,3)", "range(1,3,0.25)"`}
         style={{
           width: "7em",
           ...invalidBorder(!accepts(valueProps.value)),
