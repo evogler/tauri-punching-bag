@@ -758,6 +758,67 @@ probe, why not the onset detector, and what each gate means.
   path rather than producing a plausible constant. It also retroactively
   confirms the 4330 default.
 
+### The practice cycle
+
+`sections: Section[]` plus `sectionsOn`, in the Rust config. A section is *how
+long, and what sounds*: `{ on, beats, click, drums[] }`. They run in order and
+then start again from the top. A count-off is a section, a groove is a section,
+a pause is a section with nothing on.
+
+- **It replaced `clickToggle`, which was two of them** -- sound for
+  `beatsToLoop`, silence for the next. Two mechanisms both gating the click and
+  the drums is the tangle this exists to avoid, so the key is retired and
+  `migrateRust` turns a session that had it on into the equivalent two sections.
+  Unrecognised keys are dropped, so the old key doesn't survive alongside.
+- **There is deliberately no repeat count.** A section says "for this many
+  beats, these sound", and the rhythms tile on their own cycles independently --
+  so running the groove four times is *indistinguishable* from making it four
+  times as long. Write `bar*16` and the repeat is visible in the text. The only
+  thing that would justify the field is a repeat that had to *do* something
+  different per pass, and the reroll happens at the cycle top instead.
+- **A section carries nothing else, and that is the line.** The moment it holds
+  its own tempo or its own grid this is a DAW. Everything else stays global and
+  is varied through the parameters, which is the surface that makes it
+  interesting in the first place.
+- **A count-off needs no rhythm or sound of its own** -- a section names which
+  *drum voices* sound, by index, the way a pane's `channels` does. So counting
+  off on 2 and 4 with a cowbell is an ordinary voice with its own rhythm. The
+  cost is that a count-off voice and a groove voice are two entries, which is
+  clearer anyway.
+- **At the wrap, time genuinely restarts**: `beat = 0`, the file position, the
+  analyzer. Nothing is learned from being at beat 7004, and resetting is what
+  puts the drums, the file and the display cursor back on one.
+- **Nothing recorded before a restart may play back** -- it was at the old
+  tempo, against a different bar. Clearing the loop buffer would be a
+  multi-megabyte memset on the audio thread, so `loop_written` counts frames
+  since the restart and a tap reading further back than that contributes
+  nothing. Same effect, O(1). The read distance is computed from the resolved
+  index rather than from `back`, because the audio taps are offset by
+  `buffer_compensation` and read a different distance than the visual ones.
+- **The reroll cannot happen in the callback**, because parameters live in the
+  frontend. The callback counts wraps into `VisualSamples::cycle`; the frontend
+  already polls that stream 100 times a second and rerolls when the number
+  moves. It rides on the sample stream rather than a Tauri event because an
+  event cannot be emitted from the render callback -- it allocates and locks.
+  - **So the new tempo lands a few milliseconds into the cycle.** The count-off's
+    *first* click sounds at the restart either way, and every interval after it
+    is at the new tempo -- and an interval is what carries a tempo. If it ever
+    reads as wrong, emitting one section early is the fix.
+  - The same latency means the first hit of a cycle can't use its offset
+    look-ahead: there is no time before beat 0 to fire it in, so that one lands
+    `offset_beats` late.
+- **`section_bounds` writes into a reused vector** and returns the cycle length,
+  once per callback next to the pan gains. A section with no usable length is
+  *skipped* rather than clamped -- it would otherwise be a boundary the beat can
+  never cross, and the cycle would stop advancing with nothing saying why.
+- `beats` is expression-backed and in `resolveRustConfig`'s walk, the
+  prerequisite any nested field needs before it can hold an expression.
+- **For ~`buffer_compensation` after each restart the visual stamp is negative.**
+  `getCanvasPositions` wraps it Euclidean, so those samples draw at the end of
+  the last row -- which is honest, they were captured before the restart. Expect
+  a brief smear at the pane's tail every cycle. Pre-existing behaviour of the
+  reset button, now hit every cycle instead of on a press.
+
 ### Looper
 
 One buffer **per input channel**, sharing a position, advancing once per frame.
@@ -1232,15 +1293,14 @@ than resetting each cycle. Empty means no modulation.
 transient lands on the beat. Seeking into the file would chop the front off a
 slow attack. `offset_beats = offset_ms / 1000 * bpm / 60`.
 
-**The `clickToggle` gate asks about the beat a hit *sounds* on, not the beat its
-trigger fires on.** Those are `offset_beats` apart by construction -- the offset
-is a look-ahead so the transient lands on the beat -- so testing at the trigger
-sounded the note at the top of the silent half and dropped the one at the top of
-the sounding half, exactly the wrong two. `toggle_silent(sounding_beat,
-beats_to_loop)` in `util.rs` is the one definition, used by the click (whose
-trigger instant *is* its sounding beat, being synthesised) and by each drum
-voice at `beat + offset_beats`. A `shift` needs no correction: it moves where
-the note sounds *and* when it triggers, together.
+**A voice is gated on the section a hit will *sound* in, not the one its trigger
+fires in.** Those are `offset_beats` apart by construction -- the offset is a
+look-ahead so the transient lands on the beat -- so testing at the trigger
+sounded the note at the top of a silent section and dropped the one at the top
+of a sounding section, exactly the wrong two. `section_at` takes the sounding
+beat and reduces it into the cycle, which is also what lets a look-ahead ask
+about a beat past the wrap. A `shift` needs no correction: it moves where the
+note sounds *and* when it triggers, together.
 
 `shift` and `gains` carry `#[serde(default)]` because `presets.ts` only merges top-level
 keys — a session saved before it existed has drum voices without the field. The
@@ -1769,6 +1829,24 @@ sticky across a session restore is what you want in practice or whether you'd
 rather it rolled fresh at launch, and whether `1, g x k` with a rolled `g` is a
 musically useful thing to have or just a noisy one.
 
+The **practice cycle** (see its own section) is new and unheard. Checked by temp
+test in Rust (run, then deleted): the bounds run and total correctly, a skipped
+or zero-length section is left out without stalling the cycle, the reused vector
+never regrows, every beat belongs to exactly one section, a sounding beat past
+the wrap or before zero reduces into the cycle, an empty cycle answers nothing
+rather than panicking, and -- replaying the callback's own gating over two full
+cycles -- the click covers exactly the count-off, the drums cover exactly the
+groove and never bleed into the count-off or the pause, and the groove's own
+downbeat is not lost to the offset look-ahead. On the frontend (also deleted): a
+section length re-resolves on a parameter change and keeps its last good value
+and text when it stops evaluating, a zero or negative length is refused, and a
+session that had `clickToggle` on comes back as the equivalent two sections
+while one that had it off gains none.
+
+What no test can say: whether the reroll landing a few milliseconds into the
+cycle is audible at the top of a count-off, and whether the whole thing is
+actually a good way to practise.
+
 Drum `gains` became expression-backed in the same pass. Checked by temp test
 (run, then deleted): a pre-expression bare array still reads and is wrapped on
 the way through the resolve walk, an expression re-resolves on every parameter
@@ -1791,7 +1869,8 @@ had never read it), every parameter now showing what it resolves to rather than
 only the randoms, `range` taking an optional step, and `yarn tauri` going
 through `scripts/tauri.mjs` so a successful build sweeps stale disk images, the
 sweep eraser covering the pixel rows a loud bar antialiases into, and the
-`clickToggle` gate moving to the beat a drum hit sounds on.
+`clickToggle` gate moving to the beat a drum hit sounds on -- which was then
+generalised away entirely by the practice cycle, below.
 
 The **high pass** (see its own section) is new and unheard and unseen. Checked
 by temp test in Rust (run, then deleted): the passband is flat within 0.25 dB,

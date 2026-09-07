@@ -63,6 +63,38 @@ export type DrumVoice = {
   rhythm: Rhythm;
 };
 
+// One stretch of the practice cycle: how long it lasts and what sounds during
+// it. A count-off is a section, a groove is a section, a pause is a section
+// with nothing on -- and the retired `clickToggle` was two of them.
+//
+// Deliberately holds nothing else. The moment a section carries its own tempo
+// or its own grid this is a DAW; everything else stays global and is varied
+// through the parameters, which is the surface that actually makes it
+// interesting.
+export type Section = {
+  on: boolean;
+  // Expression-backed, and `resolveRustConfig` walks it -- so `bar*16` is four
+  // bars of groove, and a count-off can be `bar` whatever `bar` becomes.
+  beats: NumberExpr;
+  click: boolean;
+  // Which drum voices sound, by index, the same convention a pane's `channels`
+  // uses. So a count-off is an ordinary voice with its own rhythm, and nothing
+  // here needs a rhythm or a sound of its own.
+  drums: number[];
+};
+
+export const sectionBeats = (section: Section) =>
+  exprNumber(section.beats);
+
+// What one section costs, and what the whole cycle does. Both here rather than
+// in the panel because the section list and the cycle readout want the same
+// answer.
+export const cycleBeatsOf = (sections: Section[]) =>
+  sections.reduce(
+    (total, s) => (s.on && sectionBeats(s) > 0 ? total + sectionBeats(s) : total),
+    0
+  );
+
 export const drumShift = (voice: DrumVoice) =>
   typeof voice.shift === "number" ? voice.shift : 0;
 
@@ -233,7 +265,9 @@ export const defaultRustConfig = {
   // a channel with no entry sits centred.
   channelPans: [] as number[],
   clickOn: true,
-  clickToggle: false,
+  // The practice cycle. Off, everything sounds continuously.
+  sectionsOn: false,
+  sections: [] as Section[],
   clickVolume: numExpr(0.3),
   clickShift: numExpr(0),
   drumOn: true,
@@ -911,6 +945,19 @@ export const resolveRustConfig = (
     out[key] = resolveNumber(rust[key], params, validate);
   }
   out.audioSubdivisions = resolveRhythm(rust.audioSubdivisions, params);
+  // In the walk for the same reason drum gains are: nothing on this side reads
+  // a section's length, so without it a parameter change would leave the old
+  // number gating the audio thread indefinitely.
+  out.sections = rust.sections.map((s) => ({
+    ...s,
+    beats: resolveNumber(
+      Array.isArray(s.beats) || typeof s.beats === "number"
+        ? { inputText: String(s.beats), val: Number(s.beats) }
+        : s.beats,
+      params,
+      (n) => Number.isFinite(n) && n > 0 && n < 100000
+    ),
+  }));
   out.drums = rust.drums.map((d) => ({
     ...d,
     rhythm: resolveRhythm(d.rhythm, params),

@@ -61,6 +61,7 @@ import { SlidingDivision } from "./SlidingDivision";
 import { PresetBar } from "./PresetBar";
 import { Preset, makePreset, readSession, writeSession } from "./presets";
 import { GridList } from "./GridList";
+import { SectionList } from "./SectionList";
 import { RowColorList } from "./RowColorList";
 import { SpectrogramControls } from "./SpectrogramControls";
 import { Slider } from "./Slider";
@@ -527,6 +528,7 @@ const App = () => {
   const reroll = (pick?: (name: string) => boolean) =>
     setParameters(rollParameters(jsConfig.parameters, pick));
 
+
   const set = <T,>(k: string, v: T) => {
     if (isRustConfigKey(k)) {
       updateRustConfig({ [k]: v });
@@ -764,9 +766,28 @@ const App = () => {
   const viewIO = viewSetGet(activeView);
   // The visual stream as Rust sends it: one beat per frame, `channels` values
   // per beat, flattened so neither side allocates per frame.
-  type VisualSamples = { channels: number; beats: number[]; values: number[] };
-  const samples = useRef<VisualSamples>({ channels: 1, beats: [], values: [] });
+  type VisualSamples = {
+    cycle: number;
+    channels: number;
+    beats: number[];
+    values: number[];
+  };
+  const samples = useRef<VisualSamples>({
+    cycle: 0,
+    channels: 1,
+    beats: [],
+    values: [],
+  });
   const appendSamples = (batch: VisualSamples) => {
+    // The audio thread restarts the cycle itself -- it has to, or the count-off
+    // would begin a round trip late. What it cannot do is reroll, because the
+    // parameters live here, so it counts the wraps and this notices one. Read
+    // through a ref for the same reason the keyboard shortcuts are: the poll is
+    // registered once and `reroll` is a new closure every render.
+    if (batch.cycle !== lastCycle.current) {
+      lastCycle.current = batch.cycle;
+      onCycleWrap.current();
+    }
     const held = samples.current;
     // A change of channel count changes the row width, so anything collected
     // under the old one can't be read alongside the new.
@@ -819,6 +840,9 @@ const App = () => {
     for (let i = 0; i < batch.onsets.length; i++)
       held.onsets.push(batch.onsets[i]);
   };
+  const lastCycle = useRef(0);
+  const onCycleWrap = useRef(() => {});
+
   const getArray = async () => {
     appendSamples(await invoke("get_samples"));
     appendAnalysis(await invoke("get_analysis"));
@@ -830,7 +854,7 @@ const App = () => {
   const beatsPerSample = 91 / 60 / 44100;
   const mockGetArray = async () => {
     const channels = Math.max(1, get("visibleChannels").length);
-    const batch: VisualSamples = { channels, beats: [], values: [] };
+    const batch: VisualSamples = { cycle: 0, channels, beats: [], values: [] };
     const noise = () =>
       Math.abs(
         (Math.random() * 2 - 1) *
@@ -1715,6 +1739,7 @@ const App = () => {
     // Panes dropped by a smaller arrangement shouldn't keep a canvas alive.
     layers.current.length = viewCtxs.length;
     samples.current = {
+      cycle: samples.current.cycle,
       channels: samples.current.channels,
       beats: [],
       values: [],
@@ -1840,6 +1865,7 @@ const App = () => {
   // registered once and reaches the current config through a ref, for the same
   // reason the draw loop does -- `set` and `get` are new closures every render,
   // so depending on them would tear the listener down and rebuild it each time.
+  onCycleWrap.current = () => reroll();
   const toggleRef = useRef((k: "paused" | "loopingOn") => {});
   toggleRef.current = (k) => set(k, !get(k));
   const rerollRef = useRef(() => {});
@@ -1967,12 +1993,6 @@ const App = () => {
               set={set}
               get={get}
             />
-            <Input
-              label="toggle (click + drums)"
-              _key="clickToggle"
-              set={set}
-              get={get}
-            />
             <Input label="click volume" _key="clickVolume" params={params} set={set} get={get} />
             {/* Beats, not milliseconds: the click is synthesised in the
                 callback, so there is no file attack to align the way a drum
@@ -1994,6 +2014,21 @@ const App = () => {
               setDrums={(next) => set("drums", next)}
               onAdd={addDrumSample}
               status={sampleStatus}
+            />
+          </Section>
+          <Section label="practice cycle">
+            <Input
+              label="run the cycle"
+              _key="sectionsOn"
+              set={set}
+              get={get}
+              title="Play the sections in order, then start again -- rerolling, resetting the beat and clearing the looper"
+            />
+            <SectionList
+              sections={get("sections")}
+              setSections={(next) => set("sections", next)}
+              drums={rustConfig.drums}
+              params={params}
             />
           </Section>
           <Section label="file">

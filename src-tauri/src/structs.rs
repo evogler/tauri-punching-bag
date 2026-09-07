@@ -46,6 +46,12 @@ pub struct Mp3BufferState(pub Arc<Mutex<Mp3Buffer>>);
 // previous pass.
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct VisualSamples {
+    /// How many times the section cycle has wrapped. Rides here rather than in
+    /// a poll of its own because the frontend already reads this 100 times a
+    /// second, and because a Tauri event cannot be emitted from the render
+    /// callback -- it would allocate and take a lock on the one thread that
+    /// must not wait for either.
+    pub cycle: u64,
     /// How many values in `values` belong to each entry in `beats`.
     pub channels: usize,
     pub beats: Vec<f64>,
@@ -136,6 +142,25 @@ pub struct InputChannelCount(pub usize);
 
 // One recording per input channel, all sharing a position. Per channel rather
 // than a mono sum so a looped take plays back on the channel it was played on.
+/// One stretch of the practice cycle: how long it lasts and what sounds during
+/// it. A count-off is a section, a groove is a section, a pause is a section
+/// with nothing on -- and the old `click_toggle` was two of them.
+///
+/// Deliberately holds no settings of its own beyond that. The moment a section
+/// carries its own tempo or its own grid this is a DAW; everything else stays
+/// global and is varied through the parameters instead.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Section {
+    pub on: bool,
+    pub beats: f64,
+    pub click: bool,
+    /// Which drum voices sound, by index into `Config::drums` -- the same
+    /// convention a pane's `channels` uses. A count-off is therefore an
+    /// ordinary voice with its own rhythm, which is why nothing here needs a
+    /// rhythm or a sound of its own.
+    pub drums: Vec<usize>,
+}
+
 pub struct LoopBuffer {
     pub channels: Vec<Vec<f32>>,
     pub pos: usize,
@@ -191,7 +216,10 @@ pub struct Config {
     pub high_pass_audio: bool,
     pub looping_on: bool,
     pub click_on: bool,
-    pub click_toggle: bool,
+    /// Run the practice cycle. Off, everything sounds continuously, which is
+    /// what the app did before sections existed.
+    pub sections_on: bool,
+    pub sections: Vec<Section>,
     pub click_volume: f64,
     /// Musical placement of the click's rhythm, in beats -- the same thing a
     /// drum voice's `shift` is, and subtracted the same way. There is no

@@ -90,6 +90,7 @@ pub fn get_samples(state: State<SampleOutputBuffer>) -> Result<VisualSamples, St
         state.drained.beats.store(spare.0.len(), Ordering::Relaxed);
         state.drained.values.store(spare.1.len(), Ordering::Relaxed);
         return Ok(VisualSamples {
+            cycle: samples.cycle,
             channels: samples.channels,
             beats: spare.0,
             values: spare.1,

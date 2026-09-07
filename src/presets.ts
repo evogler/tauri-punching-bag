@@ -102,6 +102,34 @@ const migrateRust = (rust: Record<string, unknown>): Record<string, unknown> => 
       out.audioSubdivisions,
       defaultRustConfig.audioSubdivisions
     );
+  // `clickToggle` was two halves of a double-length loop: sound for
+  // `beatsToLoop`, silence for the next. That is two sections, so a session
+  // that had it on comes back doing the same thing rather than silently losing
+  // the practice setup. Retired rather than kept alongside: two mechanisms both
+  // gating the click and the drums is exactly the tangle sections exist to
+  // avoid.
+  if (out.clickToggle && !Array.isArray(out.sections)) {
+    const beats = wrapNumber(out.beatsToLoop, numExpr(4));
+    const drums = Array.isArray(out.drums)
+      ? (out.drums as unknown[]).map((_, i) => i)
+      : [];
+    out.sections = [
+      { on: true, beats, click: true, drums },
+      { on: true, beats, click: false, drums: [] },
+    ];
+    out.sectionsOn = true;
+  }
+  // A hand-written preset, or one saved before the length took expressions.
+  if (Array.isArray(out.sections))
+    out.sections = (out.sections as unknown[]).map((sec) =>
+      typeof sec === "object" && sec !== null
+        ? {
+            ...sec,
+            beats: wrapNumber((sec as { beats?: unknown }).beats, numExpr(4)),
+          }
+        : sec
+    );
+
   if (Array.isArray(out.drums))
     out.drums = (out.drums as unknown[]).map((d) =>
       typeof d === "object" && d !== null

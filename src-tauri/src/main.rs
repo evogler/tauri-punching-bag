@@ -40,7 +40,7 @@ use crate::structs::{
     SampleOutputBuffer, SoundingSample,
 };
 use crate::types::{Args, S};
-use crate::util::{beat_bisect, mod_add, toggle_silent};
+use crate::util::{beat_bisect, mod_add, section_at, section_bounds};
 use rand::Rng;
 use std::{
     collections::HashMap,
@@ -159,6 +159,15 @@ fn main() -> Result<(), coreaudio::Error> {
     let mut input_frame = vec![0f32; input_channels];
     let mut input_audio = vec![0f32; input_channels];
     let mut loop_visual = vec![0f32; input_channels];
+    // Reused across callbacks so the section walk never allocates; it only
+    // grows when a section is added.
+    let mut bounds: Vec<(f64, usize)> = Vec::new();
+    // How many frames have been written to the loop buffer since the cycle last
+    // restarted, saturating at its length. Clearing the buffer on a restart
+    // would be a multi-megabyte memset on the audio thread; suppressing the
+    // taps that would read across the restart is the same thing in O(1).
+    let mut loop_written: usize = 0;
+    let mut cycle_count: u64 = 0;
     // One filter for the live signal and one for the looper's summed echoes.
     // Sized here rather than per callback because a device change needs a
     // relaunch anyway, so the channel count cannot move under them.
@@ -347,6 +356,12 @@ fn main() -> Result<(), coreaudio::Error> {
         drum_last_beats.resize(config.drums.len(), isize::MIN);
         bus_delay.resize(config.buffer_compensation);
 
+        // The practice cycle: count-off, groove, pause, whatever is in the
+        // list. Resolved once per callback like everything else the frame loop
+        // needs.
+        let cycle_beats = section_bounds(&config.sections, &mut bounds);
+        let sections_on = config.sections_on && cycle_beats > 0.0;
+
         // Coefficients once per callback, never per frame -- and hoisted here
         // for the same reason the pan gains are.
         let high_pass_on = config.high_pass_on;
@@ -442,6 +457,40 @@ fn main() -> Result<(), coreaudio::Error> {
             }
 
             for i in 0..num_frames {
+                // The cycle wraps: start the whole thing again. Time really
+                // restarts rather than counting on -- there is nothing to be
+                // learned from being at beat 7004, and resetting is what puts
+                // the drums, the file and the display cursor back on one.
+                //
+                // The reroll cannot happen here: parameters live in the
+                // frontend, which is told by way of `cycle` on the sample
+                // stream. That lands a few milliseconds into the new cycle, so
+                // the count-off's *first* click sounds at the restart and every
+                // interval after it is at the new tempo -- which is the part
+                // that carries the tempo.
+                if sections_on && beat >= cycle_beats {
+                    beat = 0.0;
+                    mp3.pos = 0.0;
+                    // A window stitched across the jump is a spectral edge
+                    // nobody played, the same as at a manual reset.
+                    analyzer.reset();
+                    // Nothing recorded before the restart may be played back:
+                    // it was at the old tempo, against a different bar.
+                    loop_written = 0;
+                    loop_buffer.pos = 0;
+                    cycle_count += 1;
+                    state_vec.cycle = cycle_count;
+                }
+                let section = if sections_on {
+                    section_at(&bounds, beat, cycle_beats)
+                } else {
+                    None
+                };
+                // Nothing is gated when sections are off, which is what the app
+                // did before they existed.
+                let click_here = !sections_on
+                    || section.map_or(false, |i| config.sections[i].click);
+
                 // One sample per input channel, then a mono sum of them for
                 // everything downstream that still works on a single signal --
                 // the monitor and the looper. For one channel this is exactly
@@ -537,8 +586,19 @@ fn main() -> Result<(), coreaudio::Error> {
                                 // been resized yet: the taps alias briefly
                                 // rather than indexing past the end.
                                 let back = ((k + 1) * loop_spacing) % loop_len;
-                                visual_sum += buf[(p + loop_len - back) % loop_len] * gain;
-                                audio_sum += buf[(audio_from + loop_len - back) % loop_len] * gain;
+                                let v_at = (p + loop_len - back) % loop_len;
+                                let a_at = (audio_from + loop_len - back) % loop_len;
+                                // How far back each tap actually reads, which
+                                // the audio side's compensation offset makes
+                                // different from `back`. Anything older than the
+                                // restart is silence rather than a phrase played
+                                // at the previous tempo.
+                                if (p + loop_len - v_at) % loop_len <= loop_written {
+                                    visual_sum += buf[v_at] * gain;
+                                }
+                                if (p + loop_len - a_at) % loop_len <= loop_written {
+                                    audio_sum += buf[a_at] * gain;
+                                }
                             }
                             loop_visual[ch] = visual_sum;
                             let (left, right) = pan_gains[ch];
@@ -566,16 +626,8 @@ fn main() -> Result<(), coreaudio::Error> {
                         }
                     }
                     loop_buffer.pos = (p + 1) % loop_len;
+                    loop_written = (loop_written + 1).min(loop_len);
                 }
-
-                // Alternating halves of a double-length loop: the metronome
-                // plays for one loop and is silent for the next, so you play
-                // the second half against what you just recorded. The click is
-                // synthesised at the instant it sounds, so this beat is its
-                // sounding beat; a drum voice asks separately, because its
-                // offset means those are not the same moment.
-                let toggled_off =
-                    config.click_toggle && toggle_silent(beat, config.beats_to_loop);
 
                 // Triggers, once per frame rather than once per output channel.
                 // Subtracting the shift reads the rhythm from earlier in the
@@ -626,15 +678,16 @@ fn main() -> Result<(), coreaudio::Error> {
                             // is still recorded, so coming back doesn't fire a
                             // burst for everything missed.
                             //
-                            // Asked about the beat this hit will *sound* on
-                            // rather than about `beat`: the offset fires the
-                            // trigger `offset_beats` early, so testing the
-                            // trigger instant sounded the note at the top of the
-                            // silent half and dropped the one at the top of the
-                            // sounding half -- exactly the wrong two.
-                            let voice_silent = config.click_toggle
-                                && toggle_silent(beat + offset_beats, config.beats_to_loop);
-                            if !voice_silent {
+                            // Asked about the section this hit will *sound* in
+                            // rather than the one the trigger fires in: the
+                            // offset fires it `offset_beats` early, so testing
+                            // the trigger instant sounded the note at the top of
+                            // a silent section and dropped the one at the top of
+                            // a sounding section -- exactly the wrong two.
+                            let sounds_here = !sections_on
+                                || section_at(&bounds, beat + offset_beats, cycle_beats)
+                                    .map_or(false, |i| config.sections[i].drums.contains(&v));
+                            if sounds_here {
                                 sounding_samples.push(SoundingSample {
                                     sample: sample.clone(),
                                     pos: 0,
@@ -736,7 +789,7 @@ fn main() -> Result<(), coreaudio::Error> {
                     if click_sound_counter > 0 {
                         click_sound_counter -= 1;
                         if config.click_on {
-                            if !toggled_off {
+                            if click_here {
                                 let mut r = rng.gen::<f32>() * (config.click_volume as f32);
                                 if r > 1.0 {
                                     r = 1.0;
