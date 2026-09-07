@@ -948,6 +948,17 @@ per-pane, held in `views: ViewConfig[]`.
     on the pixel grid for the eraser to cover them; the vertical extent is the
     *signal*, and rounding it would drop a quiet passage to nothing rather than
     drawing it faintly.
+    - **So the eraser has to floor and ceil, not round.** A full-amplitude bar
+      antialiases into the pixel row at each end of its box, and the eraser
+      rounded that box instead of taking every pixel it touches -- leaving a
+      fringe at the top or bottom edge of a row that only a loud sound reached
+      far enough to expose. It bit 179 of 342 rows across a sweep of realistic
+      pane heights and row counts. `rowBox` is now the single definition of a
+      row's extent, read by the eraser, the waveform, the onset ticks and the
+      spectrogram column alike; the two had been computed separately and drifted.
+      Grid lines are the exception and stay rounded to the *full* row height --
+      they are painted onto the visible canvas rather than the layer, so the
+      eraser never sees them.
   - **`span` is how many columns the sweep just crossed, computed per copy on
     screen**, and normally 1. It is greater where the zoom puts consecutive
     samples more than a pixel apart, and those skipped columns have to be

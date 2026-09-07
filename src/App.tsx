@@ -1120,6 +1120,15 @@ const App = () => {
   // the previous pass showing through once the flush became one per column.
   // The erase and the channels share this geometry exactly, so what is drawn is
   // what gets cleared next time round.
+  // A row's drawn extent, in fractional surface pixels. The `-1` is the gap
+  // between rows. Everything that paints inside a row derives its geometry from
+  // here, and so does the eraser -- they were computed separately once, and
+  // drifted.
+  const rowBox = (v: ViewCtx, row: number) => ({
+    y: row * v.rowHeight,
+    height: v.rowHeight - 1,
+  });
+
   const eraseColumn = (
     ctx: CanvasRenderingContext2D,
     v: ViewCtx,
@@ -1127,9 +1136,14 @@ const App = () => {
     row: number,
     span: number
   ) => {
-    const top = Math.round(row * v.rowHeight);
-    // The row's last pixel is left alone, which is the gap between rows.
-    const bottom = Math.round((row + 1) * v.rowHeight - 1);
+    const { y, height } = rowBox(v, row);
+    // Every pixel row a bar can *touch*, not the ones it fills. The vertical
+    // extent is deliberately fractional -- rounding it would drop a quiet
+    // passage to nothing -- so a full-amplitude bar antialiases into the pixel
+    // row at each end. Rounding here instead of flooring and ceiling left those
+    // two fringes behind, and only a loud sound reaches far enough to show it.
+    const top = Math.floor(y);
+    const bottom = Math.ceil(y + height);
     drawOps.current++;
     ctx.globalAlpha = 1;
     ctx.fillStyle = background;
@@ -1150,8 +1164,7 @@ const App = () => {
     isMargin: boolean,
     half: "both" | "up" | "down"
   ) => {
-    const y = row * v.rowHeight;
-    const height = v.rowHeight - 1;
+    const { y, height } = rowBox(v, row);
     const val = Math.min(1, Math.max(value, 0));
     drawOps.current++;
     // Margin copies are repeats of another part of the loop, so they're dimmed
@@ -1340,8 +1353,7 @@ const App = () => {
     const index = v.channels.indexOf(mark.channel);
     const style = channelStyles[mark.channel];
     if (index < 0 || !style) return;
-    const y = row * v.rowHeight;
-    const height = v.rowHeight - 1;
+    const { y, height } = rowBox(v, row);
     const tick = Math.max(3, height * ONSET_TICK);
     // In split mode the tick sits on the edge its channel's waveform grows
     // from, so two channels' onsets stay told apart.
@@ -1494,8 +1506,7 @@ const App = () => {
     style: ChannelStyle,
     isMargin: boolean
   ) => {
-    const y = row * v.rowHeight;
-    const height = v.rowHeight - 1;
+    const { y, height } = rowBox(v, row);
     // The column is drawn backwards from `x`: the hops in it cover the span
     // ending at this beat, so anchoring them forward would put every one of
     // them a whole hop late.
