@@ -788,6 +788,40 @@ what sits between the panes -- the frame rather than the signal.
   grid's tracks, and each pane's backing store is measured from the track it
   lands in, so a wider gap gives every pane a genuinely narrower surface rather
   than the same surface squeezed. Nothing has to know the gap is there.
+- **`gridWidth` is in CSS pixels, not surface pixels**, and `drawGrids`
+  multiplies it by the pane's measured ratio. The hard-coded `lineWidth = 2`
+  was in surface pixels, so its weight moved with the surface-to-screen scale --
+  hiding the panel used to make grid lines 65% heavier, and a Retina pane drew
+  them at half the weight an external monitor did. A CSS width is the same line
+  everywhere. The default of 1 is exactly what the old constant came to on a 2x
+  display, so nothing changes until the slider is moved.
+  - **Grid lines are filled rects on whole pixels, not strokes.** A stroke at a
+    fractional `x` -- which is every one of them -- spreads its width over one
+    more column than it asked for, at partial coverage. That would only be soft
+    edges, except that sweep mode repaints the grids *every frame*, so alpha
+    compositing drives every column the stroke touches to full opacity within
+    about a second. The width on screen was therefore how many columns the
+    stroke overlapped: 1 device pixel and 2 came out as 2 columns and 3, which
+    is why the control looked like it did nothing. `fillRect` on rounded
+    coordinates with a whole-pixel width draws exactly the columns asked for.
+  - **The same repainting makes a grid's `alpha` nearly inert in sweep mode.**
+    It is honest for the fraction of a second after the sweep passes a line and
+    then saturates. Fixing it means painting the grids per column inside the
+    sweep, the way the spectrogram already does, rather than over the whole pane
+    every frame. Not done.
+  - **0.5 is the floor because that is one device pixel on a 2x display** --
+    the thinnest line the screen can draw, which is the end of the range worth
+    having. Below it a line is a fraction of a pixel and antialiases to a
+    smudge; a fainter grid is what each grid's own `alpha` is for.
+  - **The panel resolves the width against `paneSizes[0].scale`**, the ratio the
+    panes were actually measured at, rather than reading
+    `window.devicePixelRatio` again -- the readout should name the number being
+    drawn with, not a second opinion about it.
+  - The waveform stroke, the erase column and the onset ticks are **still in
+    surface pixels** and so still display-dependent. They are a coupled set --
+    the eraser must be at least as wide as what it erases -- and giving them CSS
+    widths would double their weight on a Retina display, which is a look to
+    choose deliberately rather than to inherit from this change.
 - **`ColorInput` is called by name, not dispatched on type.** `Input` picks its
   widget from the value's type, and `filePath` is a string too -- "every string
   is a colour" would be wrong the moment anything else took one. Same treatment

@@ -126,13 +126,14 @@ const stretchRatio = (info: FileInfo | null, fileBeats: number, bpm: number) => 
 const STRETCH_CLEAN_LOW = 0.75;
 const STRETCH_CLEAN_HIGH = 1.33;
 
-// A pane's backing store, in device pixels.
-type PaneSize = { width: number; height: number };
+// A pane's backing store, in device pixels, and the ratio it was measured at --
+// the one number that converts a width in CSS pixels into surface pixels.
+type PaneSize = { width: number; height: number; scale: number };
 
 // Only ever used by the render that *creates* a pane's canvas: the layout
 // effect measures the real box before the first paint. Not a layout constant --
 // nothing is laid out to these numbers.
-const UNMEASURED_PANE: PaneSize = { width: 300, height: 150 };
+const UNMEASURED_PANE: PaneSize = { width: 300, height: 150, scale: 1 };
 
 // The pane arrangements the panel offers, as [across, down].
 const ARRANGEMENTS: [number, number][] = [
@@ -530,6 +531,8 @@ const App = () => {
     layout: Layout;
     visualGain: number;
     rowHeight: number;
+    // `gridWidth` converted from CSS pixels into this pane's surface pixels.
+    gridLineWidth: number;
     width: number;
     height: number;
     state: ViewDrawState;
@@ -557,6 +560,11 @@ const App = () => {
   // What the sweep paints over old samples with. The whole-cycle refresh clears
   // to the same thing, so both modes sit on the same background.
   const background = get("waveformBackground");
+  const gridWidth = get("gridWidth");
+  // What the panel's readout resolves a CSS width against: the ratio the panes
+  // were measured at, not `window.devicePixelRatio` read again, so the number
+  // shown is the one actually being drawn with.
+  const paneScale = paneSizes[0]?.scale ?? 1;
   const paneCount = viewCols * viewRows;
 
   // The backing store is sized from the pane's own box, so one pixel of surface
@@ -589,13 +597,19 @@ const App = () => {
         next.push({
           width: Math.max(1, Math.round((box?.width ?? 0) * dpr)),
           height: Math.max(1, Math.round((box?.height ?? 0) * dpr)),
+          scale: dpr,
         });
       }
       // Setting the width attribute blanks a canvas, so an unchanged size must
       // not reach the DOM -- and an unconditional setState here would loop.
       setPaneSizes((prev) =>
         prev.length === next.length &&
-        prev.every((p, i) => p.width === next[i].width && p.height === next[i].height)
+        prev.every(
+          (p, i) =>
+            p.width === next[i].width &&
+            p.height === next[i].height &&
+            p.scale === next[i].scale
+        )
           ? prev
           : next
       );
@@ -646,7 +660,11 @@ const App = () => {
   const viewCtxs: ViewCtx[] = get("views").map((cfg, index) => {
     // Measured, not derived: the backing store is this pane's own box, so
     // nothing the draw code computes is stretched on its way to the screen.
-    const { width: cellWidth, height: cellHeight } = paneSizes[index] ?? UNMEASURED_PANE;
+    const {
+      width: cellWidth,
+      height: cellHeight,
+      scale,
+    } = paneSizes[index] ?? UNMEASURED_PANE;
     const beatsPerRow = viewRowBeats(cfg);
     const marginLeft = exprNumber(cfg.marginLeft);
     const marginRight = exprNumber(cfg.marginRight);
@@ -673,6 +691,7 @@ const App = () => {
       },
       visualGain: exprNumber(cfg.visualGain),
       rowHeight: cellHeight / beatsPerRow.length,
+      gridLineWidth: gridWidth * scale,
       width: cellWidth,
       height: cellHeight,
       state: viewStates.current[index],
@@ -1317,24 +1336,32 @@ const App = () => {
   const drawGrids = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
     const grids = v.cfg.grids;
     const { cycleBeats } = v.layout;
+    // A fraction of a pixel cannot be drawn crisply, and a crisp hairline is the
+    // whole point of the control, so the width lands on a whole device pixel.
+    const width = Math.max(1, Math.round(v.gridLineWidth));
     for (let i = grids.length - 1; i >= 0; i--) {
       const grid = grids[i];
       const { notes, end } = grid.subdivisions.val;
       // A pattern of zero (or negative) length would never advance the tiling.
       if (!(end > 0) || !notes.length) continue;
-      ctx.strokeStyle = grid.color;
+      ctx.fillStyle = grid.color;
       ctx.globalAlpha = gridAlpha(grid);
-      ctx.lineWidth = 2;
       for (let startBeat = 0; startBeat < cycleBeats; startBeat += end) {
         for (const note of notes) {
           const b = startBeat + note.time;
           if (b >= cycleBeats) break;
           for (const { x, row } of getCanvasPositions(v.layout, b)) {
-            const y = row * v.rowHeight;
-            ctx.beginPath();
-            ctx.moveTo(x, y);
-            ctx.lineTo(x, y + v.rowHeight);
-            ctx.stroke();
+            const top = Math.round(row * v.rowHeight);
+            const bottom = Math.round((row + 1) * v.rowHeight);
+            // Snapped to whole pixels, and filled rather than stroked. A stroke
+            // at a fractional x spreads its width over one more column than it
+            // asked for, at partial coverage -- and since the grids are
+            // repainted every frame, alpha compositing drives every column it
+            // touches to full opacity anyway. The line's width on screen was
+            // therefore *how many columns it overlapped*, so 1 device pixel and
+            // 2 came out as 2 columns and 3 rather than as 1 and 2, and the
+            // setting looked like it did nothing.
+            ctx.fillRect(Math.round(x - width / 2), top, width, bottom - top);
           }
         }
       }
@@ -1958,6 +1985,29 @@ const App = () => {
               onChange={(c) => set("waveformBackground", c)}
               title="What a pane is erased to, in both draw modes"
             />
+            {/* CSS pixels rather than surface pixels, so a line is the same
+                weight on the laptop screen and an external monitor. The note
+                below resolves it against the ratio the panes were actually
+                measured at, because "one device pixel" is the interesting end
+                of this slider and it isn't a round number in CSS pixels. */}
+            <Slider
+              label="grid width"
+              value={gridWidth}
+              min={0.5}
+              max={4}
+              step={0.25}
+              onChange={(n) => set("gridWidth", n)}
+              title="Grid line thickness in CSS pixels, scaled by the display's pixel ratio"
+            />
+            <div style={{ color: "#aaa", fontSize: "0.8em" }}>
+              {Math.max(1, Math.round(gridWidth * paneScale)) === 1
+                ? "1 device pixel -- as thin as this display draws"
+                : `${Math.max(
+                    1,
+                    Math.round(gridWidth * paneScale)
+                  )} device pixels`}
+            </div>
+            <Divider label="between panes" />
             <Slider
               label="pane gap"
               value={get("paneGap")}

@@ -537,6 +537,12 @@ export const defaultJsConfig = {
   // What shows through that gutter. Invisible at a 1x1 arrangement, and at a
   // gap of 0, because there is no gutter to see.
   paneGapColor: "#333333",
+  // Grid line thickness, in **CSS** pixels, so a line is the same weight on a
+  // Retina display and an external monitor -- the draw code multiplies by the
+  // pane's device pixel ratio. 0.5 is therefore one device pixel on a 2x
+  // display, the thinnest line that screen can draw; 1 is what the hard-coded
+  // `lineWidth = 2` came to there, so the default changes nothing.
+  gridWidth: 1,
 };
 
 export type RustConfig = typeof defaultRustConfig;
