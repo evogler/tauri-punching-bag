@@ -11,6 +11,7 @@ mod get_loop_buffer_size;
 mod prefs;
 mod io_channels;
 mod read_audio_file;
+mod stretch;
 mod structs;
 mod types;
 mod util;
@@ -99,9 +100,13 @@ fn main() -> Result<(), coreaudio::Error> {
     // captured here: this path is one person's machine, and a startup flag meant
     // that anywhere it didn't exist, picking a file loaded the samples and then
     // never played them.
+    let natural = Arc::new(data.unwrap_or_default());
     let mp3_arc = Arc::new(Mutex::new(Mp3Buffer {
-        buffer: data.unwrap_or_default(),
+        buffer: (*natural).clone(),
         pos: 0.0,
+        natural,
+        generation: 0,
+        ratio: 1.0,
     }));
 
     let mp3 = mp3_arc.clone();

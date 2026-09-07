@@ -219,6 +219,10 @@ export const defaultRustConfig = {
   // the file's own beats, instead of the whole of it. Needs `fileBeats` -- a
   // position in beats means nothing until the length in beats is declared. A
   // segment may cross the file's end (14..18 of 16 beats), which loops a pickup.
+  // Render the file to fit `fileBeats` at the current tempo without moving its
+  // pitch. Off by default: unstretched is exact, and a varispeed is sometimes
+  // what you want. Needs `fileBeats` -- there is no ratio without a length.
+  fileStretch: false,
   fileRepeatOn: false,
   fileRepeatStart: numExpr(0),
   fileRepeatEnd: numExpr(4),

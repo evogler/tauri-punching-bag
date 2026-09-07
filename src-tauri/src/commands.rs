@@ -5,6 +5,7 @@ use crate::get_loop_buffer_size::get_loop_buffer_size;
 use crate::io_channels::{list_devices, ActiveDevices, AudioDeviceInfo};
 use crate::prefs::{load as load_prefs, save as save_prefs, AudioPrefs};
 use crate::read_audio_file::{decode_audio_file, get_samples_from_filename, to_device_stereo};
+use crate::stretch::{desired_ratio, request as request_stretch};
 use crate::structs::{
     AnalysisFrames, AnalysisOutputBuffer, BeatResetState, CalibrationState, Config, ConfigState,
     DrumSamples, InputChannelCount, LogState, LoopBufferState, Mp3BufferState, Payload,
@@ -36,13 +37,29 @@ pub fn set_mp3_buffer(app_handle: tauri::AppHandle, filename: String) -> Result<
     let frames = samples.len() / 2;
 
     let mp3_buffer_state: tauri::State<Mp3BufferState> = app_handle.state();
-    let mut mp3_buffer = mp3_buffer_state.0.lock().unwrap();
-    mp3_buffer.buffer = samples;
+    {
+        let mut mp3_buffer = mp3_buffer_state.0.lock().unwrap();
+        mp3_buffer.natural = Arc::new(samples);
+        mp3_buffer.buffer = (*mp3_buffer.natural).clone();
+        // A new file means the ratio the old one was rendered at says nothing.
+        mp3_buffer.ratio = 1.0;
+        mp3_buffer.generation += 1;
     // Only matters when no length in beats has been declared; above zero the
     // position is derived from the beat and this is ignored. Loading no longer
     // resets the beat: the file is phase-locked to the clock now, so restarting
     // the clock to line a file up is neither needed nor wanted mid-practice.
-    mp3_buffer.pos = 0.0;
+        mp3_buffer.pos = 0.0;
+    }
+
+    // The tempo hasn't changed but the file has, so whatever stretch the config
+    // implies has to be rendered for the new one.
+    {
+        let config_state: tauri::State<ConfigState> = app_handle.state();
+        let config = config_state.0.lock().unwrap();
+        let ratio = desired_ratio(&config, frames);
+        drop(config);
+        request_stretch(&app_handle, ratio);
+    }
 
     Ok(FileInfo {
         frames,
@@ -300,4 +317,18 @@ pub fn set_config(app_handle: tauri::AppHandle, new_config: Config) {
         loop_buffer.pos = 0;
         println!("new_buffer_size: {}", new_buffer_size);
     }
+
+    // Tempo, length in beats and the switch itself all move the stretch ratio,
+    // so this is checked on every push -- `request_stretch` returns immediately
+    // when the ratio hasn't actually moved, which is nearly always.
+    let natural_frames = {
+        let mp3_state: tauri::State<Mp3BufferState> = app_handle.state();
+        let mp3 = mp3_state.0.lock().unwrap();
+        mp3.natural.len() / 2
+    };
+    let ratio = desired_ratio(&config, natural_frames);
+    // Dropped before asking: the render callback takes the config lock and then
+    // the file lock, so this side must never hold the two in the other order.
+    drop(config);
+    request_stretch(&app_handle, ratio);
 }

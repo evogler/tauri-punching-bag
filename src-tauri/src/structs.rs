@@ -15,6 +15,18 @@ pub struct Mp3Buffer {
     /// Above zero the position is derived from `beat` instead and this is
     /// ignored; f64 so the two paths can share one interpolating read.
     pub pos: f64,
+    /// The file as loaded, before any time stretching. Every stretch is
+    /// rendered from *this*, never from the last stretch -- restretching a
+    /// stretch compounds the artifacts, and the ratio changes every time the
+    /// tempo does.
+    pub natural: Arc<Vec<f32>>,
+    /// Bumped on every stretch request. A render that finishes holding a stale
+    /// one is thrown away rather than applied over a newer answer -- which is
+    /// what makes it safe to fire one of these off on every keystroke.
+    pub generation: u64,
+    /// The ratio `buffer` is currently rendered at, so an unchanged request
+    /// costs nothing.
+    pub ratio: f64,
 }
 
 impl Mp3Buffer {
@@ -187,6 +199,11 @@ pub struct Config {
     /// Musical rotation, in beats: which beat of the grid the file's start
     /// lands on. Tempo-independent, like a drum voice's `shift`.
     pub file_shift: f64,
+    /// Time-stretch the file so it fits `file_beats` at the current tempo
+    /// without moving its pitch. Off, a tempo that isn't the file's own
+    /// varispeeds it, which is exact but transposes. Needs `file_beats`:
+    /// without a length in beats there is no ratio to compute.
+    pub file_stretch: bool,
     /// A-B repeat: play `file_repeat_start`..`file_repeat_end` of the file,
     /// in the file's own beats, over and over. Off, the segment is the whole
     /// file, which is the same arithmetic with different numbers. Needs

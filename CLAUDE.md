@@ -50,6 +50,7 @@ position, looper) derives from it.
 | `util.rs` | `beat_bisect` (which subdivision a beat falls in), `mod_add`. |
 | `analysis.rs` | The short-time FFT behind the spectrogram and the spectral flux (see below). |
 | `calibration.rs` | The round-trip latency measurement -- probe, matched filter, gates. |
+| `stretch.rs` | WSOLA time stretching for the file player, and the off-thread render that applies it. |
 | `prefs.rs` | `audio-prefs.json`: device choice and per-pair latency. Not the config. |
 
 ### Layout of the frontend
@@ -927,6 +928,57 @@ against your own playing like any other channel.
   other end. Same for A-B with no `fileBeats`: a position in beats means
   nothing until a length in beats has been declared, and the panel says so
   rather than silently doing nothing.
+#### Time stretching
+
+`fileStretch` renders the file to fit `fileBeats` at the current tempo without
+moving its pitch. **`docs/` has nothing on this; `stretch.rs` is the reference.**
+
+- **Nothing about it runs on the audio thread, and that is the whole design.**
+  The ratio changes only on a config event, and the file is known in advance, so
+  the entire file is re-rendered on a worker thread and the result swapped in.
+  The render callback is untouched: it still reads a plain buffer at a position
+  derived from the beat. This is the same shape as the load-time resampling, for
+  the same reason.
+- **The ratio needs no new setting.** `naturalBpm = fileBeats * 60 /
+  naturalSeconds`, and the ratio is `naturalBpm / bpm` -- both numbers are
+  already on screen. The frontend derives it independently for display rather
+  than asking Rust, since it is a consequence of two fields it owns.
+- **WSOLA, not a phase vocoder**, although `realfft` is already in the tree and
+  would have made one easy. A phase vocoder smears transients, and smeared
+  transients are exactly what this app exists to let you place. WSOLA is
+  overlap-add with a similarity search choosing where each grain is cut from,
+  which is what keeps successive grains in phase.
+- **Both buffers are circular.** The file is going to be looped, so wrapping the
+  overlap-add across the end is what makes the loop point seamless instead of a
+  fade to silence every cycle. Measured: block peaks stay within 0.999-1.000
+  across the seam.
+- **The render is rounded to a whole hop, and that cannot desync anything.** The
+  read position is a fraction of *whatever length the buffer turns out to be*,
+  so the file still spans `fileBeats` exactly; the rounding shows up as a
+  ~0.05% difference in playback rate and nowhere else. This is the same property
+  that lets `set tempo from file` round to four places.
+- **`natural` is kept alongside `buffer`.** Every render is computed from the
+  unstretched source, never from the last stretch -- restretching a stretch
+  compounds artifacts, and the ratio moves every time the tempo does. Costs a
+  second copy of the file in memory.
+- **A `generation` counter is what makes it safe to ask on every keystroke.**
+  The frontend pushes a config per keypress, so typing `120` is three requests.
+  Each bumps the counter; a render that finishes holding a stale one is dropped
+  rather than applied over a newer answer. A 200 ms debounce in front of it
+  means the superseded ones usually never start.
+- **The swap allocates and frees outside the lock**, and `mem::replace`s the old
+  buffer out to be dropped after unlocking. The callback holds this mutex for
+  its whole run, so a 23 MB free inside it is time the audio thread waits.
+- **Lock order is config, then file** -- the same order the callback takes them,
+  which is why `set_config` drops the config guard before requesting a stretch.
+- **Quality is honest to about a third either way.** Measured: a 440 Hz sine
+  comes back within 0.5 Hz from 0.5x to 2x, where naive resampling puts it at
+  293 Hz at 1.5x. But past ~0.75-1.33 a drum loop starts to flam and sustained
+  material warbles, so the panel turns the ratio orange there. Logic's Flex Time
+  is much better; bouncing per tempo is still the right answer for big changes.
+- 10 s of stereo renders in ~375 ms, which is why there is a `file-stretch`
+  event and a `rendering…` note rather than a silent pause.
+
 - **`filePath` lives in the js config** so a session comes back with its file
   loaded -- Rust holds decoded samples and not the path, so the frontend pushes
   it back through `set_mp3_buffer` once on mount. `set_mp3_buffer` returns a
@@ -1276,6 +1328,12 @@ keyboard, that `set tempo from file` gives a tempo you'd have typed, or that the
 file bus is legible in a pane next to your own playing. The mono and rate
 conversions also now sit under the *drum* samples, which were fine before and
 should be listened to once for that reason.
+
+A-B repeat and the time stretching are newer still and equally unheard. The
+stretch is unit-checked for pitch (a sine holds within 0.5 Hz from 0.5x to 2x),
+for amplitude across the loop seam, for length, for degenerate ratios and for
+cost; what no test can say is whether a real drum loop at 0.85x sounds like
+something you'd want to play along with.
 
 Still to build, and deliberately not started: selecting a *region* of the file
 rather than using all of it, and the static waveform with hand-drawn beat

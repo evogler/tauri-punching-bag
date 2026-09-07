@@ -106,6 +106,20 @@ const repeatDescription = (a: number, b: number, fileBeats: number) => {
   }`;
 };
 
+// The ratio is a plain consequence of two numbers you have already given, so
+// it's derived here rather than reported back from Rust. Above 1 is slower.
+const stretchRatio = (info: FileInfo | null, fileBeats: number, bpm: number) => {
+  if (!info || !(info.seconds > 0) || !(fileBeats > 0) || !(bpm > 0)) return null;
+  const naturalBpm = (fileBeats * 60) / info.seconds;
+  return { ratio: naturalBpm / bpm, naturalBpm };
+};
+
+// WSOLA is honest up to about a third either way; past that a drum loop starts
+// to flam and sustained material warbles. Better to say so than to let it be
+// discovered as "the file sounds wrong".
+const STRETCH_CLEAN_LOW = 0.75;
+const STRETCH_CLEAN_HIGH = 1.33;
+
 // What the sweep paints over old samples with. The whole-cycle refresh clears to
 // the same thing, so both modes sit on the same background.
 const WAVEFORM_BACKGROUND = "#222222";
@@ -433,6 +447,19 @@ const App = () => {
     }
     if (path) pickNewMp3(path)();
   };
+
+  // Rendering a long file takes a moment, and it happens on a worker thread, so
+  // without this a tempo change would look like nothing happening.
+  const [stretching, setStretching] = useState(false);
+  useEffect(() => {
+    if (BROWSER_DEBUG_MODE) return;
+    const p = listen<{ stretching: boolean }>("file-stretch", (e) =>
+      setStretching(e.payload.stretching)
+    );
+    return () => {
+      p.then((un) => un());
+    };
+  }, []);
 
   const fileRestored = useRef(false);
   useEffect(() => {
@@ -1697,6 +1724,44 @@ const App = () => {
               set={set}
               get={get}
             />
+            <Divider label="follow tempo" />
+            <Input
+              label="time stretch"
+              _key="fileStretch"
+              set={set}
+              get={get}
+              title="fit the file to `file beats` at the current tempo without changing its pitch"
+            />
+            {get("fileStretch") &&
+              (() => {
+                const st = stretchRatio(
+                  fileInfo,
+                  exprNumber(get("fileBeats")),
+                  exprNumber(get("bpm"))
+                );
+                if (!st)
+                  return (
+                    <div style={{ color: "#e86", fontSize: "0.9em" }}>
+                      ⚠ needs `file beats` — playing at its own speed
+                    </div>
+                  );
+                const rough =
+                  st.ratio < STRETCH_CLEAN_LOW || st.ratio > STRETCH_CLEAN_HIGH;
+                return (
+                  <div
+                    style={{
+                      fontSize: "0.9em",
+                      opacity: 0.8,
+                      color: rough ? "#e86" : undefined,
+                    }}
+                  >
+                    {st.ratio.toFixed(3)}× — {st.naturalBpm.toFixed(2)} bpm
+                    material at {exprNumber(get("bpm"))}
+                    {rough && " · past where this stays clean"}
+                    {stretching && " · rendering…"}
+                  </div>
+                );
+              })()}
             <Divider label="a–b repeat" />
             <Input label="repeat a–b" _key="fileRepeatOn" set={set} get={get} />
             <Input

@@ -91,6 +91,7 @@ pub fn default_config() -> Config {
         file_beats: 0.0,
         file_offset_ms: 0.0,
         file_shift: 0.0,
+        file_stretch: false,
         file_repeat_on: false,
         file_repeat_start: 0.0,
         file_repeat_end: 4.0,
