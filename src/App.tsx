@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useState, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  useRef,
+} from "react";
 import { invoke } from "@tauri-apps/api";
 import {
   defaultRustConfig,
@@ -119,6 +125,14 @@ const stretchRatio = (info: FileInfo | null, fileBeats: number, bpm: number) => 
 // discovered as "the file sounds wrong".
 const STRETCH_CLEAN_LOW = 0.75;
 const STRETCH_CLEAN_HIGH = 1.33;
+
+// A pane's backing store, in device pixels.
+type PaneSize = { width: number; height: number };
+
+// Only ever used by the render that *creates* a pane's canvas: the layout
+// effect measures the real box before the first paint. Not a layout constant --
+// nothing is laid out to these numbers.
+const UNMEASURED_PANE: PaneSize = { width: 300, height: 150 };
 
 // The pane arrangements the panel offers, as [across, down].
 const ARRANGEMENTS: [number, number][] = [
@@ -353,23 +367,6 @@ const App = () => {
   //   alert("just tried and didn't error");
   // });
 
-  useEffect(() => {
-    // console log the new window size whenever the window is resized
-    const unlisten = appWindow.onResized(() => {
-      appWindow.innerSize().then(({ width, height }) => {
-        // setLog(`${width}x${height}`);
-        setJsConfig((jsConfig) => ({
-          ...jsConfig,
-          canvasHeight: height - 250,
-          canvasWidth: width - 500,
-        }));
-      });
-    });
-    return () => {
-      (async () => await unlisten)();
-    };
-  });
-
   const getArrayAdded = useRef(false);
   useEffect(() => {
     // check for new samples
@@ -546,6 +543,11 @@ const App = () => {
   const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([]);
   const [selectedView, setSelectedView] = useState(0);
 
+  // Each pane's backing store, in device pixels. Measured from the element
+  // rather than derived from the window, which is what stops the picture being
+  // scaled -- see the layout effect below.
+  const [paneSizes, setPaneSizes] = useState<PaneSize[]>([]);
+
   // Resolved once per render and handed to every field that can hold an
   // expression, so each pane's inputs read the same bindings.
   const params = parameterValues(get("parameters"));
@@ -555,10 +557,78 @@ const App = () => {
   // What the sweep paints over old samples with. The whole-cycle refresh clears
   // to the same thing, so both modes sit on the same background.
   const background = get("waveformBackground");
-  // Floored once here rather than at the canvas element, so the backing store
-  // and the pixelsPerBeat derived from it can't disagree by a fraction.
-  const cellWidth = Math.max(1, Math.floor(get("canvasWidth") / viewCols));
-  const cellHeight = Math.max(1, Math.floor(get("canvasHeight") / viewRows));
+  const paneCount = viewCols * viewRows;
+
+  // The backing store is sized from the pane's own box, so one pixel of surface
+  // is one pixel of screen. It used to be the *window's* size in physical
+  // pixels less a hard-coded 500x250, divided by the arrangement -- numbers
+  // that stopped describing the layout the moment the panel could be hidden or
+  // a gutter put between the panes, and that were in a different unit than the
+  // box besides.
+  //
+  // Nothing *moved* under that: the draw code places everything as a fraction
+  // of the surface, so a beat sat on its grid line whatever the scale. What it
+  // cost was resolution, and anisotropically -- at the sizes in use the surface
+  // was about 1.4x the screen across and 0.87x down, so the picture was
+  // oversampled horizontally and *upscaled*, i.e. blurred, vertically. The
+  // parts counted in pixels rather than fractions -- the 1px erase column, the
+  // grid hairlines, the onset ticks -- came out at different apparent weights
+  // across and down for the same reason.
+  //
+  // This cannot feed back into layout, because the canvas carries
+  // `minWidth/minHeight: 0`: without it a grid item's automatic minimum is its
+  // own aspect ratio, and a bigger backing store would ask for a bigger box.
+  useLayoutEffect(() => {
+    const measure = () => {
+      // CSS pixels times the device ratio, so a Retina pane is drawn at its
+      // real resolution rather than at half of it.
+      const dpr = window.devicePixelRatio || 1;
+      const next: PaneSize[] = [];
+      for (let i = 0; i < paneCount; i++) {
+        const box = canvasRefs.current[i]?.getBoundingClientRect();
+        next.push({
+          width: Math.max(1, Math.round((box?.width ?? 0) * dpr)),
+          height: Math.max(1, Math.round((box?.height ?? 0) * dpr)),
+        });
+      }
+      // Setting the width attribute blanks a canvas, so an unchanged size must
+      // not reach the DOM -- and an unconditional setState here would loop.
+      setPaneSizes((prev) =>
+        prev.length === next.length &&
+        prev.every((p, i) => p.width === next[i].width && p.height === next[i].height)
+          ? prev
+          : next
+      );
+    };
+
+    const observer = new ResizeObserver(measure);
+    for (let i = 0; i < paneCount; i++) {
+      const el = canvasRefs.current[i];
+      if (el) observer.observe(el);
+    }
+
+    // Moving the window to a display with a different pixel ratio leaves the
+    // CSS box the same size, so the observer never fires -- the surface would
+    // stay at the old resolution until something else resized. The query has to
+    // be rebuilt around each new ratio, since it can only ask about one.
+    let media: MediaQueryList | null = null;
+    const onRatioChange = () => {
+      measure();
+      watchRatio();
+    };
+    const watchRatio = () => {
+      media?.removeEventListener("change", onRatioChange);
+      media = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      media.addEventListener("change", onRatioChange);
+    };
+    watchRatio();
+
+    measure();
+    return () => {
+      observer.disconnect();
+      media?.removeEventListener("change", onRatioChange);
+    };
+  }, [paneCount]);
 
   // Chained panes divide one timeline between them: pane 1 covers the beats
   // after every earlier pane's, so the signal runs through its rows, then the
@@ -574,6 +644,9 @@ const App = () => {
   );
 
   const viewCtxs: ViewCtx[] = get("views").map((cfg, index) => {
+    // Measured, not derived: the backing store is this pane's own box, so
+    // nothing the draw code computes is stretched on its way to the screen.
+    const { width: cellWidth, height: cellHeight } = paneSizes[index] ?? UNMEASURED_PANE;
     const beatsPerRow = viewRowBeats(cfg);
     const marginLeft = exprNumber(cfg.marginLeft);
     const marginRight = exprNumber(cfg.marginRight);
@@ -2162,8 +2235,6 @@ const App = () => {
             />
           </Section>
         </TabPanel>
-        {/* <Input label="canvas height" _key= "canvasHeight" /> */}
-        {/* <Input label="canvas width" _key= "canvasWidth" /> */}
       </>
       {/* <div>{log}</div> */}
     </div>

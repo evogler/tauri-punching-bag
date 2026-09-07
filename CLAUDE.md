@@ -715,16 +715,39 @@ per-pane, held in `views: ViewConfig[]`.
 - **A beat exactly on a row boundary draws twice** -- dim at the end of the row
   above, solid at the start of the row below. Long-standing (the loop bound is
   inclusive at the right edge); chaining extends it to the pane boundary.
+- **Each pane's backing store is measured from its own box**, in a
+  `useLayoutEffect` holding one `ResizeObserver` over every canvas, times
+  `devicePixelRatio`. It used to be `appWindow.innerSize()` -- the *window*, in
+  **physical** pixels -- less a hard-coded 500x250, divided by the arrangement:
+  numbers that stopped describing the layout as soon as the panel could be
+  hidden or a gutter put between the panes, and that were in a different unit
+  than the box besides. `canvasWidth`/`canvasHeight` are gone from the config
+  entirely, and with them the window-resize listener that fed them.
+  - **Nothing ever *moved* under the old scheme.** The draw code places
+    everything as a fraction of the surface, so a beat sat on its grid line
+    whatever the scale factor was. What the mismatch cost was resolution, and
+    anisotropically: at the sizes in use the surface was ~1.4x the screen across
+    and ~0.87x down, so the picture was oversampled horizontally and *upscaled*,
+    i.e. blurred, vertically. The parts counted in pixels rather than fractions
+    -- the 1px erase column, the grid hairlines, the onset ticks -- came out at
+    different apparent weights across and down for the same reason.
+  - **A pixel ratio change fires no `ResizeObserver`**, since the CSS box is
+    unchanged, so a `matchMedia("(resolution: Ndppx)")` listener re-measures on
+    it. The query can only ask about one ratio, so it is rebuilt around the new
+    one each time it fires.
+  - **The measurement is state, so it must not set state that has not changed**
+    -- an unconditional `setPaneSizes` loops, and writing the `width` attribute
+    blanks a canvas even when the number is the same.
 - **Every pane carries `minWidth: 0, minHeight: 0`, and must.** A grid item's
   `min-width`/`min-height` are `auto`, and for a *replaced* element that floor
   is its own aspect ratio -- a `1fr` row will not shrink below the cell's width
-  divided by the backing store's aspect. The backing store is sized from
-  `appWindow.innerSize()`, which is **physical** pixels, less a hard-coded
-  500x250, so its aspect has nothing to do with the pane's on screen. Hiding the
-  600px panel widens the cell enough for that floor to outgrow the window, and
-  the bottom of the last row goes under the edge of the screen -- with the panel
-  open, and at launch on the 2000x1000 defaults, it stays just inside. Zero lets
-  the tracks size from the space there actually is.
+  divided by the backing store's aspect. Hiding the 600px panel widened the cell
+  enough for that floor to outgrow the window, and the bottom of the last row
+  went under the edge of the screen. Zero lets the tracks size from the space
+  there actually is -- and it is now **load-bearing in a second way**: with the
+  backing store measured from the box, an aspect-ratio floor would let a bigger
+  surface ask for a bigger box, which is a feedback loop rather than a
+  one-off overflow.
 
 - **One `requestAnimationFrame` loop, in `App`.** It draws every pane and then
   drains the sample batch **once**, after all of them have read it. `Canvas.tsx`
@@ -761,11 +784,10 @@ what sits between the panes -- the frame rather than the signal.
   that element's `backgroundColor` and not anything a canvas paints. It is
   invisible at a 1x1 arrangement or a gap of 0, and the panel says so rather
   than leaving a control that appears to do nothing.
-- **The gap does not resize the backing store.** `cellWidth`/`cellHeight` still
-  divide `canvasWidth`/`canvasHeight` by the arrangement, ignoring the gutter,
-  so a wider gap moves where the panes sit and slightly restretches what is
-  drawn in them -- it never changes the drawing itself. Same approximation the
-  hard-coded 2px always made.
+- **The gap costs the panes their width, exactly.** The gutter comes out of the
+  grid's tracks, and each pane's backing store is measured from the track it
+  lands in, so a wider gap gives every pane a genuinely narrower surface rather
+  than the same surface squeezed. Nothing has to know the gap is there.
 - **`ColorInput` is called by name, not dispatched on type.** `Input` picks its
   widget from the value's type, and `filePath` is a string too -- "every string
   is a colour" would be wrong the moment anything else took one. Same treatment

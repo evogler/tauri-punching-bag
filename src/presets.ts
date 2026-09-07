@@ -22,9 +22,11 @@ import { formatNumberList } from "./expression";
 const STORAGE_KEY = "tpb.presets.v1";
 const SESSION_KEY = "tpb.session.v1";
 
-// Derived from the window size on every resize, so a preset must not restore
-// stale values over them.
-const TRANSIENT_JS_KEYS: JsConfigKey[] = ["canvasHeight", "canvasWidth"];
+// Empty since the canvas size stopped being config at all -- each pane measures
+// its own box. Kept because the mechanism is what a transient js key needs, and
+// the next one shouldn't have to rediscover that presets would otherwise
+// restore it.
+const TRANSIENT_JS_KEYS: JsConfigKey[] = [];
 
 // Transport state rather than configuration -- saving a preset while paused
 // shouldn't make loading it later pause the app.
