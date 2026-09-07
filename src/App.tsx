@@ -2248,13 +2248,6 @@ const App = () => {
               get={get}
             />
             <Input
-              label="visual subdivision offset"
-              _key="subdivisionOffset"
-              params={params}
-              set={set}
-              get={get}
-            />
-            <Input
               label="spectrum analysis"
               _key="analysisOn"
               set={set}

@@ -1502,8 +1502,6 @@ exactly as before.
 - **The click counter ticks twice per frame** (once per output channel), so
   `click_sound_counter = 400` is really 200 frames. Moving it out of the output
   loop would double the click's length — halve the constants if you do.
-- `subdivisionOffset` is in the config with a UI input but is unused by the draw
-  code. Dead before any of this work.
 - A zero-length `beatsToLoop` used to panic; guarded now, but similar bare
   indexing exists elsewhere.
 - ~~`SAMPLE_RATE` hard-coded at 44100~~ -- **fixed 2026-09-06**, adopted from

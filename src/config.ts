@@ -532,7 +532,6 @@ export const copyView = (view: ViewConfig): ViewConfig =>
   JSON.parse(JSON.stringify(view));
 
 export const defaultJsConfig = {
-  subdivisionOffset: numExpr(0),
   channelStyles: [] as ChannelStyle[],
   // Global rather than per-view: one set of names every pane's expressions can
   // reach, so `n` means the same thing wherever it's written.
