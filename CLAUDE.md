@@ -982,11 +982,10 @@ what sits between the panes -- the frame rather than the signal.
     stroke overlapped: 1 device pixel and 2 came out as 2 columns and 3, which
     is why the control looked like it did nothing. `fillRect` on rounded
     coordinates with a whole-pixel width draws exactly the columns asked for.
-  - **The same repainting makes a grid's `alpha` nearly inert in sweep mode.**
-    It is honest for the fraction of a second after the sweep passes a line and
-    then saturates. Fixing it means painting the grids per column inside the
-    sweep, the way the spectrogram already does, rather than over the whole pane
-    every frame. Not done.
+  - **A grid's `alpha` used to be nearly inert in sweep mode**, honest only for
+    the fraction of a second after the sweep passed a line and then saturating.
+    The offscreen layer fixed it: the grids land once, on a surface rebuilt
+    every frame. See *Each pane draws through an offscreen layer*.
   - **0.5 is the floor because that is one device pixel on a 2x display** --
     the thinnest line the screen can draw, which is the end of the range worth
     having. Below it a line is a fraction of a pixel and antialiases to a
@@ -1527,6 +1526,29 @@ exactly as before.
   default input device, while the app is running is not picked up and needs a
   restart.
 
+## Verification
+
+**The owner tests everything that gets made, in the real app, and usually
+without saying so.** Treat a feature as heard and seen unless a note below says
+otherwise. The dated sections that follow record what was *new and unconfirmed
+at the time of writing* -- they are a build log, not a standing list of doubts,
+and several of them have since been confirmed. What is genuinely open is here:
+
+- **Onsets are not landing where they should.** The picker, the sub-hop
+  parabola, `ONSET_CENTRE_BIAS` and `onsetOffset` are all in and drawing, and
+  the placement is still off. Deserves follow-up; the drums bus is the reference
+  to calibrate against, since the callback knows its trigger times exactly.
+- **`buffer_compensation` at 48 kHz.** Tuned by ear at 44.1 kHz, so ~8 ms short
+  on a 48 kHz device. `measure latency` answers this in about ten seconds.
+- **The bundle on other machines.** Ad-hoc signing still means Gatekeeper
+  refuses it on a machine that hasn't been talked round, and a managed Mac
+  refuses it outright.
+
+Confirmed working in the app, whatever the older notes below say: the file
+player, A-B repeat, the time stretch, drum offsets, panning, the drums and click
+display buses, the multi-tap looper, the spectrogram, the spectral flux, onsets
+drawing at all, and ⌘R.
+
 ## State as of 2026-08-30
 
 Verified by the owner in the real app: single-channel input, 2-channel input with
@@ -1541,8 +1563,9 @@ left untouched) rather than by listening.
 Parameters and expressions are committed (`variables`, `arithmetic in more
 places`) and covered by temp tests that were run and deleted.
 
-The analysis stream, the spectrogram pane and the spectral flux are new and
-**nobody has looked at either picture**. The arithmetic (hop timing, the
+The analysis stream, the spectrogram pane and the spectral flux were new here
+and had not been looked at yet. Both pictures have since been confirmed legible;
+onset *placement* is the part still open (see *Verification*). The arithmetic (hop timing, the
 window-centre stamp, the flattening index, the log bin edges) is simulation- and
 unit-checked, and so is the flux: silence reads 0, a tone entering reads 2.3 and
 under 0.009 across twenty hops of sustain, a decay reads 0, a band excluding the
@@ -1624,7 +1647,8 @@ What that detour does and does not establish:
 
 ### 2026-09-06, later: the file player
 
-Everything in *The file player* is new and **none of it has been heard**. The
+Everything in *The file player* was new here and unheard at the time. All of it
+has since been confirmed in the app (see *Verification*). The
 position arithmetic and the resampler are simulation- and unit-checked (run,
 then deleted): mono folds to stereo at the same length, a matching rate is a
 byte-exact copy, 44.1k resamples to 48k at the same duration, empty and
@@ -1639,7 +1663,8 @@ file bus is legible in a pane next to your own playing. The mono and rate
 conversions also now sit under the *drum* samples, which were fine before and
 should be listened to once for that reason.
 
-A-B repeat and the time stretching are newer still and equally unheard. The
+A-B repeat and the time stretching were newer still and equally unheard here;
+both have since been confirmed. The
 stretch is unit-checked for pitch (a sine holds within 0.5 Hz from 0.5x to 2x),
 for amplitude across the loop seam, for length, for degenerate ratios and for
 cost; what no test can say is whether a real drum loop at 0.85x sounds like
@@ -1652,8 +1677,8 @@ question there, and per-pixel peaks of a whole one is the wrong first answer.
 
 ### 2026-09-07: random parameters, and expressions in drum gains
 
-`choose` / `range`, the per-row 🎲, reroll-all and ⌘R are new and **nobody has
-clicked any of it**. Covered by temp tests (run, then deleted): `choose` only
+`choose` / `range`, the per-row 🎲 and reroll-all are new. **⌘R is confirmed
+working in the bundle.** Covered by temp tests (run, then deleted): `choose` only
 ever returns one of its arguments and doesn't fall off the end at an rng of
 exactly 1, `range` stays inside its ends, a roll reads the other parameters,
 resolving fifty times in a row does not re-roll, a dependant follows every
@@ -1661,20 +1686,18 @@ reroll, rerolling one leaves the others untouched, a list roll repeats like a
 list, a half-typed roll keeps its stored value but fails the editor's check, and
 a cycle through a roll is still reported as a cycle.
 
-What that does *not* establish: whether ⌘R actually reaches the webview in the
-bundle rather than being eaten, whether a rerolled tempo or rhythm pushes to the
-audio thread as promptly as a typed one does, and whether the roll being sticky
-across a session restore is what you want in practice or whether you'd rather it
-rolled fresh at launch.
+Open questions are about taste rather than correctness: whether the roll being
+sticky across a session restore is what you want in practice or whether you'd
+rather it rolled fresh at launch, and whether `1, g x k` with a rolled `g` is a
+musically useful thing to have or just a noisy one.
 
-Drum `gains` becoming expression-backed is unheard too. Checked by temp test
+Drum `gains` became expression-backed in the same pass. Checked by temp test
 (run, then deleted): a pre-expression bare array still reads and is wrapped on
 the way through the resolve walk, an expression re-resolves on every parameter
 change, a list parameter stands where a group would, a parameter going away
 keeps the last good gains *and* the typed text, absent gains stay absent and
 read as unity, an empty list can never be committed, and the rhythm beside it is
-untouched. What no test says is whether `1, g x k` with a rolled `g` is a
-musically useful thing to have or just a noisy one.
+untouched.
 
 `rowColorPattern` / `rowColorPatternDown` took expressions in the same pass and
 by the same two steps. Temp-tested (run, then deleted): a pre-expression bare
@@ -1684,6 +1707,11 @@ down pattern still means the halves agree, an empty pattern still paints every
 row the first colour, no colours still falls back to the channel's, a vanished
 parameter keeps the last good pattern *and* the text, and an index past the
 palette still wraps.
+
+Also this day: `subdivisionOffset` deleted (it had a UI input and the draw code
+had never read it), every parameter now showing what it resolves to rather than
+only the randoms, `range` taking an optional step, and `yarn tauri` going
+through `scripts/tauri.mjs` so a successful build sweeps stale disk images.
 
 ## Discussed but not built
 
