@@ -2144,7 +2144,20 @@ const App = () => {
           // anyway on the resize or rearrangement that changes them.
           width={v.width}
           height={v.height}
-          style={{ width: "100%", height: "100%", display: "block" }}
+          // `min-width`/`min-height` are `auto` on a grid item, and for a
+          // replaced element that means *its own aspect ratio* sets the floor:
+          // a `1fr` row refuses to shrink below the cell's width divided by the
+          // backing store's aspect. Wide enough and the row outgrows the
+          // window, which is why hiding the 600px panel -- and nothing else --
+          // cut the bottom off. Zero lets the tracks size from the space there
+          // actually is.
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "block",
+            minWidth: 0,
+            minHeight: 0,
+          }}
         />
       ))}
     </div>

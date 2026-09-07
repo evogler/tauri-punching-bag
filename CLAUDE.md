@@ -715,6 +715,17 @@ per-pane, held in `views: ViewConfig[]`.
 - **A beat exactly on a row boundary draws twice** -- dim at the end of the row
   above, solid at the start of the row below. Long-standing (the loop bound is
   inclusive at the right edge); chaining extends it to the pane boundary.
+- **Every pane carries `minWidth: 0, minHeight: 0`, and must.** A grid item's
+  `min-width`/`min-height` are `auto`, and for a *replaced* element that floor
+  is its own aspect ratio -- a `1fr` row will not shrink below the cell's width
+  divided by the backing store's aspect. The backing store is sized from
+  `appWindow.innerSize()`, which is **physical** pixels, less a hard-coded
+  500x250, so its aspect has nothing to do with the pane's on screen. Hiding the
+  600px panel widens the cell enough for that floor to outgrow the window, and
+  the bottom of the last row goes under the edge of the screen -- with the panel
+  open, and at launch on the 2000x1000 defaults, it stays just inside. Zero lets
+  the tracks size from the space there actually is.
+
 - **One `requestAnimationFrame` loop, in `App`.** It draws every pane and then
   drains the sample batch **once**, after all of them have read it. `Canvas.tsx`
   used to own the loop and clear the buffer itself; with more than one pane that
