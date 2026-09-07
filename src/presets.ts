@@ -15,6 +15,7 @@ import {
   defaultViewConfig,
   isJsConfigKey,
   isRustConfigKey,
+  usableRhythmVal,
 } from "./config";
 import { formatNumberList } from "./expression";
 
@@ -68,13 +69,45 @@ const RUST_EXPR_KEYS: RustExprKey[] = [
   "onsetThreshold",
   "onsetMinGap",
   "onsetOffset",
+  "fileVolume",
+  "fileBeats",
+  "fileOffsetMs",
+  "fileShift",
 ];
+
+// Keeps what was typed -- so the field still shows it, and still goes red --
+// but swaps in a value the audio thread will accept. Without this, a session
+// saved while a rhythm field held something degenerate comes back rejecting
+// every config push, with no way to type your way out of it.
+const sanitizeRhythm = (rhythm: unknown, fallback: unknown): unknown => {
+  if (typeof rhythm !== "object" || rhythm === null) return fallback;
+  const val = (rhythm as { val?: unknown }).val;
+  if (Array.isArray(val) || usableRhythmVal(val)) return rhythm;
+  return { ...(rhythm as object), val: (fallback as { val?: unknown })?.val };
+};
 
 const migrateRust = (rust: Record<string, unknown>): Record<string, unknown> => {
   const out = { ...rust };
   for (const key of RUST_EXPR_KEYS) {
     if (typeof out[key] === "number") out[key] = numExpr(out[key] as number);
   }
+  if ("audioSubdivisions" in out)
+    out.audioSubdivisions = sanitizeRhythm(
+      out.audioSubdivisions,
+      defaultRustConfig.audioSubdivisions
+    );
+  if (Array.isArray(out.drums))
+    out.drums = (out.drums as unknown[]).map((d) =>
+      typeof d === "object" && d !== null
+        ? {
+            ...d,
+            rhythm: sanitizeRhythm(
+              (d as { rhythm?: unknown }).rhythm,
+              defaultRustConfig.drums[0].rhythm
+            ),
+          }
+        : d
+    );
   return out;
 };
 

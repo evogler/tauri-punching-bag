@@ -137,7 +137,11 @@ export type RustExprKey =
   | "analysisBandHigh"
   | "onsetThreshold"
   | "onsetMinGap"
-  | "onsetOffset";
+  | "onsetOffset"
+  | "fileVolume"
+  | "fileBeats"
+  | "fileOffsetMs"
+  | "fileShift";
 
 export const defaultRustConfig = {
 	audioInGain: numExpr(1.0),
@@ -195,6 +199,20 @@ export const defaultRustConfig = {
   drumOn: true,
   loopingOn: false,
   playFile: true,
+  // Output gain for the file. Everything else on the bus had one; the file was
+  // summed in at unity, so balancing it against your playing meant the system
+  // volume.
+  fileVolume: numExpr(1),
+  // How many beats the file is -- the whole of what makes it line up with the
+  // grid. Above zero the read position is derived from the beat and so cannot
+  // drift; 0 free-runs the file at its natural rate, locked to nothing.
+  fileBeats: numExpr(0),
+  // Mechanical nudge in ms, positive *earlier*, for a bounce whose downbeat
+  // sits a little way into the file. Same sense as a drum voice's offset.
+  fileOffsetMs: numExpr(0),
+  // Musical rotation in beats: which beat the file's start lands on.
+  // Tempo-independent, like a drum voice's shift.
+  fileShift: numExpr(0),
   audioSubdivisions: {
     inputText: "2:1",
     val: {
@@ -486,6 +504,10 @@ export const defaultJsConfig = {
   // same beats against its own ruling, the panes divide one long timeline
   // between them, so the signal runs through pane 1's rows, then pane 2's.
   viewsSequential: false,
+  // The file to play along with, kept so a session comes back with it loaded.
+  // Rust holds the decoded samples, not the path, so this is the only record of
+  // it -- the frontend pushes it back through `set_mp3_buffer` on mount.
+  filePath: "",
 };
 
 export type RustConfig = typeof defaultRustConfig;
@@ -641,6 +663,28 @@ const resolveList = (
   }
 };
 
+// A rhythm the audio thread will actually take: a cycle with a length, and
+// every note at a real time. A NaN time is written to the session as JSON
+// `null`, and serde refuses `null` for an f64 -- so one saved into a session
+// would reject *every* config push for the life of the app, and unfixably,
+// since the session is restored before anything can be retyped.
+//
+// Arrays are parser1's shape and are left alone: nothing creates one any more,
+// and they were never a shape this check describes.
+export const usableRhythmVal = (val: unknown): boolean => {
+  if (typeof val !== "object" || val === null || Array.isArray(val)) return false;
+  const { notes, end } = val as { notes?: unknown; end?: unknown };
+  if (!Array.isArray(notes)) return false;
+  if (typeof end !== "number" || !Number.isFinite(end) || end <= 0) return false;
+  return notes.every(
+    (n) =>
+      typeof n === "object" &&
+      n !== null &&
+      typeof (n as { time?: unknown }).time === "number" &&
+      Number.isFinite((n as { time: number }).time)
+  );
+};
+
 const resolveRhythm = (rhythm: Rhythm, params: Params): Rhythm => {
   try {
     const text = resolveRhythmText(rhythm.inputText, params);
@@ -648,7 +692,12 @@ const resolveRhythm = (rhythm: Rhythm, params: Params): Rhythm => {
     // moved -- and text the parsers no longer accept is never re-parsed.
     if (text === rhythm.inputText) return rhythm;
     const parser = rhythm.type === "parser1" ? parser1 : parser2;
-    return { ...rhythm, val: parser.parse(text) };
+    const val = parser.parse(text);
+    // A parameter can make a rhythm degenerate without the field being touched
+    // -- `n:1` with n set to 0 -- and that push has to be refused here, since
+    // there's no input component watching to turn red.
+    if (rhythm.type !== "parser1" && !usableRhythmVal(val)) return rhythm;
+    return { ...rhythm, val };
   } catch (e) {
     return rhythm;
   }
@@ -692,6 +741,11 @@ const RUST_EXPR_FIELDS: {
   { key: "onsetMinGap", validate: (n) => Number.isFinite(n) && n >= 0 && n < 10000 },
   { key: "onsetOffset", validate: (n) => Number.isFinite(n) && Math.abs(n) < 10000 },
   { key: "clickVolume", validate: (n) => n >= 0 },
+  { key: "fileVolume", validate: (n) => n >= 0 },
+  // 0 is the "not declared" case, so this is >= rather than > 0.
+  { key: "fileBeats", validate: (n) => Number.isFinite(n) && n >= 0 && n < 100000 },
+  { key: "fileOffsetMs", validate: (n) => Number.isFinite(n) && Math.abs(n) < 100000 },
+  { key: "fileShift", validate: (n) => Number.isFinite(n) && Math.abs(n) < 100000 },
   { key: "audioInGain", validate: (n) => n >= 0 },
   { key: "bufferCompensation", validate: (n) => n >= 0 },
   { key: "analysisBandLow", validate: inBand },

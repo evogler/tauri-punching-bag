@@ -68,6 +68,31 @@ import { open as openFileDialog } from "@tauri-apps/api/dialog";
 // global is injected and we always use real samples.
 const BROWSER_DEBUG_MODE = !("__TAURI_IPC__" in window);
 
+// What `set_mp3_buffer` reports back about the file it just decoded. The
+// buffer Rust keeps has already been converted to the device rate and to
+// stereo, so `frames` and `seconds` are in the units the callback plays at;
+// `sourceRate` and `sourceChannels` are what the file itself was.
+type FileInfo = {
+  frames: number;
+  seconds: number;
+  sourceRate: number;
+  sourceChannels: number;
+  deviceRate: number;
+};
+
+// Rate and channel count are only mentioned when the loader actually had to do
+// something about them, so the usual case stays short. The beat figure is the
+// point of the line: it's what tells you to type 8 into `file beats`.
+const fileDescription = (info: FileInfo, bpm: number) => {
+  const parts = [`${info.seconds.toFixed(3)} s`];
+  if (info.sourceChannels !== 2) parts.push(`${info.sourceChannels} ch → 2`);
+  if (Math.abs(info.sourceRate - info.deviceRate) > 0.5)
+    parts.push(`${info.sourceRate} → ${info.deviceRate} Hz`);
+  if (bpm > 0)
+    parts.push(`${((info.seconds * bpm) / 60).toFixed(2)} beats at ${bpm} bpm`);
+  return parts.join(" · ");
+};
+
 // What the sweep paints over old samples with. The whole-cycle refresh clears to
 // the same thing, so both modes sit on the same background.
 const WAVEFORM_BACKGROUND = "#222222";
@@ -335,9 +360,75 @@ const App = () => {
     return () => { clearInterval(interval); getArrayAdded.current = false;};
   }, []);
 
-  const pickNewMp3 = (filename: string) => () => {
-    invoke("set_mp3_buffer", { filename });
+  // What the loader made of the current file. Kept so the panel can say what
+  // was converted on the way in -- a 44.1k bounce on a 48k device used to be
+  // resampled by nobody and simply play 8.8% fast -- and so `set tempo from
+  // file` has a length to divide.
+  const [fileInfo, setFileInfo] = useState<FileInfo | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+
+  const loadFile = (filename: string) => {
+    if (BROWSER_DEBUG_MODE) return;
+    invoke<FileInfo>("set_mp3_buffer", { filename })
+      .then((info) => {
+        setFileInfo(info);
+        setFileError(null);
+      })
+      .catch((e) => {
+        setFileInfo(null);
+        setFileError(String(e));
+      });
   };
+
+  // The path lives in the js config so the session brings it back; Rust holds
+  // only the decoded samples, so it has to be pushed across again on mount.
+  const pickNewMp3 = (filename: string) => () => {
+    set("filePath", filename);
+    loadFile(filename);
+  };
+
+  // The file's own length is a tempo, once you say how many beats it is. Worth
+  // a button because a Logic bounce of a known bar count is the case this whole
+  // feature is for, and typing the quotient by hand is how you end up a few
+  // thousandths out.
+  //
+  // Rounding the result is safe in a way it wouldn't be with an accumulated
+  // read position: the file is locked to `beat` by construction, so a rounded
+  // bpm shifts the playback *rate* by a millionth and cannot slide the file off
+  // the grid however long it runs.
+  const setTempoFromFile = () => {
+    const beats = exprNumber(get("fileBeats"));
+    if (!fileInfo || beats <= 0 || fileInfo.seconds <= 0) return;
+    set("bpm", numExpr(Math.round(((beats * 60) / fileInfo.seconds) * 10000) / 10000));
+  };
+
+  const chooseFile = async () => {
+    let path: string | null = null;
+    if (BROWSER_DEBUG_MODE) {
+      path = window.prompt("Path to an audio file");
+    } else {
+      const picked = await openFileDialog({
+        multiple: false,
+        filters: [
+          {
+            name: "Audio",
+            extensions: ["wav", "aif", "aiff", "mp3", "flac", "ogg", "m4a"],
+          },
+        ],
+      });
+      path = typeof picked === "string" ? picked : null;
+    }
+    if (path) pickNewMp3(path)();
+  };
+
+  const fileRestored = useRef(false);
+  useEffect(() => {
+    if (fileRestored.current) return;
+    fileRestored.current = true;
+    const path = get("filePath");
+    if (path) loadFile(path);
+    // Once, on mount: Rust boots with no file, whatever the session says.
+  }, []);
 
   useEffect(() => {
     const unsubscribe = appWindow.onFileDropEvent((event) => {
@@ -778,7 +869,12 @@ const App = () => {
     ...Array.from({ length: inputChannelCount }, (_, i) => `ch ${i + 1}`),
     "drums",
     "click",
+    "file",
   ];
+
+  // Set when the audio thread has refused the config, i.e. when what you see in
+  // the panel is not what is playing.
+  const [configError, setConfigError] = useState<string | null>(null);
 
   const updateRustConfig = (args: Partial<RustConfig>) => {
     // console.log("calling set_config");
@@ -788,7 +884,17 @@ const App = () => {
     const newConfigForRust = snakeCaseKeys(unwrapValues(newConfig));
     // console.log("calling set_config with " + newConfigForRust);
     // alert(JSON.stringify(newConfigForRust));
-    invoke("set_config", { newConfig: newConfigForRust });
+    // A rejected push used to vanish: Tauri deserializes the argument before the
+    // command runs, so one bad field means the *whole* config is refused and
+    // Rust keeps whatever it last accepted. Everything still looks fine -- the
+    // panel updates, the checkbox ticks -- and nothing reaches the audio thread
+    // ever again. That was a NaN note time arriving as JSON `null`, which serde
+    // won't take; the grammar rejects those now, but the point is that a push
+    // failing for any reason has to be visible rather than inferred from the
+    // sound not changing.
+    invoke("set_config", { newConfig: newConfigForRust })
+      .then(() => setConfigError(null))
+      .catch((e) => setConfigError(String(e)));
     // console.log("called set_config");
   };
 
@@ -1450,6 +1556,26 @@ const App = () => {
 				NEW MP3 2
 			</button> */}
 
+        {configError && (
+          <div
+            style={{
+              border: "1px solid #e86",
+              borderRadius: 8,
+              margin: 4,
+              padding: 8,
+              backgroundColor: "#4a2a2a",
+              color: "#fbb",
+            }}
+          >
+            <b>the audio thread refused this config.</b> what you see here is not
+            what is playing. usually a rhythm field: fix the red one and it will
+            reconnect.
+            <div style={{ opacity: 0.8, fontSize: "0.85em", marginTop: 4 }}>
+              {configError}
+            </div>
+          </div>
+        )}
+
         <Section label="parameters">
           <ParameterList
             parameters={get("parameters")}
@@ -1502,7 +1628,62 @@ const App = () => {
             />
           </Section>
           <Section label="file">
+            <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+              <button onClick={chooseFile}>choose file…</button>
+              <span
+                style={{
+                  opacity: 0.7,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  direction: "rtl",
+                }}
+              >
+                {get("filePath") || "none"}
+              </span>
+            </div>
+            {fileError && <div style={{ color: "#e86" }}>{fileError}</div>}
+            {fileInfo && (
+              <div style={{ opacity: 0.7, fontSize: "0.9em" }}>
+                {fileDescription(fileInfo, exprNumber(get("bpm")))}
+              </div>
+            )}
             <Input label="play file" _key="playFile" set={set} get={get} />
+            <Input
+              label="file volume"
+              _key="fileVolume"
+              params={params}
+              set={set}
+              get={get}
+            />
+            <Divider label="against the grid" />
+            <Input
+              label="file beats"
+              _key="fileBeats"
+              params={params}
+              set={set}
+              get={get}
+            />
+            <button
+              onClick={setTempoFromFile}
+              disabled={!fileInfo || exprNumber(get("fileBeats")) <= 0}
+            >
+              set tempo from file
+            </button>
+            <Input
+              label="file offset (ms)"
+              _key="fileOffsetMs"
+              params={params}
+              set={set}
+              get={get}
+            />
+            <Input
+              label="file shift (beats)"
+              _key="fileShift"
+              params={params}
+              set={set}
+              get={get}
+            />
           </Section>
         </TabPanel>
 

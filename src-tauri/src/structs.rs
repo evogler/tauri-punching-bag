@@ -8,8 +8,19 @@ use std::{
 pub struct BeatResetState(pub Arc<AtomicBool>);
 
 pub struct Mp3Buffer {
+    /// Interleaved stereo at the *device* rate -- `read_audio_file` converts on
+    /// the way in, so the callback never resamples.
     pub buffer: Vec<f32>,
-    pub pos: usize,
+    /// Free-running read position in frames, used only when `file_beats` is 0.
+    /// Above zero the position is derived from `beat` instead and this is
+    /// ignored; f64 so the two paths can share one interpolating read.
+    pub pos: f64,
+}
+
+impl Mp3Buffer {
+    pub fn frames(&self) -> usize {
+        self.buffer.len() / 2
+    }
 }
 
 pub struct Mp3BufferState(pub Arc<Mutex<Mp3Buffer>>);
@@ -160,6 +171,22 @@ pub struct Config {
     pub click_volume: f64,
     pub drum_on: bool,
     pub play_file: bool,
+    /// Output gain for the file. Everything else summed onto the bus has one;
+    /// the file used to go in at unity, so balancing it against your own
+    /// playing meant reaching for the system volume.
+    pub file_volume: f64,
+    /// How many beats the file is, and the whole of what makes it line up with
+    /// the grid. Above zero the read position is *derived* from `beat` rather
+    /// than accumulated, so it cannot drift no matter how long it runs; at zero
+    /// the file free-runs at its natural rate, locked to nothing.
+    pub file_beats: f64,
+    /// Mechanical nudge in milliseconds, positive *earlier* -- the same sense
+    /// as a drum voice's `offset` and for the same job: a bounce whose downbeat
+    /// sits a few ms into the file.
+    pub file_offset_ms: f64,
+    /// Musical rotation, in beats: which beat of the grid the file's start
+    /// lands on. Tempo-independent, like a drum voice's `shift`.
+    pub file_shift: f64,
     pub visual_monitor_on: bool,
     pub audio_monitor_on: bool,
     pub buffer_compensation: usize,
@@ -259,8 +286,12 @@ pub struct Buffers {
 /// in the callback and heard now -- so that same shift would draw them early by
 /// the full compensation. Holding them back by it puts each one back on its own
 /// beat without moving anything else.
+/// drums, click, file -- the synthetic buses, in the order the frontend labels
+/// them and the order `main.rs` fills them.
+pub const BUS_COUNT: usize = 3;
+
 pub struct BusDelay {
-    slots: Vec<[f32; 2]>,
+    slots: Vec<[f32; BUS_COUNT]>,
     pos: usize,
 }
 
@@ -279,14 +310,14 @@ impl BusDelay {
             return;
         }
         self.slots.clear();
-        self.slots.resize(frames, [0.0, 0.0]);
+        self.slots.resize(frames, [0.0; BUS_COUNT]);
         self.pos = 0;
     }
 
-    /// Takes this frame's buses and returns the pair from `frames` ago. With no
+    /// Takes this frame's buses and returns the set from `frames` ago. With no
     /// compensation set there's nothing to line up, so it passes straight
     /// through.
-    pub fn push(&mut self, frame: [f32; 2]) -> [f32; 2] {
+    pub fn push(&mut self, frame: [f32; BUS_COUNT]) -> [f32; BUS_COUNT] {
         if self.slots.is_empty() {
             return frame;
         }

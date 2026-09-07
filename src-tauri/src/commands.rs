@@ -4,7 +4,7 @@ use crate::constants::{sample_rate, ANALYSIS_RESERVE_HOPS, ONSET_RESERVE, VISUAL
 use crate::get_loop_buffer_size::get_loop_buffer_size;
 use crate::io_channels::{list_devices, ActiveDevices, AudioDeviceInfo};
 use crate::prefs::{load as load_prefs, save as save_prefs, AudioPrefs};
-use crate::read_audio_file::get_samples_from_filename;
+use crate::read_audio_file::{decode_audio_file, get_samples_from_filename, to_device_stereo};
 use crate::structs::{
     AnalysisFrames, AnalysisOutputBuffer, BeatResetState, CalibrationState, Config, ConfigState,
     DrumSamples, InputChannelCount, LogState, LoopBufferState, Mp3BufferState, Payload,
@@ -14,23 +14,47 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::{Manager, State};
 
+/// What the loader found, so the panel can say what it is and work out what
+/// tempo a given number of beats implies. `sourceRate` is the file's own rate;
+/// the buffer itself has already been converted to the device's.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileInfo {
+    /// Frames *after* conversion, so seconds and beats are computed against the
+    /// rate the callback actually plays at.
+    pub frames: usize,
+    pub seconds: f64,
+    pub source_rate: f64,
+    pub source_channels: usize,
+    pub device_rate: f64,
+}
+
 #[tauri::command]
-pub fn set_mp3_buffer(app_handle: tauri::AppHandle, filename: String) {
+pub fn set_mp3_buffer(app_handle: tauri::AppHandle, filename: String) -> Result<FileInfo, String> {
+    let decoded = decode_audio_file(&filename)?;
+    let samples = to_device_stereo(&decoded);
+    let frames = samples.len() / 2;
+
     let mp3_buffer_state: tauri::State<Mp3BufferState> = app_handle.state();
-    let beat_state_reset: tauri::State<BeatResetState> = app_handle.state();
     let mut mp3_buffer = mp3_buffer_state.0.lock().unwrap();
-    let samples = get_samples_from_filename(&filename);
-    if let Err(_err) = samples {
-        println!("Error while reading file: {}", _err);
-    } else {
-        let samples = samples.unwrap();
-        println!("samples: {}", samples.len());
-        mp3_buffer.buffer = samples;
-        mp3_buffer.pos = 0;
-        beat_state_reset
-            .0
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-    }
+    mp3_buffer.buffer = samples;
+    // Only matters when no length in beats has been declared; above zero the
+    // position is derived from the beat and this is ignored. Loading no longer
+    // resets the beat: the file is phase-locked to the clock now, so restarting
+    // the clock to line a file up is neither needed nor wanted mid-practice.
+    mp3_buffer.pos = 0.0;
+
+    Ok(FileInfo {
+        frames,
+        seconds: if sample_rate() > 0.0 {
+            frames as f64 / sample_rate()
+        } else {
+            0.0
+        },
+        source_rate: decoded.rate,
+        source_channels: decoded.channels,
+        device_rate: sample_rate(),
+    })
 }
 
 #[tauri::command]

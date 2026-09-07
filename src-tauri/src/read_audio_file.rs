@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use crate::constants::sample_rate;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error;
@@ -8,7 +9,74 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
+/// What the decoder actually found, before anything is done about it. The rate
+/// and the channel count used to be dropped on the floor here, which is two
+/// silent bugs: a 44.1k file on a 48k device plays 8.8% fast, and a mono file
+/// plays an octave high, because the callback advances the read position once
+/// per *output* channel and so assumes interleaved stereo.
+pub struct AudioFile {
+    /// Interleaved, `channels` values per frame, at `rate`.
+    pub samples: Vec<f32>,
+    pub rate: f64,
+    pub channels: usize,
+}
+
+impl AudioFile {
+    pub fn frames(&self) -> usize {
+        if self.channels == 0 {
+            0
+        } else {
+            self.samples.len() / self.channels
+        }
+    }
+}
+
+/// Resample to the device rate and fold to interleaved stereo, so everything
+/// downstream can assume both. Linear interpolation, which is coarse but is
+/// done *once at load*, off the audio thread -- the alternative is a rate
+/// conversion in the render callback, which is exactly what must not happen.
+///
+/// Mono lands on both sides at full level rather than being panned, since a
+/// mono drum bounce is meant to be centred.
+pub fn to_device_stereo(file: &AudioFile) -> Vec<f32> {
+    let in_ch = file.channels.max(1);
+    let in_frames = file.frames();
+    if in_frames == 0 {
+        return Vec::new();
+    }
+    // Input frames per output frame. 1.0 when the rates already agree, and the
+    // interpolation below then reduces to an exact sample copy.
+    let ratio = if file.rate > 0.0 {
+        file.rate / sample_rate()
+    } else {
+        1.0
+    };
+    let out_frames = ((in_frames as f64) / ratio).floor().max(0.0) as usize;
+    let mut out = Vec::with_capacity(out_frames * 2);
+    for i in 0..out_frames {
+        let src = i as f64 * ratio;
+        let i0 = src.floor() as usize;
+        let frac = (src - i0 as f64) as f32;
+        let i1 = (i0 + 1).min(in_frames - 1);
+        for side in 0..2 {
+            // A mono file reads channel 0 for both sides; anything past stereo
+            // is dropped, since the output bus is stereo.
+            let c = side.min(in_ch - 1);
+            let a = file.samples[i0 * in_ch + c];
+            let b = file.samples[i1 * in_ch + c];
+            out.push(a + (b - a) * frac);
+        }
+    }
+    out
+}
+
+/// Interleaved stereo at the device rate, which is what both the file player
+/// and the drum voices assume.
 pub fn get_samples_from_filename(filename: &String) -> Result<Vec<f32>, String> {
+    Ok(to_device_stereo(&decode_audio_file(filename)?))
+}
+
+pub fn decode_audio_file(filename: &String) -> Result<AudioFile, String> {
     let src_result = std::fs::File::open(&filename);
     if let Err(e) = src_result {
         return Err(format!("Failed to open file: {}", e));
@@ -59,6 +127,11 @@ pub fn get_samples_from_filename(filename: &String) -> Result<Vec<f32>, String> 
     // Store the track identifier, it will be used to filter packets.
     let track_id = track.id;
 
+    // The container header usually carries both, but the spec on a decoded
+    // packet is authoritative, so it overwrites these below.
+    let mut rate = track.codec_params.sample_rate.unwrap_or(0) as f64;
+    let mut channels = track.codec_params.channels.map(|c| c.count()).unwrap_or(0);
+
     let mut sample_data: Vec<f32> = Vec::new();
 
     // The decode loop.
@@ -75,7 +148,11 @@ pub fn get_samples_from_filename(filename: &String) -> Result<Vec<f32>, String> 
             }
             Err(err) => {
                 if err.to_string() == "end of stream" {
-                    return Ok(sample_data);
+                    return Ok(AudioFile {
+                        samples: sample_data,
+                        rate,
+                        channels,
+                    });
                 } else {
                     println!(
                         "there was an error while reading an audio file: {:?}",
@@ -105,6 +182,8 @@ pub fn get_samples_from_filename(filename: &String) -> Result<Vec<f32>, String> 
                 // Consume the decoded audio samples (see below).
                 if _decoded.frames() > 0 {
                     let spec = *_decoded.spec();
+                    rate = spec.rate as f64;
+                    channels = spec.channels.count();
                     let mut samples: SampleBuffer<f32> =
                         SampleBuffer::new(_decoded.frames() as u64, spec);
                     samples.copy_interleaved_ref(_decoded);

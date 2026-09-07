@@ -239,8 +239,21 @@ function peg$parse(input, options) {
             time += note.time;
         }
         const endTime = time;
+        // Wrapping each note into the cycle below is `t % endTime`, which is
+        // NaN when the cycle has no length -- and a NaN time reaches Rust as
+        // JSON `null`, which serde refuses, which rejects the whole config push
+        // and silently freezes the audio thread at its last good settings.
+        // Erroring here instead leaves the field red with its last good value,
+        // the same as any other syntax error, for the same reason the repeat
+        // count below 1 does: `end: 0` is a shape nothing downstream survives.
+        if (!(endTime > 0) || !isFinite(endTime)) {
+        	error("a rhythm needs a length above zero");
+        }
         for (let i = 0; i < notes.length; i++) {
         	notes[i].time = (notes[i].time % endTime + endTime) % endTime;
+            if (!isFinite(notes[i].time)) {
+            	error("a note landed at no time in particular");
+            }
         }
         notes.sort((a, b) => a.time - b.time);
     return { notes, start: 0, end: endTime };

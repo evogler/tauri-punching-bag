@@ -91,24 +91,18 @@ fn main() -> Result<(), coreaudio::Error> {
     // access an asset file within the tauri app
 
     // load mp3
-    let mut mp3_loaded = false;
     let path = "/Users/eric/Music/Logic/tauri-file.wav".into();
     println!("app_config_dir: {:?}", app_config_dir);
     println!("resource_dir: {:?}", &resource_dir);
     let data = get_samples_from_filename(&path);
-    let mp3_arc: Arc<Mutex<Mp3Buffer>>;
-    if let Ok(data) = data {
-        mp3_loaded = true;
-        mp3_arc = Arc::new(Mutex::new(Mp3Buffer {
-            buffer: data,
-            pos: 0,
-        }));
-    } else {
-        mp3_arc = Arc::new(Mutex::new(Mp3Buffer {
-            buffer: vec![],
-            pos: 0,
-        }));
-    }
+    // Whether a file is loaded is asked of the buffer every callback, not
+    // captured here: this path is one person's machine, and a startup flag meant
+    // that anywhere it didn't exist, picking a file loaded the samples and then
+    // never played them.
+    let mp3_arc = Arc::new(Mutex::new(Mp3Buffer {
+        buffer: data.unwrap_or_default(),
+        pos: 0.0,
+    }));
 
     let mp3 = mp3_arc.clone();
     let mp3_state = Mp3BufferState(mp3_arc.clone());
@@ -233,7 +227,7 @@ fn main() -> Result<(), coreaudio::Error> {
 
         if should_reset_beat.load(std::sync::atomic::Ordering::Relaxed) {
             beat = 0.0;
-            mp3.pos = 0;
+            mp3.pos = 0.0;
             // A window stitched across the jump is a spectral edge nobody
             // played, and it would read as a phantom transient.
             analyzer.reset();
@@ -333,6 +327,16 @@ fn main() -> Result<(), coreaudio::Error> {
         // retrigger the others.
         drum_last_beats.resize(config.drums.len(), isize::MIN);
         bus_delay.resize(config.buffer_compensation);
+
+        // Resolved once per callback like everything else the frame loop needs.
+        // The buffer is already interleaved stereo at the device rate, so a
+        // frame is two values and no conversion happens down here.
+        let file_frames = mp3.frames();
+        let file_on = file_frames > 0 && config.play_file;
+        let file_gain = config.file_volume as S;
+        // Positive is *earlier*, i.e. further into the file, matching a drum
+        // voice's offset.
+        let file_offset_frames = config.file_offset_ms / 1000.0 * sample_rate();
         // Capped because a 16-input interface would otherwise cost 16 FFTs a
         // hop to look at one channel. Zero when analysis is off, which drops
         // the ring and stops any work happening at all.
@@ -562,6 +566,46 @@ fn main() -> Result<(), coreaudio::Error> {
                     }
                 }
 
+                // The read position is *derived* from the beat rather than
+                // accumulated, and that is the whole of the drift fix. An
+                // independent counter and the beat clock only ever agree by
+                // coincidence: any mismatch between the file's length and its
+                // length in beats -- a bounce a few samples long, a tempo that
+                // isn't exactly the file's -- used to add up, one wrap at a
+                // time, without bound. Recomputing from `beat` means the worst
+                // case is a sub-sample rounding rather than a running sum.
+                let mut file_frame = [0.0 as S; 2];
+                if file_on {
+                    let pos = if config.file_beats > 0.0 {
+                        let phase = (beat - config.file_shift).rem_euclid(config.file_beats)
+                            / config.file_beats;
+                        phase * file_frames as f64
+                    } else {
+                        // Length undeclared: free-run at the file's natural
+                        // rate, locked to nothing. Advanced once per *frame*
+                        // below, not once per output channel, which is what
+                        // made a mono file play an octave high.
+                        mp3.pos
+                    };
+                    let pos = (pos + file_offset_frames).rem_euclid(file_frames as f64);
+                    // rem_euclid can land on the modulus itself once rounded.
+                    let i0 = (pos.floor() as usize).min(file_frames - 1);
+                    let frac = (pos - i0 as f64) as S;
+                    let i1 = (i0 + 1) % file_frames;
+                    for side in 0..2 {
+                        let a = mp3.buffer[i0 * 2 + side];
+                        let b = mp3.buffer[i1 * 2 + side];
+                        // Interpolated because a declared length that isn't the
+                        // file's natural one is a varispeed. At the natural rate
+                        // `frac` is 0 and this is an exact sample read.
+                        file_frame[side] = a + (b - a) * frac;
+                    }
+                    mp3.pos = (mp3.pos + 1.0) % file_frames as f64;
+                }
+                // Mono sum, at the gain it sounded at, so the file can be shown
+                // as its own channel against what you played.
+                let file_bus: S = (file_frame[0] + file_frame[1]) * 0.5 * file_gain;
+
                 // What the drums and the click put out this frame, kept so the
                 // display can show them as their own channels -- which is how
                 // you line a sample's offset up against the grid by eye. Both
@@ -583,16 +627,8 @@ fn main() -> Result<(), coreaudio::Error> {
 
                     channel[i] = audio_out * 12.0;
 
-                    // mp3_sample = mp3_sample * 0.995 + mp3[mp3_pos] * 0.005;
-                    if mp3_loaded && config.play_file {
-                        channel[i] += mp3.buffer[mp3.pos];
-                        // channel[i] += mp3_sample;
-                    }
-                    if ch == 0 || ch == 1 {
-                        mp3.pos += 1;
-                    }
-                    if mp3.pos >= mp3.buffer.len() {
-                        mp3.pos = 0;
+                    if file_on {
+                        channel[i] += file_frame[side] * file_gain;
                     }
 
                     let mut drums: S = 0.0;
@@ -631,7 +667,8 @@ fn main() -> Result<(), coreaudio::Error> {
 
                 // Delayed by the compensation so they sit on the beat they
                 // sounded on, not the one the input stamp is shifted to.
-                let [drum_visual, click_visual] = bus_delay.push([drum_frame, click_frame]);
+                let [drum_visual, click_visual, file_visual] =
+                    bus_delay.push([drum_frame, click_frame, file_bus]);
 
                 // A wedged frontend must not be able to grow this without bound:
                 // it would cost memory, make the next drain's reserve enormous,
@@ -641,8 +678,9 @@ fn main() -> Result<(), coreaudio::Error> {
                 if state_vec.beats.len() < max_visual_backlog() {
                     state_vec.beats.push(visual_beat);
                     for &ch in config.visible_channels.iter() {
-                        // Channels past the input count are the synthetic buses, in
-                        // the order the frontend labels them: drums, then click.
+                        // Channels past the input count are the synthetic buses,
+                        // in the order the frontend labels them: drums, click,
+                        // then file.
                         let value = if ch < input_frame.len() {
                             let mut v = loop_visual[ch];
                             if config.visual_monitor_on {
@@ -651,8 +689,10 @@ fn main() -> Result<(), coreaudio::Error> {
                             v
                         } else if ch == input_frame.len() {
                             drum_visual
-                        } else {
+                        } else if ch == input_frame.len() + 1 {
                             click_visual
+                        } else {
+                            file_visual
                         };
                         state_vec.values.push(value.abs());
                     }

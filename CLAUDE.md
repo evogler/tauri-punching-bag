@@ -150,8 +150,8 @@ keeping the last good value. Deliberately not a scripting language.
   as `Rhythm`, so the recursive `unwrapValues` already strips them to `val` and
   they cost nothing on the Rust side. Per-view: `beatsPerRow`, `marginLeft`,
   `marginRight`, `visualGain`. Rust-side: `bpm`, `beatsToLoop`, `loopEchoes`,
-  `loopEchoGain`, `clickVolume`, `audioInGain`, `bufferCompensation` (see
-  `RustExprKey`). Read them through `exprNumber` / `exprList` / `viewRowBeats`,
+  `loopEchoGain`, `clickVolume`, `audioInGain`, `bufferCompensation`,
+  `fileVolume`, `fileBeats`, `fileOffsetMs`, `fileShift` (see `RustExprKey`). Read them through `exprNumber` / `exprList` / `viewRowBeats`,
   never directly. Sliders and dropdowns keep plain numbers -- there's nowhere to
   type an expression.
 - **Rhythm text takes bare parameter names**, no braces. Both generated PEG
@@ -284,6 +284,10 @@ legacy (it returns a flat array of times rather than `{notes, start, end}`).
   nothing downstream is written to survive, and this grammar could not produce
   one before; erroring leaves the field red with its last good value, like any
   other syntax error.
+- **A zero-length rhythm is a syntax error**, not a value. `"0"`, `"4:0"`,
+  `"0:1"` and `"1/0"` used to parse into notes at NaN, which is `null` over IPC
+  and unloadable by serde -- see *Failing loudly*. Same treatment as a repeat
+  count below 1, and for the same stated reason.
 - **`parser2.js` is generated and regenerating it is now a one-liner.**
   `yarn build:parser` runs `scripts/build-parser.mjs`, which uses `peggy`
   (a devDependency as of this change) with `format: "bare"` -- that is why the
@@ -787,8 +791,8 @@ Channels are named by *device channel index*, and indices past the input count
 are **synthetic buses**, in the order the frontend labels them:
 
 ```
-[ ch 1 … ch N ]  [ drums ]  [ click ]
-     inputs        bus N      bus N+1
+[ ch 1 … ch N ]  [ drums ]  [ click ]  [ file ]
+     inputs        bus N      bus N+1    bus N+2
 ```
 
 The frontend's `channelLabels` order **must** match how `main.rs` fills them.
@@ -856,6 +860,60 @@ and `drumGains()`, the same pattern as `VisualGrid.alpha`.
 Files are decoded in Rust by `load_drum_sample` and keyed by path; the callback
 only does a map lookup. Built-ins are keyed by plain name (`"ride"`) so a voice
 can refer to one without knowing the install path.
+
+### The file player
+
+One file, played along with, looping. `playFile` switches it, `fileVolume` is
+its output gain, and it appears as the third synthetic bus so it can be drawn
+against your own playing like any other channel.
+
+- **The read position is derived from `beat`, never accumulated.** This is the
+  whole of the sync fix. `mp3.pos` used to be a counter incremented once per
+  output channel and wrapped at `buffer.len()`, with nothing anywhere
+  reconciling it against the beat clock -- they agreed only at a beat reset, and
+  any mismatch between the file's length and its length in beats added up, one
+  wrap at a time, without bound. A bounce 40 frames longer than exactly 8 beats
+  is 4505 frames -- 102 ms -- out after ten minutes, which is what "it slowly
+  goes out of sync" was. Simulation-checked both ways: derived lands within one
+  frame of the file's start on every eighth beat over the same ten minutes.
+- **`fileBeats` is what makes that possible, and 0 means "don't".** Above zero
+  the file is phase-locked: `phase = (beat - fileShift) mod fileBeats`, times
+  the frame count. At 0 it free-runs at its natural rate off `Mp3Buffer::pos`,
+  which is the old behaviour minus the bugs -- and is not locked to anything, so
+  it will still slide against the grid. That's honest rather than fixable: a
+  file whose length nobody has declared has no beat.
+- **A rounded bpm cannot slide the file off the grid.** With the position
+  derived from `beat`, tempo only sets the playback *rate*; the file still hits
+  its start exactly on the beat. That is why `set tempo from file` can round to
+  four places -- the residue is a millionth of a semitone of varispeed, not a
+  drift.
+- **Declaring a length that isn't the file's natural one is a varispeed**, and
+  the read interpolates for it. At the natural rate `frac` is 0 and the read is
+  an exact sample copy, so nothing is filtered that needn't be.
+- **`fileOffsetMs` and `fileShift` are the drum `offset`/`shift` split**, for
+  the same reasons: ms is mechanical (a bounce whose downbeat sits a few ms in),
+  positive *earlier*; beats is musical placement and is tempo-independent.
+- **The rate and channel count were decoded and thrown away**, which was two
+  silent bugs at once: a 44.1k file on a 48k device played 8.8% fast, and a mono
+  file played an octave high because the position advanced once per output
+  channel. `decode_audio_file` now returns them and `to_device_stereo` converts
+  **at load**, off the audio thread -- linear interpolation, and mono goes to
+  both sides at full level rather than being panned. `get_samples_from_filename`
+  is that pair composed, so the drum voices were fixed by the same change.
+- **`mp3_loaded` was captured at startup from a hard-coded path**
+  (`/Users/eric/Music/Logic/tauri-file.wav`), so on any machine where that file
+  doesn't exist, picking a file decoded it and then never played it. The
+  callback asks the buffer instead. The startup path is still there and still
+  personal; nothing depends on it any more.
+- **Loading a file no longer resets the beat.** It used to, because that reset
+  was the only thing that ever aligned the two clocks. Now the file is locked to
+  the beat by construction, so restarting the clock to line a file up is neither
+  needed nor wanted mid-practice.
+- **`filePath` lives in the js config** so a session comes back with its file
+  loaded -- Rust holds decoded samples and not the path, so the frontend pushes
+  it back through `set_mp3_buffer` once on mount. `set_mp3_buffer` returns a
+  `FileInfo` (frames, seconds, source rate and channels, device rate), which is
+  what the panel prints and what `set tempo from file` divides.
 
 ### The analysis stream and the spectrogram view kind
 
@@ -1026,14 +1084,53 @@ one f32 a hop a channel, unclamped.
 - Skipped for spectrogram panes and in `barColorMode`, both of which fill the
   row height: there is nowhere to put a second signal.
 
+## Failing loudly
+
+A config push is all-or-nothing and used to fail in silence, which cost a
+debugging session on 2026-09-06: a click rhythm of `0` made the panel look
+completely dead -- pause, mute, every button -- while the audio carried on
+exactly as before.
+
+- **Tauri deserializes a command's arguments before the command runs**, so one
+  bad field means the *whole* `set_config` is refused and Rust keeps whatever it
+  last accepted. Nothing in the panel changes: React state updates, the checkbox
+  ticks, the field is green. Only the sound disagrees.
+- **The trigger was `JSON.stringify(NaN) === "null"`**, and serde will not take
+  `null` for an `f64`. `parser2`'s `Result` rule wraps every note into the cycle
+  with `t % endTime`, which is NaN when `endTime` is 0 -- so `"0"`, `"4:0"`,
+  `"0:1"` and `"1/0"` all parsed *successfully* into a config that could never
+  be sent. The grammar rejects a non-positive or non-finite span now, the same
+  way and for the same reason it rejects a repeat count below 1.
+- **`invoke("set_config")` now has a `.catch`** and the panel shows a red banner
+  saying what you are looking at is not what is playing. This is the fix that
+  matters: the grammar hole is closed, but the next one won't be, and a push
+  that fails has to be visible rather than inferred from the sound not changing.
+- **A saved session was the worse half.** The session is written on every config
+  change, so a `null` time went to local storage and came back at launch --
+  rejecting every push from the first render, before anything could be retyped.
+  `sanitizeRhythm` in `presets.ts` swaps an unusable `val` for the default's
+  while keeping `inputText`, so the field still shows what was typed and still
+  reads red. Applies to `audioSubdivisions` and each drum voice's rhythm; the
+  view grids don't need it, since they never leave the frontend and `drawGrids`
+  already skips a non-positive span.
+- **`resolveRhythm` refuses an unusable re-parse too.** A parameter can make a
+  rhythm degenerate without the field being touched -- `n:1` with `n` set to
+  0 -- and there's no input component watching that path to turn red.
+- **Two audio-thread guards, independent of all of the above.** `beat_bisect`
+  falls back to its default cycle when the span isn't finite and positive:
+  `beat / 0` saturates the loop count to `isize::MAX` and then *overflows* to
+  `isize::MIN` on the way out, which in release wraps silently and stops the
+  click triggering at all. And `mod_add` returned into a `while res >= max`
+  loop that never terminates when `max` is 0 -- a hung render callback holding
+  every lock the IPC thread needs, which is the worst failure available here.
+  Both are O(1) and neither depends on the frontend having validated anything.
+
 ## Known issues / latent bugs
 
-- **Mono audio files play at double speed.** `mp3.pos += 1` and
-  `sounding_samples[j].pos += 1` happen once per *output* channel, which assumes
-  decoded audio is interleaved stereo. `copy_interleaved_ref` gives whatever the
-  file has. The bundled `ride_cropped.wav` is stereo so it's fine, but any mono
-  file a user adds as a drum sample will play an octave high. **Most likely thing
-  to hit next.**
+- ~~**Mono audio files play at double speed.**~~ -- **fixed 2026-09-06.**
+  Everything is converted to interleaved stereo at the device rate on the way
+  in, so `sounding_samples[j].pos += 1` per output channel is now a correct
+  assumption rather than a lucky one. See *The file player*.
 - **The channel count `2` is a magic literal** in the output stream format and
   `if ch == 0 || ch == 1`. Untangling these into one constant is prerequisite work
   for any further channel changes.
@@ -1145,6 +1242,28 @@ What that detour does and does not establish:
   working around -- a notarized Developer ID build is the answer, if IT's policy
   is the standard one rather than an allowlist.
 
+### 2026-09-06, later: the file player
+
+Everything in *The file player* is new and **none of it has been heard**. The
+position arithmetic and the resampler are simulation- and unit-checked (run,
+then deleted): mono folds to stereo at the same length, a matching rate is a
+byte-exact copy, 44.1k resamples to 48k at the same duration, empty and
+zero-channel files don't panic, a whole cycle of `fileShift` is a no-op, and the
+derived position holds within one frame over ten minutes where the old
+accumulating one is 4505 frames out.
+
+What that does *not* establish: that a Logic bounce lands where you expect
+against the click, that `fileOffsetMs` has the sign that feels right at the
+keyboard, that `set tempo from file` gives a tempo you'd have typed, or that the
+file bus is legible in a pane next to your own playing. The mono and rate
+conversions also now sit under the *drum* samples, which were fine before and
+should be listened to once for that reason.
+
+Still to build, and deliberately not started: selecting a *region* of the file
+rather than using all of it, and the static waveform with hand-drawn beat
+markers. The static waveform is v2 by decision -- a long file is the open
+question there, and per-pixel peaks of a whole one is the wrong first answer.
+
 ## Discussed but not built
 
 - **An iOS / iPadOS port.** Wanted eventually, iPad first. Doable, and the code
@@ -1193,6 +1312,20 @@ What that detour does and does not establish:
   "several interfaces" is the same code path as "one device with more channels".
   v1 = user creates it in Audio MIDI Setup; v2 = app creates it via
   `AudioHardwareCreateAggregateDevice`.
+- **A static file waveform, and hand-drawn beat markers.** The next step for
+  playing along with a file: per-pixel peaks painted under the grid, stable
+  rather than swept, as the surface you click on to say where the beats are.
+  Deferred on the question of what a long file costs -- peaks for a whole file
+  at pane resolution is fine for a two-bar loop and not for an album side, so it
+  wants a region and probably a decimation step before it wants drawing code.
+  The onset picker could *propose* markers once they exist, but manual ones come
+  first: they're the ground truth any detector would be checked against, and the
+  point of the tool is that it's authoritative.
+- **Cancelling the app's own output out of the input.** The click, the drums and
+  now the file all bleed into the microphone on speakers, and the callback knows
+  exactly what it emitted -- so in principle it could be subtracted. Not
+  attempted; the room's impulse response sits between the two, which is the
+  whole difficulty. Headphones remain the answer.
 - **Decimated sample transport.** Send per-block peaks from Rust instead of raw
   samples. The frontend already reduces to per-pixel peaks, so the picture is
   identical for ~8× less JSON. Worth doing before going past a few channels.
