@@ -3,6 +3,8 @@ import parser2 from "./parser2";
 import {
   Params,
   evaluate,
+  formatNumberList,
+  referencedNames,
   resolveRhythmText,
   parseNumberList,
 } from "./expression";
@@ -76,7 +78,19 @@ export const drumLabel = (path: string) =>
 // renaming is safe here in a way it is not for most keys: a saved session's
 // plain number is still a valid value, so restore merges it over the default
 // and nothing changes meaning.
-export type Parameter = { name: string; value: number | number[] };
+export type Parameter = {
+  name: string;
+  /** The last value that resolved. Kept when `inputText` stops evaluating. */
+  value: number | number[];
+  /**
+   * The expression as typed, when it is one. Absent means `value` is a literal.
+   *
+   * Optional rather than a required `{inputText, val}` pair so a session
+   * written before parameters could reference each other still loads: its
+   * `{ name, value: 4 }` is already a valid parameter and needs no migration.
+   */
+  inputText?: string;
+};
 
 // A field written as an expression over the parameters: the text typed, and the
 // number it currently evaluates to. Same shape as `Rhythm`, so the recursive
@@ -506,11 +520,90 @@ export type ConfigKey = keyof Config;
 // Later duplicates would silently win, so the first binding of a name is the
 // one that counts. The panel refuses to create a duplicate; this only decides
 // what a hand-edited session does.
-export const parameterValues = (parameters: Parameter[]): Params => {
-  const out: Params = {};
-  for (const p of parameters) if (!(p.name in out)) out[p.name] = p.value;
-  return out;
+export const parameterText = (p: Parameter): string =>
+  p.inputText ??
+  (Array.isArray(p.value) ? formatNumberList(p.value) : String(p.value));
+
+// Scalar first: `parseNumberList("4")` is `[4]`, a one-element *list*, so
+// trying it first would quietly turn every literal into one.
+const evaluateParameter = (p: Parameter, values: Params): number | number[] => {
+  const text = parameterText(p);
+  try {
+    return evaluate(text, values);
+  } catch (scalarError) {
+    try {
+      return parseNumberList(text, values);
+    } catch (listError) {
+      // The scalar error is almost always the informative one -- "unknown
+      // parameter n" rather than whatever the list parser made of it.
+      throw text.includes(",") || text.includes("[") ? listError : scalarError;
+    }
+  }
 };
+
+export type ParameterResolution = {
+  values: Params;
+  /** name -> why it didn't resolve. */
+  failed: Record<string, string>;
+};
+
+/**
+ * Parameters may reference other parameters, in any order, so long as the
+ * references form a DAG.
+ *
+ * The DAG is enforced without building one: each pass resolves every parameter
+ * whose references are already resolved, and when a pass resolves *nothing*,
+ * whatever is left is a cycle, or depends on one, or names something that
+ * doesn't exist. That is the same answer a topological sort gives, and it needs
+ * no graph, no visited set, and no recursion.
+ *
+ * A parameter that fails contributes *nothing* rather than its cached value.
+ * Falling back to the cache would let a cycle appear to work off stale numbers,
+ * which is the one outcome worse than an error. Fields referring to it go red
+ * and keep their own last good values, exactly as when a parameter is deleted.
+ */
+export const resolveParameters = (
+  parameters: Parameter[]
+): ParameterResolution => {
+  const values: Params = {};
+  const failed: Record<string, string> = {};
+  // First definition of a name wins, as it always has.
+  const seen = new Set<string>();
+  let remaining = parameters.filter((p) => {
+    if (seen.has(p.name)) return false;
+    seen.add(p.name);
+    return true;
+  });
+  const errors: Record<string, string> = {};
+
+  while (remaining.length) {
+    const next: Parameter[] = [];
+    let progressed = false;
+    for (const p of remaining) {
+      try {
+        values[p.name] = evaluateParameter(p, values);
+        progressed = true;
+      } catch (e) {
+        errors[p.name] = (e as Error).message;
+        next.push(p);
+      }
+    }
+    remaining = next;
+    if (!progressed) break;
+  }
+
+  const stuck = new Set(remaining.map((p) => p.name));
+  for (const p of remaining) {
+    const circular = referencedNames(parameterText(p)).some((n) => stuck.has(n));
+    failed[p.name] = circular
+      ? "circular reference"
+      : errors[p.name] ?? "unresolved";
+  }
+  return { values, failed };
+};
+
+export const parameterValues = (parameters: Parameter[]): Params =>
+  resolveParameters(parameters).values;
 
 // Failure keeps the last good `val` and leaves the text alone. Deleting a
 // parameter shouldn't wipe every field that referred to it -- the field goes
@@ -622,6 +715,16 @@ export const resolveRustConfig = (
 };
 
 export const resolveJsConfig = (js: JsConfig): JsConfig => {
-  const params = parameterValues(js.parameters);
-  return { ...js, views: js.views.map((v) => resolveView(v, params)) };
+  const { values } = resolveParameters(js.parameters);
+  // Parameters carry their own cache, so a parameter that depends on one that
+  // just changed has to be written back here too -- otherwise `b = a*2` keeps
+  // showing the old product everywhere `value` is read directly.
+  const parameters = js.parameters.map((p) =>
+    p.name in values ? { ...p, value: values[p.name] } : p
+  );
+  return {
+    ...js,
+    parameters,
+    views: js.views.map((v) => resolveView(v, values)),
+  };
 };

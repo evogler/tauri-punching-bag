@@ -211,11 +211,33 @@ keeping the last good value. Deliberately not a scripting language.
   which is exactly a group body in both grammars, so `[divs]:1` becomes
   `[0.6,0.4]:1` and works. Anywhere else in a rhythm it will fail to parse,
   which surfaces as the field going red with its last good value kept.
-- **The parameter editor takes a number or a bare comma list**, not an
-  expression: a parameter is the thing expressions are written *over*, so
-  letting one be an expression would need a dependency order nothing else here
-  has. `parseParameterValue` returns `null` rather than throwing, since it runs
-  on every keystroke.
+- **A parameter may be an expression over the other parameters**, in any order,
+  so long as the references form a **DAG**. `resolveParameters` enforces that
+  without building a graph: each pass resolves every parameter whose references
+  are already resolved, and when a pass resolves *nothing*, whatever is left is
+  a cycle, depends on one, or names something that doesn't exist. Same answer a
+  topological sort gives, with no graph, no visited set and no recursion.
+  `parameterValues` is now `resolveParameters(...).values`, so every existing
+  caller -- session restore, `setParameters`, `loadPreset`, `resolveJsConfig` --
+  picked this up unchanged.
+- **A failed parameter contributes nothing, not its cached value.** Falling back
+  to the cache would let a cycle appear to work off stale numbers, which is
+  worse than an error. Fields referring to it go red and keep their own last
+  good values, exactly as when a parameter is deleted.
+- **A cycle is rejected where it is typed**, not stored and then reported: the
+  editor resolves a *candidate* list on each keystroke and commits only if this
+  parameter resolves in it. `referencedNames` then separates "circular
+  reference" from "unknown parameter zzz" in the message -- the same failure to
+  an evaluator, completely different things to fix.
+- **`Parameter` gained an optional `inputText`** rather than becoming
+  `{inputText, val}`. Optional means a session written before this loads with no
+  migration at all: its `{ name, value: 4 }` is already valid, and
+  `parameterText` derives the text from the value. `resolveJsConfig` writes the
+  resolved value back into each parameter, so `b = a*2` doesn't keep showing the
+  old product wherever `value` is read directly.
+- **Scalar is tried before list** when evaluating a parameter, because
+  `parseNumberList("4")` is `[4]` -- a one-element *list* -- so the other order
+  would quietly turn every literal into one.
 - **`MAX_LIST_LENGTH` counts group members**, so `[1,2]x64` is exactly at the
   cap and `[1,2]x128` is rejected.
 - **`beatsPerRow` changed shape** from `number[]` to `{inputText, val}`, which

@@ -36,6 +36,25 @@ const FUNCTIONS: Record<string, (args: number[]) => number> = {
 // parameter is named is the only place a user can hit any of this.
 const RHYTHM_SOUNDS = ["h", "k", "r", "s"];
 
+// The parameter names an expression mentions. Used to tell a circular
+// reference from a merely unknown one, which are the same failure to an
+// evaluator and completely different things to fix.
+export const referencedNames = (text: string): string[] => {
+  let tokens: Token[];
+  try {
+    tokens = tokenize(text);
+  } catch {
+    return [];
+  }
+  const names: string[] = [];
+  for (const t of tokens) {
+    if (t.kind !== "name") continue;
+    if (t.value === "x" || t.value in FUNCTIONS) continue;
+    names.push(t.value);
+  }
+  return names;
+};
+
 export const isValidParameterName = (name: string): boolean =>
   /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) &&
   !(name in FUNCTIONS) &&

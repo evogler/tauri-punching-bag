@@ -1,5 +1,5 @@
-import { Parameter } from "./config";
-import { formatNumberList, isValidParameterName } from "./expression";
+import { Parameter, parameterText, resolveParameters } from "./config";
+import { isValidParameterName } from "./expression";
 import { invalidBorder, useFocusedValue } from "./Input";
 
 const rowStyle: React.CSSProperties = {
@@ -15,26 +15,6 @@ const rowStyle: React.CSSProperties = {
 // `{n/bar}:1` grid.
 const NAMES = ["n", "bar", "m", "k", "a", "b", "c", "d"];
 
-// A number, or a list. Deliberately *not* the full expression language: a
-// parameter is the thing expressions are written over, so letting one be an
-// expression would need a dependency order nothing else here has.
-// `null` rather than a throw, since this runs on every keystroke.
-const parseParameterValue = (text: string): number | number[] | null => {
-  const trimmed = text.trim();
-  if (!trimmed) return null;
-  if (!trimmed.includes(",")) {
-    const n = parseFloat(trimmed);
-    return Number.isFinite(n) && /^-?(\d+\.?\d*|\.\d+)$/.test(trimmed)
-      ? n
-      : null;
-  }
-  const parts = trimmed.split(",").map((p) => p.trim());
-  const values = parts.map((p) => parseFloat(p));
-  if (parts.some((p) => !p) || values.some((v) => !Number.isFinite(v)))
-    return null;
-  return values;
-};
-
 const nextName = (parameters: Parameter[]) => {
   const taken = parameters.map((p) => p.name);
   const free = NAMES.find((n) => !taken.includes(n));
@@ -47,22 +27,26 @@ const nextName = (parameters: Parameter[]) => {
 const ParameterRow = ({
   parameter,
   others,
+  accepts,
+  failure,
   onChange,
   onRemove,
 }: {
   parameter: Parameter;
   others: string[];
+  /** Whether this text would resolve, given every *other* parameter. */
+  accepts: (text: string) => boolean;
+  /** Why the committed value doesn't resolve, if it doesn't. */
+  failure?: string;
   onChange: (next: Parameter) => void;
   onRemove: () => void;
 }) => {
   const [nameProps, setNameText] = useFocusedValue(parameter.name, {
     toString: (x) => x as string,
   });
-  const [valueProps, setValueText] = useFocusedValue(
-    Array.isArray(parameter.value)
-      ? formatNumberList(parameter.value)
-      : parameter.value
-  );
+  const [valueProps, setValueText] = useFocusedValue(parameterText(parameter), {
+    toString: (x) => x as string,
+  });
   // A name that isn't an identifier, or is already in use, simply doesn't
   // commit -- so the expressions that refer to the old one keep working while
   // it's being retyped.
@@ -85,19 +69,25 @@ const ParameterRow = ({
       <input
         {...valueProps}
         onChange={(e) => {
-          setValueText(e.target.value);
-          const value = parseParameterValue(e.target.value);
-          if (value !== null) onChange({ ...parameter, value });
+          const inputText = e.target.value;
+          setValueText(inputText);
+          // Committed only when it resolves *in place* -- which is what stops a
+          // cycle being stored at all, rather than being stored and then
+          // reported. `value` is left alone so the last good one survives.
+          if (accepts(inputText)) onChange({ ...parameter, inputText });
         }}
-        title={`Value of ${parameter.name}. A number, or a list like ".6,.4" to repeat as "${parameter.name} x 4"`}
+        title={`Value of ${parameter.name}. A number, a list like ".6,.4", or an expression over the other parameters`}
         style={{
-          width: "6em",
-          ...invalidBorder(parseParameterValue(valueProps.value) === null),
+          width: "7em",
+          ...invalidBorder(!accepts(valueProps.value)),
         }}
       />
       <button onClick={onRemove} title={`Remove ${parameter.name}`}>
         ✕
       </button>
+      {failure && (
+        <span style={{ color: "#e86", fontSize: "0.8em" }}>{failure}</span>
+      )}
     </div>
   );
 };
@@ -111,12 +101,26 @@ export const ParameterList = ({
 }: {
   parameters: Parameter[];
   setParameters: (next: Parameter[]) => void;
-}) => (
+}) => {
+  // Parameters may refer to each other in any order, so long as the references
+  // form a DAG. A candidate list is resolved on every keystroke to decide
+  // whether the text can be committed -- cheap, and it means a cycle is
+  // rejected where it is typed rather than stored and reported afterwards.
+  const { failed } = resolveParameters(parameters);
+  const acceptsFor = (i: number) => (inputText: string) => {
+    const candidate = parameters.map((p, j) =>
+      j === i ? { ...p, inputText } : p
+    );
+    return !(candidate[i].name in resolveParameters(candidate).failed);
+  };
+  return (
   <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
     {parameters.map((parameter, i) => (
       <ParameterRow
         key={i}
         parameter={parameter}
+        accepts={acceptsFor(i)}
+        failure={failed[parameter.name]}
         others={parameters.filter((_, j) => j !== i).map((p) => p.name)}
         onChange={(next) =>
           setParameters(parameters.map((p, j) => (j === i ? next : p)))
@@ -141,4 +145,5 @@ export const ParameterList = ({
       )}
     </div>
   </div>
-);
+  );
+};
