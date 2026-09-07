@@ -972,6 +972,32 @@ takes which, 1-based, in the same `parseNumberList` syntax as `beatsPerRow`.
   upper pattern is the equivalent, and turning `splitChannels` off ignores it
   entirely.
 
+### Grid and click offsets
+
+Both are the *musical* half of the drum pair -- a `shift` in beats, positive
+moving the pattern later, subtracted (or added, on the display side) the same
+way `DrumVoice.shift` is. Neither gets a millisecond partner: a grid is drawn,
+not sounded, and the click is synthesised in the callback, so there is no file
+attack to align.
+
+- **`VisualGrid.shift` is expression-backed**, unlike the drums'. The drums'
+  are literals because they are nested in the `drums` array and *not* in the
+  re-resolution walk, so an expression there would go stale on a parameter
+  change; `resolveView` already walks every grid to re-resolve its rhythm, so a
+  grid's shift is re-resolved with it and `1/3` or `bar/n` are safe to type.
+- **Optional, like `alpha`**, and read through `gridShift`. Left absent rather
+  than defaulted by `resolveView`, so a preset saved before this keeps its shape
+  and answers 0.
+- **Reduced modulo the pattern length before drawing**, since the pattern tiles
+  every `end` and a whole pattern of shift is a no-op -- the same property the
+  drums' shift has. The tiling starts one pattern *early* (`startBeat = -end`)
+  and skips negative results, or a shift would leave the first beats of the pane
+  empty instead of filling them from the previous tile.
+- **`clickShift` is an ordinary `RustExprKey`** -- registered in `RustExprKey`,
+  `RUST_EXPR_FIELDS` and `RUST_EXPR_KEYS` like every other Rust-side expression
+  -- and reaches the callback as `beat_bisect(&click_times, beat -
+  config.click_shift)`.
+
 `getCanvasPositions(layout, beat)` in `layout.ts` returns **every** place a beat
 appears on screen. Each row draws its own beats plus `marginLeft` beats of lead-in
 and `marginRight` of lead-out; because the loop repeats, a margin wider than the

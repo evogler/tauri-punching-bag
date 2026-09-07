@@ -181,6 +181,11 @@ pub struct Config {
     pub click_on: bool,
     pub click_toggle: bool,
     pub click_volume: f64,
+    /// Musical placement of the click's rhythm, in beats -- the same thing a
+    /// drum voice's `shift` is, and subtracted the same way. There is no
+    /// millisecond partner here: the click is synthesised in the callback, so
+    /// it has no file attack to align.
+    pub click_shift: f64,
     pub drum_on: bool,
     pub play_file: bool,
     /// Output gain for the file. Everything else summed onto the bus has one;

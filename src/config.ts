@@ -131,6 +131,7 @@ export type RustExprKey =
   | "loopEchoes"
   | "loopEchoGain"
   | "clickVolume"
+  | "clickShift"
   | "audioInGain"
   | "bufferCompensation"
   | "analysisBandLow"
@@ -198,6 +199,7 @@ export const defaultRustConfig = {
   clickOn: true,
   clickToggle: false,
   clickVolume: numExpr(0.3),
+  clickShift: numExpr(0),
   drumOn: true,
   loopingOn: false,
   playFile: true,
@@ -279,10 +281,18 @@ export type VisualGrid = {
   // read it through gridAlpha rather than directly.
   alpha?: number;
   subdivisions: Rhythm;
+  // Where the pattern starts, in beats -- a positive shift moves it later, the
+  // same sign as a drum voice's. Optional for the same reason `alpha` is; read
+  // it through gridShift. Expression-backed, unlike the drums', because grids
+  // *are* walked by `resolveView` and so cannot go stale on a parameter change.
+  shift?: NumberExpr;
 };
 
 export const gridAlpha = (grid: VisualGrid) =>
   typeof grid.alpha === "number" ? grid.alpha : 1;
+
+export const gridShift = (grid: VisualGrid) =>
+  grid.shift ? exprNumber(grid.shift) : 0;
 
 // Handed out in order to newly added grids so each one starts visually distinct
 // without the user having to pick a color.
@@ -751,6 +761,9 @@ const resolveView = (view: ViewConfig, params: Params): ViewConfig => ({
   grids: view.grids.map((g) => ({
     ...g,
     subdivisions: resolveRhythm(g.subdivisions, params),
+    // Left absent rather than defaulted, so a grid saved before this keeps its
+    // shape and `gridShift` answers 0 for it.
+    shift: g.shift ? resolveNumber(g.shift, params) : g.shift,
   })),
 });
 
@@ -780,6 +793,7 @@ const RUST_EXPR_FIELDS: {
   { key: "onsetMinGap", validate: (n) => Number.isFinite(n) && n >= 0 && n < 10000 },
   { key: "onsetOffset", validate: (n) => Number.isFinite(n) && Math.abs(n) < 10000 },
   { key: "clickVolume", validate: (n) => n >= 0 },
+  { key: "clickShift", validate: (n) => Number.isFinite(n) && Math.abs(n) < 100000 },
   { key: "fileVolume", validate: (n) => n >= 0 },
   // 0 is the "not declared" case, so this is >= rather than > 0.
   { key: "fileBeats", validate: (n) => Number.isFinite(n) && n >= 0 && n < 100000 },

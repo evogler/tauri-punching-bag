@@ -15,6 +15,7 @@ import {
   isJsConfigKey,
   ConfigKey,
   gridAlpha,
+  gridShift,
   ChannelStyle,
   channelStyle,
   channelGain,
@@ -1378,10 +1379,16 @@ const App = () => {
       if (!(end > 0) || !notes.length) continue;
       ctx.fillStyle = grid.color;
       ctx.globalAlpha = gridAlpha(grid);
-      for (let startBeat = 0; startBeat < cycleBeats; startBeat += end) {
+      // Reduced into one pattern length: the pattern tiles every `end`, so a
+      // whole pattern of shift is a no-op -- the property a drum voice's shift
+      // has for the same reason. Tiling starts one pattern early so a shift
+      // can't leave the first beats of the pane empty.
+      const shift = (((gridShift(grid) % end) + end) % end) || 0;
+      for (let startBeat = -end; startBeat < cycleBeats; startBeat += end) {
         for (const note of notes) {
-          const b = startBeat + note.time;
+          const b = startBeat + note.time + shift;
           if (b >= cycleBeats) break;
+          if (b < 0) continue;
           for (const { x, row } of getCanvasPositions(v.layout, b)) {
             const top = Math.round(row * v.rowHeight);
             const bottom = Math.round((row + 1) * v.rowHeight);
@@ -1937,6 +1944,17 @@ const App = () => {
               get={get}
             />
             <Input label="click volume" _key="clickVolume" params={params} set={set} get={get} />
+            {/* Beats, not milliseconds: the click is synthesised in the
+                callback, so there is no file attack to align the way a drum
+                voice's `offset` does. This is the musical half only. */}
+            <Input
+              label="click offset (beats)"
+              _key="clickShift"
+              params={params}
+              set={set}
+              get={get}
+              validate={(n: number) => Number.isFinite(n) && Math.abs(n) < 100000}
+            />
           </Section>
           <Section label="drums">
             <Input label="drums on" _key="drumOn" set={set} get={get} />

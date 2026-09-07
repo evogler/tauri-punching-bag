@@ -85,6 +85,7 @@ pub fn default_config() -> Config {
         click_on: true,
         click_toggle: false,
         click_volume: 0.3,
+        click_shift: 0.0,
         drum_on: true,
         play_file: true,
         file_volume: 1.0,

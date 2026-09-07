@@ -64,6 +64,7 @@ const RUST_EXPR_KEYS: RustExprKey[] = [
   "loopEchoes",
   "loopEchoGain",
   "clickVolume",
+  "clickShift",
   "audioInGain",
   "bufferCompensation",
   "analysisBandLow",

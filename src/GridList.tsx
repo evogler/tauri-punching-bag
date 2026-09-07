@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
-import { GRID_COLORS, Rhythm, VisualGrid, gridAlpha } from "./config";
+import { GRID_COLORS, Rhythm, VisualGrid, gridAlpha, gridShift } from "./config";
 import { accepts, invalidBorder, useFocusedValue } from "./Input";
-import { Params, resolveRhythmText } from "./expression";
+import { Params, evaluate, resolveRhythmText } from "./expression";
 import parser1 from "./parser1";
 import parser2 from "./parser2";
 
@@ -64,6 +64,13 @@ const GridRow = ({
   const parse = (text: string) =>
     parserFor(grid.subdivisions).parse(resolveRhythmText(text, params));
   const invalid = !accepts(() => parse(props.value));
+  // Absent rather than 0 on a grid saved before this existed, so the field
+  // shows what `gridShift` answers for it rather than inventing a value.
+  const [shiftProps, setShiftVal] = useFocusedValue(
+    grid.shift?.inputText ?? String(gridShift(grid)),
+    { toString: (x) => x as string }
+  );
+  const shiftInvalid = !accepts(() => evaluate(shiftProps.value, params));
 
   return (
     <div style={{ ...rowStyle, opacity: dragging ? 0.4 : 1 }}>
@@ -114,6 +121,18 @@ const GridRow = ({
         }}
         title={`Grid ${index + 1} rhythm. Parameters work bare: "div:1", "1/div"`}
         style={{ flex: 1, minWidth: 0, ...invalidBorder(invalid) }}
+      />
+      <input
+        {...shiftProps}
+        onChange={(e) => {
+          const v = e.target.value;
+          setShiftVal(v);
+          try {
+            onChange({ ...grid, shift: { inputText: v, val: evaluate(v, params) } });
+          } catch (e) {}
+        }}
+        title={`Grid ${index + 1} offset in beats -- positive moves it later. Arithmetic and parameters work: "1/3", "bar/n"`}
+        style={{ width: "4em", ...invalidBorder(shiftInvalid) }}
       />
       <input
         type="range"

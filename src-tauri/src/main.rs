@@ -525,7 +525,10 @@ fn main() -> Result<(), coreaudio::Error> {
                 let toggled_off = config.click_toggle && !in_loop;
 
                 // Triggers, once per frame rather than once per output channel.
-                let click_beat = beat_bisect(&click_times, beat);
+                // Subtracting the shift reads the rhythm from earlier in the
+                // cycle, so a positive shift moves the click later -- the same
+                // sign and the same mechanism as a drum voice's.
+                let click_beat = beat_bisect(&click_times, beat - config.click_shift);
                 if click_beat != last_beat {
                     click_sound_counter = if config.audio_subdivisions.notes.len() < 2
                         || (click_beat % (config.audio_subdivisions.notes.len() as isize) == 0)
