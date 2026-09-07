@@ -30,9 +30,10 @@ const nextName = (parameters: Parameter[]) => {
   return `p${i}`;
 };
 
-// What a parameter currently *is*, for a row whose text doesn't say. Only the
-// randoms show this: for everything else the text is the value, or is arithmetic
-// you can follow.
+// What a parameter currently *is*, for a row whose text doesn't already say --
+// a roll, an expression over other parameters, or a list written in a shorthand
+// like ".6,.4x3". Shown against the text rather than against a flag, so any
+// field whose text reads as its own value stays uncluttered.
 const showValue = (value: number | number[] | undefined): string =>
   value === undefined
     ? "?"
@@ -71,6 +72,11 @@ const ParameterRow = ({
   const nameOk = (name: string) =>
     isValidParameterName(name) && !others.includes(name);
   const random = isRandomParameter(parameter);
+  const resolved = showValue(parameter.value);
+  // A failed parameter contributes *nothing* downstream, so showing its last
+  // good value beside the error would claim something that isn't true. The
+  // error takes the slot instead.
+  const showsValue = !failure && resolved !== parameterText(parameter);
 
   return (
     <div style={rowStyle}>
@@ -102,14 +108,17 @@ const ParameterRow = ({
         }}
       />
       {random && (
-        <>
-          <button onClick={onReroll} title={`Reroll ${parameter.name}`}>
-            🎲
-          </button>
-          <span style={{ color: "#aaa" }}>
-            {showValue(parameter.value)}
-          </span>
-        </>
+        <button onClick={onReroll} title={`Reroll ${parameter.name}`}>
+          🎲
+        </button>
+      )}
+      {showsValue && (
+        <span
+          style={{ color: "#aaa" }}
+          title={`What ${parameter.name} currently resolves to`}
+        >
+          = {resolved}
+        </span>
       )}
       <button onClick={onRemove} title={`Remove ${parameter.name}`}>
         ✕
