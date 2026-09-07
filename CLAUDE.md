@@ -1077,6 +1077,40 @@ What that detour does and does not establish:
 
 ## Discussed but not built
 
+- **An iOS / iPadOS port.** Wanted eventually, iPad first. Doable, and the code
+  is already split roughly the right way: `analysis.rs`, `calibration.rs`,
+  `structs.rs`, `read_audio_file.rs`, `util.rs`, `prefs.rs` and
+  `get_loop_buffer_size.rs` -- about 1500 lines, including the beat clock, the
+  FFT, the flux, the onset picker and the matched filter -- are pure logic and
+  port unchanged. The damage is concentrated in `io_channels.rs` (428 lines, 31
+  Core Audio calls) and the setup half of `main.rs`. Two blockers and three
+  consequences:
+  - **Tauri v1 has no mobile support.** A v2 migration comes first: allowlist to
+    the capabilities model, `tauri::api::path` into plugins, a new config
+    schema. Mechanical but wide -- every command and the whole config file.
+  - **iOS has no Core Audio HAL.** `AudioObjectGetPropertyData`, `AudioDeviceID`,
+    device enumeration, `kAudioDevicePropertyNominalSampleRate` are all
+    macOS-only. iOS uses AVAudioSession, which is a different *model*, not a
+    different spelling: you declare a category and a *preferred* rate, and the
+    system routes and decides. Audio itself is a RemoteIO unit rather than AUHAL.
+    `coreaudio-rs`'s `macos_helpers` is exactly what its name says.
+  - **The device picker becomes meaningless**, not merely unported -- routing is
+    the user's business on iOS.
+  - **The calibration becomes optional but stays useful.** iOS reports
+    `inputLatency` / `outputLatency` / `ioBufferDuration` directly. Keep the
+    measurement anyway: it reads the real round trip including the air path,
+    which those figures cannot know.
+  - **Decimated sample transport stops being optional.** `get_samples` returns
+    JSON over IPC 100x a second, which is comfortable on a Mac and not on a
+    phone.
+  - Phone-specific and *not* just design: AVAudioSession interruptions (calls,
+    alarms, another app taking the session) have to be handled and the unit
+    restarted -- there is no macOS equivalent in the code today. And Bluetooth
+    output is ~150-200 ms, which the calibration would measure honestly and
+    absorb correctly while still being unplayable. Wired or built-in only.
+  - An Apple Developer Program membership stops being optional: iOS has no
+    ad-hoc sideloading escape hatch.
+
 - **Per-channel latency offsets.** Wanted, low priority — the owner isn't
   worried about a few ms of mic distance.
 - **Multiple input devices.** Do *not* build offset correction for this. Latency
