@@ -71,7 +71,12 @@ export const channelGain = (gains: number[], index: number) => gains[index] ?? 1
 export const drumLabel = (path: string) =>
   BUILT_IN_DRUMS.includes(path) ? path : path.split("/").pop() || path;
 
-export type Parameter = { name: string; value: number };
+// `value` widened from `number` to also hold a list, so `divs = .6,.4` can be
+// repeated as `divs x 4` in any number-list field. Widening rather than
+// renaming is safe here in a way it is not for most keys: a saved session's
+// plain number is still a valid value, so restore merges it over the default
+// and nothing changes meaning.
+export type Parameter = { name: string; value: number | number[] };
 
 // A field written as an expression over the parameters: the text typed, and the
 // number it currently evaluates to. Same shape as `Rhythm`, so the recursive

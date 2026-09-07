@@ -1,5 +1,5 @@
 import { Parameter } from "./config";
-import { isValidParameterName } from "./expression";
+import { formatNumberList, isValidParameterName } from "./expression";
 import { invalidBorder, useFocusedValue } from "./Input";
 
 const rowStyle: React.CSSProperties = {
@@ -14,6 +14,26 @@ const rowStyle: React.CSSProperties = {
 // pair the whole feature was designed around -- `bar/n x n` rows against a
 // `{n/bar}:1` grid.
 const NAMES = ["n", "bar", "m", "k", "a", "b", "c", "d"];
+
+// A number, or a list. Deliberately *not* the full expression language: a
+// parameter is the thing expressions are written over, so letting one be an
+// expression would need a dependency order nothing else here has.
+// `null` rather than a throw, since this runs on every keystroke.
+const parseParameterValue = (text: string): number | number[] | null => {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  if (!trimmed.includes(",")) {
+    const n = parseFloat(trimmed);
+    return Number.isFinite(n) && /^-?(\d+\.?\d*|\.\d+)$/.test(trimmed)
+      ? n
+      : null;
+  }
+  const parts = trimmed.split(",").map((p) => p.trim());
+  const values = parts.map((p) => parseFloat(p));
+  if (parts.some((p) => !p) || values.some((v) => !Number.isFinite(v)))
+    return null;
+  return values;
+};
 
 const nextName = (parameters: Parameter[]) => {
   const taken = parameters.map((p) => p.name);
@@ -38,7 +58,11 @@ const ParameterRow = ({
   const [nameProps, setNameText] = useFocusedValue(parameter.name, {
     toString: (x) => x as string,
   });
-  const [valueProps, setValueText] = useFocusedValue(parameter.value);
+  const [valueProps, setValueText] = useFocusedValue(
+    Array.isArray(parameter.value)
+      ? formatNumberList(parameter.value)
+      : parameter.value
+  );
   // A name that isn't an identifier, or is already in use, simply doesn't
   // commit -- so the expressions that refer to the old one keep working while
   // it's being retyped.
@@ -62,13 +86,13 @@ const ParameterRow = ({
         {...valueProps}
         onChange={(e) => {
           setValueText(e.target.value);
-          const value = parseFloat(e.target.value);
-          if (Number.isFinite(value)) onChange({ ...parameter, value });
+          const value = parseParameterValue(e.target.value);
+          if (value !== null) onChange({ ...parameter, value });
         }}
-        title={`Value of ${parameter.name}`}
+        title={`Value of ${parameter.name}. A number, or a list like ".6,.4" to repeat as "${parameter.name} x 4"`}
         style={{
-          width: "4em",
-          ...invalidBorder(!Number.isFinite(parseFloat(valueProps.value))),
+          width: "6em",
+          ...invalidBorder(parseParameterValue(valueProps.value) === null),
         }}
       />
       <button onClick={onRemove} title={`Remove ${parameter.name}`}>

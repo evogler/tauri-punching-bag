@@ -23,13 +23,42 @@ List
      = head: Note _ "," _ tail:List ","? { return [head, ...tail]}
      / head: Range _ "," _ tail: List      ","?	{ return [...head, ...tail] }
      / head: Squish _ "," _ tail: List     ","? { return [...head, ...tail] }
+     / head: Repeat _ "," _ tail: List     ","? { return [...head, ...tail] }
      / r:Range
      / s:Squish
+     / rep:Repeat
      / n:Note 							{ return [n] }
-     / "[" _ l:List _ ","? _ "]" 						{ return l }
+     / g:Group 						{ return g }
+
+// A bracketed group on its own. Factored out of Squish so that a repeat can
+// stand in the same place a group does.
+Group
+    = "[" _ l:List _ ","? _ "]" { return l; }
+
+// `[k 1, h 1]x4` -- the group again, end to end, four times. Rounds a
+// fractional count rather than rejecting it, matching parseNumberList: a
+// parameter sweep passes through 3.5 on its way somewhere useful, and a field
+// that flashes red at every intermediate value is unusable.
+// Squish takes `(Repeat / Group)`, so `[k 1, h 1]x4:1` repeats *then* squishes
+// the whole run into one beat.
+Repeat
+    = g:(Group) _ "x"i _ n:Expression
+    {
+      const count = Math.round(n);
+      // A count of 0 would give an empty rhythm with end 0, which nothing
+      // downstream is written to survive -- this grammar could not produce one
+      // before. Erroring puts the field in the same state as any other syntax
+      // error: red, not applied, last good value kept.
+      if (!(count >= 1)) error("repeat count must be at least 1");
+      const res = [];
+      for (let i = 0; i < count; i++) {
+        for (const note of g) res.push({ ...note });
+      }
+      return res;
+    }
 
 Squish
-    = "[" _ list:List _ "]" _ ":" space:Expression
+    = list:(Repeat / Group) _ ":" space:Expression
     { const s = space / list.reduce((sum,n) => sum + n.time, 0);
       const res = [];
       for (const note of list) {

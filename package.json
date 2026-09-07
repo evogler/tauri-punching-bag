@@ -22,7 +22,8 @@
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "dev": "yarn tauri dev"
+    "dev": "yarn tauri dev",
+    "build:parser": "node scripts/build-parser.mjs"
   },
   "eslintConfig": {
     "extends": [
@@ -43,6 +44,7 @@
     ]
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^1.0.5"
+    "@tauri-apps/cli": "^1.0.5",
+    "peggy": "^5.1.0"
   }
 }

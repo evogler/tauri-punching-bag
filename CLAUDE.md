@@ -67,7 +67,7 @@ position, looper) derives from it.
 | `SpectrogramControls.tsx` | The per-view spectrogram channel/gain/floor controls. |
 | `Slider.tsx` | The labelled range input those and `flux gain` share. |
 | `presets.ts` | Named presets *and* the auto-restored session. |
-| `parser1.js` / `parser2.js` | Generated PEG parsers for rhythm syntax (see Rhythm syntax). Don't hand-edit. |
+| `parser1.js` / `parser2.js` | Generated PEG parsers for rhythm syntax (see Rhythm syntax). Don't hand-edit -- `parser2.js` is built from `parser2.peg` by `yarn build:parser`. `parser1.js` has no source and is legacy. |
 
 ## The config system — sharp edges
 
@@ -192,6 +192,32 @@ keeping the last good value. Deliberately not a scripting language.
 - **A fractional repeat count rounds**, it doesn't reject -- `bar/n x n/2` at
   `n = 7` wants 3.5 rows, and rejecting would flash the field red at every
   intermediate value of a parameter sweep. `MAX_LIST_LENGTH` still caps at 128.
+- **`x` repeats a *group*, not only a number.** `[.6,.4]x8` gives sixteen
+  entries alternating, and groups nest: `[[.6,.4]x2, 1]x3`. A bracketed group
+  is parsed by exactly the same rules as a whole field -- `parseTokenList` is
+  the single implementation, used for both -- so expressions and parameters
+  work inside one (`[bar/n, .4]x2`). `[` and `]` are ops in the tokenizer and
+  `splitTop` counts their depth alongside parentheses.
+- **A parameter can be a list**: `divs = .6,.4`, then `rows: divs x 4`. A bare
+  list parameter stands exactly where a group would. `Params` is
+  `Record<string, number | number[]>` and `Parameter.value` was **widened**
+  rather than renamed -- unusually safe here, because a saved session's plain
+  number is still a valid value, so restore merges it over the default and
+  nothing changes meaning. The one place widening is not enough is a scalar
+  context: `evaluateTokens` throws `"divs" is a list` rather than guessing at
+  the first element or the length, and `divs*2` is an error in a list field too
+  -- arithmetic on a list has no meaning here.
+- **A list parameter substitutes into rhythm text as its comma-joined values**,
+  which is exactly a group body in both grammars, so `[divs]:1` becomes
+  `[0.6,0.4]:1` and works. Anywhere else in a rhythm it will fail to parse,
+  which surfaces as the field going red with its last good value kept.
+- **The parameter editor takes a number or a bare comma list**, not an
+  expression: a parameter is the thing expressions are written *over*, so
+  letting one be an expression would need a dependency order nothing else here
+  has. `parseParameterValue` returns `null` rather than throwing, since it runs
+  on every keystroke.
+- **`MAX_LIST_LENGTH` counts group members**, so `[1,2]x64` is exactly at the
+  cap and `[1,2]x128` is rejected.
 - **`beatsPerRow` changed shape** from `number[]` to `{inputText, val}`, which
   is the `loopFeedback` trap above: restore merges a saved array *over* the new
   object and `Math.max(...beatsPerRow)` returns NaN, drawing a blank pane.
@@ -221,7 +247,29 @@ legacy (it returns a flat array of times rather than `{notes, start, end}`).
 | `[k 1, h 1]:1` | sounds: a letter (`h` `k` `r` `s`) then a weight |
 | `[h 1>-.1]:1` | `>` nudges that note's time -- lands at 0.9, not 0 |
 | `[[k 1>-.1, h 1, s 1]:1, 3:1, 1]:1` | groups nest |
+| `[k 1, h 1]x4` | repeat the group four times |
+| `[k 1, h 1]x4:1` | repeat, *then* squish the whole run into one beat |
 
+- **`x` repeats a group, and it is a *different* `x` from the one in number
+  lists.** They look alike and are two languages: `parseNumberList` handles
+  `beatsPerRow`, `rowColorPattern` and drum `gains`; the PEG grammar handles
+  rhythms. `[.6,.4]x2` in a rhythm field used to fail with `Expected ":" or end
+  of input but "x" found` for exactly that reason. The grammar now has a
+  `Repeat` rule, and `Squish` takes `(Repeat / Group)` so `[k 1, h 1]x4:1`
+  repeats *then* squishes -- eight evenly spaced notes in one beat.
+- **A fractional repeat rounds** here too, matching `parseNumberList`, but a
+  count below 1 is an **error** rather than an empty rhythm. `end: 0` is a shape
+  nothing downstream is written to survive, and this grammar could not produce
+  one before; erroring leaves the field red with its last good value, like any
+  other syntax error.
+- **`parser2.js` is generated and regenerating it is now a one-liner.**
+  `yarn build:parser` runs `scripts/build-parser.mjs`, which uses `peggy`
+  (a devDependency as of this change) with `format: "bare"` -- that is why the
+  file reads `export default (function(){...})();`, the same shape it always
+  had, so nothing importing it changes. The syntax documentation lives in the
+  script's header constant so it is regenerated alongside the parser rather than
+  drifting from it. Checked by replaying 19 existing rhythms through the old and
+  new parsers: byte-identical output on every one.
 - **`+ - * / ( ) [ ]` are all grammar tokens and are evaluated natively.** That
   is why parameters need no braces in a rhythm field (see Parameters and
   expressions) -- substituting the name is enough and the grammar does the rest.
@@ -1107,7 +1155,10 @@ What that detour does and does not establish:
     alarms, another app taking the session) have to be handled and the unit
     restarted -- there is no macOS equivalent in the code today. And Bluetooth
     output is ~150-200 ms, which the calibration would measure honestly and
-    absorb correctly while still being unplayable. Wired or built-in only.
+    absorb correctly while still being unplayable -- not because 200 ms is
+    large, which `buffer_compensation` handles fine, but because it *varies*
+    with codec renegotiation and interference, and a compensation can only
+    absorb a constant. Wired or built-in only.
   - An Apple Developer Program membership stops being optional: iOS has no
     ad-hoc sideloading escape hatch.
 

@@ -7,7 +7,10 @@
 // use the throw to decide between committing a new value and keeping the last
 // good one -- a silent NaN would reach the draw loop as a blank pane.
 
-export type Params = Record<string, number>;
+// A parameter is a number, or a list of them. A list is only meaningful where a
+// list is expected -- `rows: divs x 4` -- so every scalar context rejects one
+// by name rather than coercing it to something arbitrary.
+export type Params = Record<string, number | number[]>;
 
 export type Token =
   | { kind: "num"; value: number }
@@ -48,7 +51,7 @@ export const tokenize = (text: string): Token[] => {
       i++;
       continue;
     }
-    if ("+-*/(),".includes(c)) {
+    if ("+-*/(),[]".includes(c)) {
       out.push({ kind: "op", value: c });
       i++;
       continue;
@@ -149,7 +152,11 @@ export const evaluateTokens = (tokens: Token[], params: Params): number => {
       return fn(args);
     }
     if (!(t.value in params)) throw new Error(`unknown parameter "${t.value}"`);
-    const v = params[t.value];
+    const raw = params[t.value];
+    // A list parameter in a scalar position. Saying so beats silently taking
+    // the first element or the length, either of which would be a guess.
+    if (Array.isArray(raw)) throw new Error(`"${t.value}" is a list`);
+    const v = raw;
     if (!Number.isFinite(v)) throw new Error(`parameter "${t.value}" is not a number`);
     return v;
   };
@@ -172,8 +179,8 @@ const splitTop = (
   const parts: Token[][] = [[]];
   let depth = 0;
   for (const t of tokens) {
-    if (t.kind === "op" && t.value === "(") depth++;
-    else if (t.kind === "op" && t.value === ")") depth--;
+    if (t.kind === "op" && (t.value === "(" || t.value === "[")) depth++;
+    else if (t.kind === "op" && (t.value === ")" || t.value === "]")) depth--;
     if (depth === 0 && isSeparator(t)) parts.push([]);
     else parts[parts.length - 1].push(t);
   }
@@ -191,9 +198,47 @@ export const parseNumberList = (
   text: string,
   params: Params = {}
 ): number[] => {
+  const out = parseTokenList(tokenize(text), params);
+  // An empty list would divide by zero downstream, so treat it as unfinished
+  // typing instead of committing it.
+  if (!out.length) throw new Error("empty list");
+  return out;
+};
+
+// What sits to the left of an `x`: a bracketed group, a list parameter, or an
+// ordinary expression. Groups nest, since the body is parsed by the same rules.
+const groupTokens = (tokens: Token[], params: Params): number[] => {
+  const first = tokens[0];
+  const last = tokens[tokens.length - 1];
+  const bracketed =
+    tokens.length >= 2 &&
+    first.kind === "op" &&
+    first.value === "[" &&
+    last.kind === "op" &&
+    last.value === "]";
+  if (bracketed) {
+    const inner = parseTokenList(tokens.slice(1, -1), params);
+    if (!inner.length) throw new Error("empty group");
+    return inner;
+  }
+  // A bare list parameter: `divs x 4`. Only when it is the whole entry --
+  // `divs*2` is arithmetic on a list and has no meaning here.
+  if (tokens.length === 1 && first.kind === "name") {
+    const value = params[first.value];
+    if (Array.isArray(value)) {
+      if (!value.length) throw new Error(`"${first.value}" is empty`);
+      return value.slice();
+    }
+  }
+  return [evaluateTokens(tokens, params)];
+};
+
+// The one list parser, used for a whole field and for the body of a group --
+// which is what makes `[[.6,.4]x2, 1]x3` work without a second set of rules.
+const parseTokenList = (tokens: Token[], params: Params): number[] => {
   const out: number[] = [];
   for (const entry of splitTop(
-    tokenize(text),
+    tokens,
     (t) => t.kind === "op" && t.value === ","
   )) {
     if (!entry.length) continue;
@@ -202,7 +247,10 @@ export const parseNumberList = (
       (t) => t.kind === "name" && t.value === "x"
     );
     if (extra.length) throw new Error('only one "x" per entry');
-    const value = evaluateTokens(valueTokens, params);
+    // The repeated thing is a *group*, not always a single number: `[.6,.4]x8`
+    // and a list parameter both stand where a number used to. One number is
+    // just the one-element case, so there is a single path here.
+    const group = groupTokens(valueTokens, params);
     // A repeat has to be whole, and a parameter sweep hands us 3.5 on the way
     // past. Rounding keeps the field usable mid-sweep, where rejecting would
     // flash it red for every intermediate value.
@@ -211,17 +259,13 @@ export const parseNumberList = (
         ? 1
         : Math.round(evaluateTokens(countTokens, params));
     if (!(count >= 0)) throw new Error("negative repeat count");
-    if (out.length + count > MAX_LIST_LENGTH) throw new Error("list too long");
-    for (let i = 0; i < count; i++) out.push(value);
+    if (out.length + count * group.length > MAX_LIST_LENGTH)
+      throw new Error("list too long");
+    for (let i = 0; i < count; i++) out.push(...group);
   }
-  // An empty list would divide by zero downstream, so treat it as unfinished
-  // typing instead of committing it.
-  if (!out.length) throw new Error("empty list");
   return out;
 };
 
-// Writes runs back out in the "3x2" shorthand, so what you typed survives a
-// round trip through the expanded array.
 export const formatNumberList = (values: number[]): string => {
   const parts: string[] = [];
   let i = 0;
@@ -252,8 +296,14 @@ export const hasInterpolation = (text: string) => text.includes("{");
 // is what keeps parser2's sound letters working.
 export const substituteParams = (text: string, params: Params): string =>
   text.replace(/[A-Za-z_][A-Za-z0-9_]*/g, (name) =>
-    name in params ? formatValue(params[name]) : name
+    name in params ? formatParam(params[name]) : name
   );
+
+// A list substitutes as `0.6,0.4`, which is exactly a group body in both rhythm
+// grammars -- so `[divs]:1` works. Anywhere else it will fail to parse, which
+// shows up as the field going red with its last good value kept.
+const formatParam = (value: number | number[]): string =>
+  Array.isArray(value) ? value.map(formatValue).join(",") : formatValue(value);
 
 // What a rhythm field runs before parsing. Braces are still honoured first, for
 // `min`/`max`/`round` -- the grammars have no functions of their own.
