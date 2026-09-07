@@ -552,6 +552,11 @@ const App = () => {
   // the accumulated peaks every time React re-rendered.
   const viewStates = useRef<ViewDrawState[]>([]);
   const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([]);
+  // One offscreen canvas per pane, holding everything that is painted
+  // *incrementally*: the sweep's waveform, the flux, the onsets, the
+  // spectrogram's columns. The visible canvas is rebuilt from it every frame,
+  // which is what lets the grids be painted onto a clean surface exactly once.
+  const layers = useRef<HTMLCanvasElement[]>([]);
   const [selectedView, setSelectedView] = useState(0);
 
   // Each pane's backing store, in device pixels. Measured from the element
@@ -1537,24 +1542,8 @@ const App = () => {
           v.width,
           Math.max(1, Math.ceil(spanBeats * pixelsPerBeat) || 1)
         );
-        const positions = getCanvasPositions(v.layout, beat);
-        for (const { x, row, isMargin } of positions) {
+        for (const { x, row, isMargin } of getCanvasPositions(v.layout, beat)) {
           drawSpectrumColumn(ctx, v, x, width, row, peaks, style, isMargin);
-        }
-        // Grids over the spectrum rather than under it -- a column fills the
-        // whole row height, so anything beneath it is gone, and seeing the
-        // grid across the picture is most of the point. Clipped to the columns
-        // just painted so each line is composited exactly once: repainting the
-        // whole pane's grids every frame would drive any alpha below 1 to
-        // opaque within a few frames.
-        if (positions.length) {
-          ctx.save();
-          ctx.beginPath();
-          for (const { x, row } of positions)
-            ctx.rect(x - width, row * v.rowHeight, width, v.rowHeight);
-          ctx.clip();
-          drawGrids(ctx, v);
-          ctx.restore();
         }
         peaks.length = 0;
         v.state.canvasPos = column;
@@ -1570,7 +1559,6 @@ const App = () => {
     ctx.globalAlpha = 1;
     ctx.fillStyle = background;
     ctx.fillRect(0, 0, v.width, v.height);
-    drawGrids(ctx, v);
     v.state.cycleColumns.forEach((peaks, column) => {
       // Every beat inside a column lands on the same pixel, so the middle of it
       // stands in for all of them.
@@ -1632,11 +1620,36 @@ const App = () => {
     }
   };
 
+  // The pane's accumulated picture, created and sized on demand. Sizing it
+  // blanks it, which is what a resize wants anyway.
+  const layerFor = (v: ViewCtx): CanvasRenderingContext2D | null => {
+    let canvas = layers.current[v.index];
+    if (!canvas) {
+      canvas = document.createElement("canvas");
+      layers.current[v.index] = canvas;
+    }
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    if (canvas.width !== v.width || canvas.height !== v.height) {
+      canvas.width = v.width;
+      canvas.height = v.height;
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = background;
+      ctx.fillRect(0, 0, v.width, v.height);
+    }
+    return ctx;
+  };
+
   const drawView = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
+    const layer = layerFor(v);
+    if (!layer) return;
+
+    // Everything below paints into the layer, never the screen. Each of these
+    // is incremental -- a column at a time, or a whole cycle at the wrap -- and
+    // the layer is what carries that from frame to frame.
     if (v.cfg.kind === "spectrogram") {
-      // Draws its own grids, per column and on top -- see drawSpectrogram.
       // `refreshAtCycleEnd` is a waveform mode and is ignored here.
-      drawSpectrogram(ctx, v);
+      drawSpectrogram(layer, v);
     } else if (v.cfg.refreshAtCycleEnd) {
       // Collected before the wrap check inside drawWholeCycle: a hop is stamped
       // half a window behind the samples, so the tail of a cycle's flux arrives
@@ -1644,15 +1657,25 @@ const App = () => {
       // that is about to go up rather than the next one.
       if (showsFlux(v)) collectFlux(v);
       if (showsOnsets(v)) collectOnsets(v);
-      drawWholeCycle(ctx, v);
+      drawWholeCycle(layer, v);
     } else {
-      drawGrids(ctx, v);
-      drawSweep(ctx, v);
+      drawSweep(layer, v);
       // After the sweep: it erases each column just before redrawing it, so
       // anything drawn first is painted over.
-      if (showsFlux(v)) drawFlux(ctx, v);
-      if (showsOnsets(v)) drawOnsets(ctx, v);
+      if (showsFlux(v)) drawFlux(layer, v);
+      if (showsOnsets(v)) drawOnsets(layer, v);
     }
+
+    // Rebuild the pane: the accumulated picture, then the grids over it. The
+    // grids used to be painted straight onto the pane every frame, compositing
+    // over their own previous pass -- which drove any alpha below 1 to opaque
+    // within about a second, and left them *under* the waveform only in the
+    // column the sweep was in. Onto a surface rebuilt every frame they land
+    // once, at the alpha asked for, in the same order everywhere.
+    drawOps.current++;
+    ctx.globalAlpha = 1;
+    ctx.drawImage(layer.canvas, 0, 0);
+    drawGrids(ctx, v);
   };
 
   // One loop driving every pane, so the batch is drained once, after all of them
@@ -1664,6 +1687,8 @@ const App = () => {
       const ctx = canvasRefs.current[v.index]?.getContext("2d");
       if (ctx) drawView(ctx, v);
     }
+    // Panes dropped by a smaller arrangement shouldn't keep a canvas alive.
+    layers.current.length = viewCtxs.length;
     samples.current = {
       channels: samples.current.channels,
       beats: [],
@@ -1765,7 +1790,10 @@ const App = () => {
   // columns the new one happens not to visit. Repainting here costs the
   // waveform already on screen, which is exactly what a resize already does.
   useEffect(() => {
-    for (const canvas of canvasRefs.current) {
+    // The layers are what actually hold the stale picture; the panes are
+    // rebuilt from them every frame. Both are cleared so nothing shows through
+    // in the frame between this effect and the next draw.
+    for (const canvas of [...layers.current, ...canvasRefs.current]) {
       const ctx = canvas?.getContext("2d");
       if (!ctx) continue;
       ctx.globalAlpha = 1;

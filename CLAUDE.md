@@ -840,6 +840,27 @@ per-pane, held in `views: ViewConfig[]`.
       tiles the column space exactly.
     - A non-finite advance is the first flush and a negative one is the loop
       wrapping; both mean "just this column". The pane's width bounds the rest.
+- **Each pane draws through an offscreen layer.** `layers` holds one detached
+  canvas per pane carrying everything painted *incrementally* -- the sweep's
+  waveform, the flux, the onsets, the spectrogram's columns. Every frame the
+  visible canvas is rebuilt: one `drawImage` of the layer, then the grids over
+  it.
+  - **The grids are the whole reason.** They used to be painted straight onto
+    the pane every frame, compositing over their own previous pass, which drove
+    any `alpha` below 1 to opaque within about a second -- so a grid's alpha was
+    honest only just after the sweep erased it. Onto a surface rebuilt every
+    frame they land exactly once, at the alpha asked for.
+  - **It also settles where a grid line sits.** Sweep mode had them *under* the
+    waveform in the column the sweep was in and *over* it everywhere else;
+    whole-cycle mode had them under; the spectrogram drew them per column,
+    clipped, specifically to dodge the compositing problem. All three now paint
+    them on top, once, and the spectrogram's clip dance is gone.
+  - **The layer is sized on demand** in `layerFor`, and setting either dimension
+    blanks it -- which is what a resize wants. It is filled with the background
+    on creation, so the `drawImage` is opaque and the pane needs no clear of its
+    own.
+  - Cleared alongside the visible canvases whenever the background or
+    `layoutKey` changes: the layer is where the stale picture actually lives.
 - **One `requestAnimationFrame` loop, in `App`.** It draws every pane and then
   drains the sample batch **once**, after all of them have read it. `Canvas.tsx`
   used to own the loop and clear the buffer itself; with more than one pane that
