@@ -36,7 +36,7 @@ import {
   ViewKind,
 } from "./config";
 import { Calibration } from "./Calibration";
-import { Input } from "./Input";
+import { ColorInput, Input } from "./Input";
 import {
   ActiveDevices,
   AudioDeviceInfo,
@@ -119,10 +119,6 @@ const stretchRatio = (info: FileInfo | null, fileBeats: number, bpm: number) => 
 // discovered as "the file sounds wrong".
 const STRETCH_CLEAN_LOW = 0.75;
 const STRETCH_CLEAN_HIGH = 1.33;
-
-// What the sweep paints over old samples with. The whole-cycle refresh clears to
-// the same thing, so both modes sit on the same background.
-const WAVEFORM_BACKGROUND = "#222222";
 
 // The pane arrangements the panel offers, as [across, down].
 const ARRANGEMENTS: [number, number][] = [
@@ -556,6 +552,9 @@ const App = () => {
 
   const viewCols = get("viewCols");
   const viewRows = get("viewRows");
+  // What the sweep paints over old samples with. The whole-cycle refresh clears
+  // to the same thing, so both modes sit on the same background.
+  const background = get("waveformBackground");
   // Floored once here rather than at the canvas element, so the backing store
   // and the pixelsPerBeat derived from it can't disagree by a fraction.
   const cellWidth = Math.max(1, Math.floor(get("canvasWidth") / viewCols));
@@ -1003,7 +1002,7 @@ const App = () => {
   ) => {
     const y = row * v.rowHeight;
     ctx.globalAlpha = 1;
-    ctx.strokeStyle = WAVEFORM_BACKGROUND;
+    ctx.strokeStyle = background;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(x, y);
@@ -1319,7 +1318,7 @@ const App = () => {
     // them a whole hop late.
     const left = x - width;
     ctx.globalAlpha = 1;
-    ctx.fillStyle = WAVEFORM_BACKGROUND;
+    ctx.fillStyle = background;
     ctx.fillRect(left, y, width, height);
     ctx.fillStyle = style.color;
     const floor = v.cfg.spectrogramFloor;
@@ -1403,7 +1402,7 @@ const App = () => {
   // per-column erase, so grid lines stay visible behind quiet passages.
   const paintWholeCycle = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
     ctx.globalAlpha = 1;
-    ctx.fillStyle = WAVEFORM_BACKGROUND;
+    ctx.fillStyle = background;
     ctx.fillRect(0, 0, v.width, v.height);
     drawGrids(ctx, v);
     v.state.cycleColumns.forEach((peaks, column) => {
@@ -1528,6 +1527,21 @@ const App = () => {
     render();
     return () => window.cancelAnimationFrame(id);
   }, []);
+
+  // The sweep never clears a pane -- it erases one column at a time, just ahead
+  // of where it is about to draw -- so a new background would otherwise arrive
+  // one column per frame and leave the pane in two colors for a whole cycle.
+  // Dragging a color picker makes that a stack of bands. Repainting here costs
+  // the waveform already on screen, which is exactly what a resize already does.
+  useEffect(() => {
+    for (const canvas of canvasRefs.current) {
+      const ctx = canvas?.getContext("2d");
+      if (!ctx) continue;
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = background;
+      ctx.fillRect(0, 0, canvas!.width, canvas!.height);
+    }
+  }, [background]);
 
   // Transport shortcuts: cmd-P pauses, cmd-L toggles looping. The listener is
   // registered once and reaches the current config through a ref, for the same
@@ -1859,6 +1873,39 @@ const App = () => {
         </TabPanel>
 
         <TabPanel active={panelTab === "visual"}>
+          {/* The frame rather than the signal: what a pane sits on, and what
+              sits between the panes. Global on purpose -- a gutter belongs to no
+              one pane, and a background that differed pane by pane would read as
+              a difference in what is being drawn. The per-pane palette is `row
+              colors`, over in the views tab. */}
+          <Section label="layout">
+            <ColorInput
+              label="background"
+              value={get("waveformBackground")}
+              onChange={(c) => set("waveformBackground", c)}
+              title="What a pane is erased to, in both draw modes"
+            />
+            <Slider
+              label="pane gap"
+              value={get("paneGap")}
+              min={0}
+              max={24}
+              step={1}
+              onChange={(n) => set("paneGap", n)}
+              title="Gutter between panes, in pixels. 0 butts them together"
+            />
+            <ColorInput
+              label="gap color"
+              value={get("paneGapColor")}
+              onChange={(c) => set("paneGapColor", c)}
+              title="What shows through the gutter between panes"
+            />
+            {(viewCtxs.length < 2 || get("paneGap") === 0) && (
+              <div style={{ color: "#aaa", fontSize: "0.8em" }}>
+                No gutter to see -- needs more than one pane and a gap above 0.
+              </div>
+            )}
+          </Section>
           <Section label="visual">
             <Input
               label="visual monitor"
@@ -2130,7 +2177,10 @@ const App = () => {
         display: "grid",
         gridTemplateColumns: `repeat(${viewCols}, 1fr)`,
         gridTemplateRows: `repeat(${viewRows}, 1fr)`,
-        gap: "2px",
+        // The gutter is the container showing through between the panes, so the
+        // gap color is this background rather than anything the canvases draw.
+        gap: `${get("paneGap")}px`,
+        backgroundColor: get("paneGapColor"),
       }}
     >
       {viewCtxs.map((v) => (

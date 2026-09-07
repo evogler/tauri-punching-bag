@@ -261,6 +261,40 @@ const NumberInput = ({ label, _key, get, set, validate }: II<number>) => {
   );
 };
 
+// A single color, as a swatch. Deliberately *not* wired into the type dispatch
+// below: `filePath` is a string too, so "every string is a color" would be
+// wrong the moment anything else took one. Called by name instead, the way
+// Slider and RowColorList are.
+export const ColorInput = ({
+  label,
+  value,
+  onChange,
+  title,
+}: {
+  label: string;
+  value: string;
+  onChange: (color: string) => void;
+  title: string;
+}) => (
+  <div style={{ ...rowStyle, alignItems: "center" }}>
+    <label>{label}</label>
+    <input
+      type="color"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      title={title}
+      style={{
+        width: "2em",
+        height: "1.6em",
+        padding: 0,
+        border: "none",
+        background: "none",
+      }}
+    />
+    <span style={{ color: "#aaa", fontSize: "0.8em" }}>{value}</span>
+  </div>
+);
+
 // Expression-backed fields carry no `type`, which is what tells them apart from
 // a rhythm; whether the resolved value is an array picks the widget.
 const isExprField = (val: any) =>

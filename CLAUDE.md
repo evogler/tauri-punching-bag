@@ -738,6 +738,39 @@ per-pane, held in `views: ViewConfig[]`.
 - Only `channelStyles` and the channel selection stay global, so a channel keeps
   its colour in every pane -- unless the pane sets row colours, below.
 
+### Layout chrome
+
+`waveformBackground`, `paneGap` and `paneGapColor` in `defaultJsConfig`, edited
+in the *layout* Section at the top of the visual tab. What a pane sits on, and
+what sits between the panes -- the frame rather than the signal.
+
+- **Global, not per-pane.** A gutter belongs to no one pane, and a background
+  differing pane by pane would read as a difference in what is being *drawn*
+  rather than in what it is drawn on. The per-pane palette is `rowColors`, which
+  describes the signal; these describe the surface. `WAVEFORM_BACKGROUND` was a
+  module constant and is now `const background = get("waveformBackground")`,
+  read once per render next to `viewCols` -- the three draw sites (`eraseColumn`,
+  the spectrogram column, `paintWholeCycle`) close over it.
+- **Changing the background repaints every canvas from an effect**, because the
+  sweep *never clears*: it erases one column at a time just ahead of where it
+  draws, so a new colour would otherwise arrive a column per frame and leave the
+  pane in two colours for a whole cycle -- and dragging the picker makes that a
+  stack of bands. The repaint costs the waveform already on screen, which is
+  what a resize already does.
+- **The gutter is the grid container showing through**, so `paneGapColor` is
+  that element's `backgroundColor` and not anything a canvas paints. It is
+  invisible at a 1x1 arrangement or a gap of 0, and the panel says so rather
+  than leaving a control that appears to do nothing.
+- **The gap does not resize the backing store.** `cellWidth`/`cellHeight` still
+  divide `canvasWidth`/`canvasHeight` by the arrangement, ignoring the gutter,
+  so a wider gap moves where the panes sit and slightly restretches what is
+  drawn in them -- it never changes the drawing itself. Same approximation the
+  hard-coded 2px always made.
+- **`ColorInput` is called by name, not dispatched on type.** `Input` picks its
+  widget from the value's type, and `filePath` is a string too -- "every string
+  is a colour" would be wrong the moment anything else took one. Same treatment
+  as `Slider` and `RowColorList`.
+
 ### Row colours
 
 `rowColors` is a per-pane list of colours and `rowColorPattern` says which row

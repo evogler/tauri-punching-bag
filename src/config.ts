@@ -521,6 +521,24 @@ export const defaultJsConfig = {
   // Rust holds the decoded samples, not the path, so this is the only record of
   // it -- the frontend pushes it back through `set_mp3_buffer` on mount.
   filePath: "",
+
+  // Layout chrome. Global rather than per-pane: the gutter is *between* panes
+  // and belongs to no one of them, and a background that changed pane by pane
+  // would read as a difference in the signal rather than in the frame. Row
+  // colors stay per-pane -- those describe what is drawn, these describe what
+  // it is drawn on.
+  //
+  // What a pane is erased to. The sweep never clears the canvas, it repaints
+  // one column at a time, so this is the color of every part of a pane nothing
+  // has been drawn over.
+  waveformBackground: "#222222",
+  // The gutter between panes, in CSS pixels. Zero butts them together; the
+  // canvas backing store is unaffected, so this only moves where the panes sit,
+  // never what is drawn in them.
+  paneGap: 2,
+  // What shows through that gutter. Invisible at a 1x1 arrangement, and at a
+  // gap of 0, because there is no gutter to see.
+  paneGapColor: "#333333",
 };
 
 export type RustConfig = typeof defaultRustConfig;
