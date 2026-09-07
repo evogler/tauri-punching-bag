@@ -543,6 +543,10 @@ export const defaultJsConfig = {
   // display, the thinnest line that screen can draw; 1 is what the hard-coded
   // `lineWidth = 2` came to there, so the default changes nothing.
   gridWidth: 1,
+  // A diagnostic overlay: how long a frame's drawing takes, and whether the
+  // loop is keeping up. Off by default, and it writes to the DOM directly
+  // rather than through React, so having it on perturbs nothing it measures.
+  showFrameTime: false,
 };
 
 export type RustConfig = typeof defaultRustConfig;

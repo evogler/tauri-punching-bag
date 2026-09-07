@@ -749,6 +749,21 @@ per-pane, held in `views: ViewConfig[]`.
   surface ask for a bigger box, which is a feedback loop rather than a
   one-off overflow.
 
+- **`showFrameTime` overlays what the draw loop costs**, to answer whether a
+  repaint-everything model is affordable before restructuring the draw path for
+  it (see *Discussed but not built*). Off by default.
+  - **It writes `textContent` from inside the loop, never through React.** A
+    readout that caused a render sixty times a second would be measuring
+    itself. The measurement is taken unconditionally -- two `performance.now()`
+    calls -- and the write is skipped when the node isn't mounted.
+  - **`draw` and `frame` answer different questions.** `draw` is the JS side of
+    a frame; `frame` is the gap between callbacks, which is what actually says
+    whether the loop is keeping up. Canvas work can be queued and rasterised
+    after the JS returns, so a small `draw` next to a long `frame` means the
+    cost is real but not where the timer is.
+  - Accumulated over 250 ms and flushed, because a number changing every frame
+    is unreadable -- and the **max** is the half that matters, since a repaint
+    model would show up as occasional long frames rather than a raised average.
 - **One `requestAnimationFrame` loop, in `App`.** It draws every pane and then
   drains the sample batch **once**, after all of them have read it. `Canvas.tsx`
   used to own the loop and clear the buffer itself; with more than one pane that

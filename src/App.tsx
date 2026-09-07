@@ -1618,10 +1618,49 @@ const App = () => {
   // on every render, since that closure was new each time.
   const drawAllRef = useRef(drawAll);
   drawAllRef.current = drawAll;
+  // Written to by the render loop with `textContent`, never through React: a
+  // readout that caused a render 60 times a second would be measuring itself.
+  // It exists only while the toggle is on, and the loop skips the write when
+  // the node isn't there, so the measurement is always taken and never shown
+  // unless asked for.
+  const frameStatsRef = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     let id: number;
+    // Accumulated over a window and flushed a few times a second -- a number
+    // changing every frame is unreadable, and the max is the interesting half
+    // anyway. `draw` is the JS side of a frame; `frame` is the gap between
+    // callbacks, which is what actually says whether the loop is keeping up.
+    const FLUSH_MS = 250;
+    let frames = 0;
+    let drawTotal = 0;
+    let drawMax = 0;
+    let spanStart = performance.now();
+
     const render = () => {
+      const before = performance.now();
       drawAllRef.current();
+      const after = performance.now();
+
+      const draw = after - before;
+      frames++;
+      drawTotal += draw;
+      if (draw > drawMax) drawMax = draw;
+
+      if (after - spanStart >= FLUSH_MS) {
+        const node = frameStatsRef.current;
+        if (node) {
+          const interval = (after - spanStart) / frames;
+          node.textContent =
+            `draw ${(drawTotal / frames).toFixed(1)} avg / ` +
+            `${drawMax.toFixed(1)} max ms  ·  ` +
+            `frame ${interval.toFixed(1)} ms  ·  ` +
+            `${Math.round(1000 / interval)} fps`;
+        }
+        frames = 0;
+        drawTotal = 0;
+        drawMax = 0;
+        spanStart = after;
+      }
       id = window.requestAnimationFrame(render);
     };
     render();
@@ -2037,6 +2076,13 @@ const App = () => {
               get={get}
             />
             <Input
+              label="frame time"
+              _key="showFrameTime"
+              title="Overlay the draw loop's cost: JS time per frame, and the gap between frames"
+              set={set}
+              get={get}
+            />
+            <Input
               label="visual subdivision offset"
               _key="subdivisionOffset"
               params={params}
@@ -2295,6 +2341,9 @@ const App = () => {
       style={{
         width: "100%",
         height: "100%",
+        // The frame-time overlay is positioned against this, so it sits over
+        // the panes without being a grid item and taking a cell of its own.
+        position: "relative",
         display: "grid",
         gridTemplateColumns: `repeat(${viewCols}, 1fr)`,
         gridTemplateRows: `repeat(${viewRows}, 1fr)`,
@@ -2331,6 +2380,31 @@ const App = () => {
           }}
         />
       ))}
+      {get("showFrameTime") && (
+        <div
+          style={{
+            position: "absolute",
+            top: 4,
+            left: 4,
+            // Diagnostics sit *over* the picture, and must never eat a click
+            // meant for the canvas underneath -- clicking a pane is what hides
+            // the panel.
+            pointerEvents: "none",
+            font: "11px ui-monospace, Menlo, monospace",
+            color: "#9c9",
+            backgroundColor: "rgba(0, 0, 0, 0.55)",
+            padding: "2px 6px",
+            borderRadius: "3px",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <span ref={frameStatsRef}>measuring...</span>
+          <span style={{ opacity: 0.6 }}>
+            {"  ·  "}
+            {viewCols}x{viewRows} panes {"·"} {get("visibleChannels").length} ch
+          </span>
+        </div>
+      )}
     </div>
   );
 
