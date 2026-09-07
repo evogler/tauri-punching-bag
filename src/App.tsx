@@ -149,8 +149,14 @@ const ARRANGEMENTS: [number, number][] = [
 // boundary falls where a pixel column ends, and panes disagree about that
 // because they each have their own pixelsPerBeat.
 type ViewDrawState = {
-  // Where the sweep last flushed, in pixels along the loop.
+  // The pixel column the sweep is currently filling, and the last beat that
+  // landed in it -- the column is painted at that beat when the sweep leaves,
+  // so a column's peak lands where it was measured rather than one column on.
   canvasPos: number;
+  pendingBeat: number;
+  // Where the last flush painted, in pixels along the loop. The gap to the next
+  // one is what says which columns were crossed -- see drawSweep.
+  lastFlushPixels: number;
   // Whole-cycle mode: the loudest sample seen in each pixel column so far this
   // time round, so holding a cycle's worth of audio costs a few thousand
   // numbers instead of a few hundred thousand samples.
@@ -185,7 +191,9 @@ type ViewDrawState = {
 type OnsetMark = { beat: number; channel: number; strength: number };
 
 const freshViewState = (): ViewDrawState => ({
-  canvasPos: 0,
+  canvasPos: -1,
+  pendingBeat: NaN,
+  lastFlushPixels: NaN,
   cycleColumns: new Map(),
   lastCyclePos: 0,
   channelPeaks: [],
@@ -1084,22 +1092,35 @@ const App = () => {
     invoke("reset_beat");
   };
 
-  // The eraser: one dark column covering the row, painted before the channels so
-  // the previous pass through this spot is gone.
+  // Whole columns, ending at the one `x` falls in. The sweep moves left to
+  // right within a row, so a span greater than one covers the columns just
+  // crossed -- the erase and the draw both start here so they line up exactly.
+  const columnLeft = (x: number, span: number) => Math.floor(x) - (span - 1);
+
+  // The eraser: `span` dark columns covering the row, painted before the
+  // channels so the previous pass through this spot is gone.
+  //
+  // A *filled rect on whole columns*, not a stroke at a fractional x. A 1px
+  // stroke centred on a fraction covers two columns at partial opacity, so it
+  // only ever partly erased -- invisible while the sweep flushed once per
+  // sample and several strokes piled up per column, and immediately visible as
+  // the previous pass showing through once the flush became one per column.
+  // The erase and the channels share this geometry exactly, so what is drawn is
+  // what gets cleared next time round.
   const eraseColumn = (
     ctx: CanvasRenderingContext2D,
     v: ViewCtx,
     x: number,
-    row: number
+    row: number,
+    span: number
   ) => {
-    const y = row * v.rowHeight;
+    const top = Math.round(row * v.rowHeight);
+    // The row's last pixel is left alone, which is the gap between rows.
+    const bottom = Math.round((row + 1) * v.rowHeight - 1);
+    drawOps.current++;
     ctx.globalAlpha = 1;
-    ctx.strokeStyle = background;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x, y + (v.rowHeight - 1));
-    ctx.stroke();
+    ctx.fillStyle = background;
+    ctx.fillRect(columnLeft(x, span), top, span, bottom - top);
   };
 
   // `half` splits the waveform about the row's centre line: "up" draws only the
@@ -1110,6 +1131,7 @@ const App = () => {
     v: ViewCtx,
     x: number,
     row: number,
+    span: number,
     value: number,
     style: ChannelStyle,
     isMargin: boolean,
@@ -1118,26 +1140,27 @@ const App = () => {
     const y = row * v.rowHeight;
     const height = v.rowHeight - 1;
     const val = Math.min(1, Math.max(value, 0));
-    ctx.lineWidth = 1;
+    drawOps.current++;
     // Margin copies are repeats of another part of the loop, so they're dimmed
     // the way the single-channel version used a darker grey for them.
     ctx.globalAlpha = style.alpha * (isMargin ? 0.55 : 1);
-    ctx.beginPath();
+    // Whole columns across, fractional down: the horizontal edges have to land
+    // on the pixel grid so the eraser can cover them, but the vertical extent
+    // is the *signal*, and rounding it would drop a quiet passage to nothing
+    // instead of drawing it faintly.
+    const left = columnLeft(x, span);
     if (v.cfg.barColorMode) {
       const shade = Math.floor(val * 255)
         .toString(16)
         .padStart(2, "0");
-      ctx.strokeStyle = `#${shade}${shade}${shade}`;
-      ctx.moveTo(x, y);
-      ctx.lineTo(x, y + height);
+      ctx.fillStyle = `#${shade}${shade}${shade}`;
+      ctx.fillRect(left, y, span, height);
     } else {
-      ctx.strokeStyle = rowColorFor(v.cfg, row, half) ?? style.color;
+      ctx.fillStyle = rowColorFor(v.cfg, row, half) ?? style.color;
       const top = half === "down" ? 0.5 : 0.5 - 0.5 * val;
       const bottom = half === "up" ? 0.5 : 0.5 + 0.5 * val;
-      ctx.moveTo(x, y + top * height);
-      ctx.lineTo(x, y + bottom * height);
+      ctx.fillRect(left, y + top * height, span, (bottom - top) * height);
     }
-    ctx.stroke();
     ctx.globalAlpha = 1;
   };
 
@@ -1174,6 +1197,7 @@ const App = () => {
     v: ViewCtx,
     x: number,
     row: number,
+    span: number,
     isMargin: boolean,
     peaks: number[]
   ) => {
@@ -1187,6 +1211,7 @@ const App = () => {
         v,
         x,
         row,
+        span,
         Math.min(1, peaks[slot] * v.visualGain * channelGains[channel]),
         style,
         isMargin,
@@ -1217,6 +1242,7 @@ const App = () => {
         v,
         x,
         row,
+        1,
         Math.min(1, value * v.cfg.fluxGain),
         style,
         isMargin,
@@ -1309,6 +1335,7 @@ const App = () => {
     const top = halfFor(v, index) === "down" ? y + height - tick : y;
     ctx.globalAlpha = style.alpha * (isMargin ? 0.55 : 1);
     ctx.fillStyle = style.color;
+    drawOps.current++;
     ctx.fillRect(x - 1, top, 2, tick);
     ctx.globalAlpha = 1;
   };
@@ -1361,6 +1388,7 @@ const App = () => {
             // therefore *how many columns it overlapped*, so 1 device pixel and
             // 2 came out as 2 columns and 3 rather than as 1 and 2, and the
             // setting looked like it did nothing.
+            drawOps.current++;
             ctx.fillRect(Math.round(x - width / 2), top, width, bottom - top);
           }
         }
@@ -1378,22 +1406,58 @@ const App = () => {
     if (!(beatsPerWindow > 0) || channels < 1) return;
     const peaks = v.state.channelPeaks;
     for (let i = 0; i < beats.length; i++) {
+      const beat = beats[i];
+      // Flush once per *pixel column*. This used to compare the sweep position
+      // as a float, which changes on every sample, so a column was erased and
+      // redrawn once per sample in it -- several times over at any zoom, and
+      // more the wider the pane -- for a picture a single stroke at the column's
+      // peak draws more accurately. The peak accumulator was already here; only
+      // the boundary was wrong. The spectrogram has always flushed this way.
+      //
+      // The step along the loop is the beat's own progress, not any one copy's
+      // position on screen: a beat can appear several times in a pane.
+      const column = Math.floor((beat % cycleBeats) * pixelsPerBeat);
+      if (column !== v.state.canvasPos) {
+        // Painted at the last beat that belonged to the column now closing, so
+        // its peak lands in the column it was measured in.
+        if (!Number.isNaN(v.state.pendingBeat)) {
+          // How far the sweep moved since the last flush, in pixels. Each copy
+          // of the beat on screen advances by exactly this, so the columns it
+          // crossed are (floor(x - advance), floor(x)] -- computed per copy
+          // rather than once from the loop's own column index, because a row's
+          // x is the loop position minus a *fractional* offset and the two
+          // therefore cross pixel boundaries at different moments. Taking one
+          // span for every copy left a column unvisited at some zooms, and an
+          // unvisited column is never erased: the leftover bar stays until the
+          // geometry changes.
+          const closing =
+            (v.state.pendingBeat % cycleBeats) * pixelsPerBeat;
+          const advance = closing - v.state.lastFlushPixels;
+          for (const { x, row, isMargin } of getCanvasPositions(
+            v.layout,
+            v.state.pendingBeat
+          )) {
+            const right = Math.floor(x);
+            // Not finite on the first flush, negative when the loop wrapped;
+            // both mean "just this column". The pane's width bounds the rest.
+            const left =
+              advance > 0
+                ? Math.max(right - v.width + 1, Math.floor(x - advance) + 1)
+                : right;
+            const span = right - left + 1;
+            eraseColumn(ctx, v, x, row, span);
+            drawChannelsAt(ctx, v, x, row, span, isMargin, peaks);
+          }
+          v.state.lastFlushPixels = closing;
+        }
+        peaks.length = 0;
+        v.state.canvasPos = column;
+      }
       for (let c = 0; c < channels; c++) {
         const value = values[i * channels + c];
         if (peaks[c] === undefined || value > peaks[c]) peaks[c] = value;
       }
-      const beat = beats[i];
-      // Flush once per step along the loop -- the beat's own progress, not any
-      // one copy's position on screen.
-      const sweep = (beat % cycleBeats) * pixelsPerBeat;
-      if (sweep !== v.state.canvasPos) {
-        for (const { x, row, isMargin } of getCanvasPositions(v.layout, beat)) {
-          eraseColumn(ctx, v, x, row);
-          drawChannelsAt(ctx, v, x, row, isMargin, peaks);
-        }
-        peaks.length = 0;
-        v.state.canvasPos = sweep;
-      }
+      v.state.pendingBeat = beat;
     }
   };
 
@@ -1418,6 +1482,7 @@ const App = () => {
     // them a whole hop late.
     const left = x - width;
     ctx.globalAlpha = 1;
+    drawOps.current++;
     ctx.fillStyle = background;
     ctx.fillRect(left, y, width, height);
     ctx.fillStyle = style.color;
@@ -1433,6 +1498,7 @@ const App = () => {
       // background-coloured seams between the rects.
       ctx.globalAlpha =
         Math.min(1, level) * style.alpha * (isMargin ? 0.55 : 1);
+      drawOps.current++;
       ctx.fillRect(left, top, width, Math.ceil(bottom - top));
     }
     ctx.globalAlpha = 1;
@@ -1510,7 +1576,7 @@ const App = () => {
       // stands in for all of them.
       const beat = (column + 0.5) / v.layout.pixelsPerBeat;
       for (const { x, row, isMargin } of getCanvasPositions(v.layout, beat)) {
-        drawChannelsAt(ctx, v, x, row, isMargin, peaks);
+        drawChannelsAt(ctx, v, x, row, 1, isMargin, peaks);
       }
     });
     if (showsFlux(v)) {
@@ -1624,6 +1690,11 @@ const App = () => {
   // the node isn't there, so the measurement is always taken and never shown
   // unless asked for.
   const frameStatsRef = useRef<HTMLSpanElement>(null);
+  // Canvas primitives issued this frame. Divided into the frame's draw time it
+  // gives cost per operation, which is the number that separates "there is too
+  // much to draw" from "each thing is drawn too expensively" -- and only the
+  // second of those is fixable without changing the picture.
+  const drawOps = useRef(0);
   useEffect(() => {
     let id: number;
     // Accumulated over a window and flushed a few times a second -- a number
@@ -1634,9 +1705,11 @@ const App = () => {
     let frames = 0;
     let drawTotal = 0;
     let drawMax = 0;
+    let opsTotal = 0;
     let spanStart = performance.now();
 
     const render = () => {
+      drawOps.current = 0;
       const before = performance.now();
       drawAllRef.current();
       const after = performance.now();
@@ -1644,21 +1717,26 @@ const App = () => {
       const draw = after - before;
       frames++;
       drawTotal += draw;
+      opsTotal += drawOps.current;
       if (draw > drawMax) drawMax = draw;
 
       if (after - spanStart >= FLUSH_MS) {
         const node = frameStatsRef.current;
         if (node) {
           const interval = (after - spanStart) / frames;
+          const ops = opsTotal / frames;
           node.textContent =
             `draw ${(drawTotal / frames).toFixed(1)} avg / ` +
             `${drawMax.toFixed(1)} max ms  ·  ` +
-            `frame ${interval.toFixed(1)} ms  ·  ` +
+            `${Math.round(ops).toLocaleString()} ops  ·  ` +
+            `${((drawTotal / frames / Math.max(1, ops)) * 1000).toFixed(2)} us/op` +
+            `  ·  frame ${interval.toFixed(1)} ms  ·  ` +
             `${Math.round(1000 / interval)} fps`;
         }
         frames = 0;
         drawTotal = 0;
         drawMax = 0;
+        opsTotal = 0;
         spanStart = after;
       }
       id = window.requestAnimationFrame(render);
@@ -1667,11 +1745,25 @@ const App = () => {
     return () => window.cancelAnimationFrame(id);
   }, []);
 
+  // Everything a pane's geometry is derived from, as one comparable value. A
+  // change to any of it invalidates every pixel already on screen *and* the
+  // accumulated per-column peaks, which are keyed by a column index that only
+  // means something at one zoom.
+  const layoutKey = viewCtxs
+    .map(
+      (v) =>
+        `${v.width}x${v.height}:${v.layout.pixelsPerBeat}:${v.layout.cycleBeats}:` +
+        `${v.layout.chainStart}:${v.layout.marginLeft},${v.layout.marginRight}:` +
+        v.layout.beatsPerRow.join(",")
+    )
+    .join("|");
+
   // The sweep never clears a pane -- it erases one column at a time, just ahead
   // of where it is about to draw -- so a new background would otherwise arrive
-  // one column per frame and leave the pane in two colors for a whole cycle.
-  // Dragging a color picker makes that a stack of bands. Repainting here costs
-  // the waveform already on screen, which is exactly what a resize already does.
+  // one column per frame and leave the pane in two colors for a whole cycle,
+  // and a new *zoom* would leave the old picture's bars standing in whatever
+  // columns the new one happens not to visit. Repainting here costs the
+  // waveform already on screen, which is exactly what a resize already does.
   useEffect(() => {
     for (const canvas of canvasRefs.current) {
       const ctx = canvas?.getContext("2d");
@@ -1680,7 +1772,15 @@ const App = () => {
       ctx.fillStyle = background;
       ctx.fillRect(0, 0, canvas!.width, canvas!.height);
     }
-  }, [background]);
+    // The draw state describes the picture just thrown away: a sweep position,
+    // a half-filled column, and peaks indexed by the old zoom's columns.
+    // Reset *in place*: the ViewCtxs the draw loop is using hold references to
+    // these objects, taken during the render before this effect ran, so
+    // replacing the array would leave the sweep on the old state until some
+    // unrelated render happened to rebuild them.
+    for (const state of viewStates.current)
+      Object.assign(state, freshViewState());
+  }, [background, layoutKey]);
 
   // Transport shortcuts: cmd-P pauses, cmd-L toggles looping. The listener is
   // registered once and reaches the current config through a ref, for the same

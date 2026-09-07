@@ -749,6 +749,16 @@ per-pane, held in `views: ViewConfig[]`.
   surface ask for a bigger box, which is a feedback loop rather than a
   one-off overflow.
 
+- **A pane is cleared when its geometry changes**, not only when the background
+  does -- `layoutKey` carries the backing store size, `pixelsPerBeat`,
+  `cycleBeats`, `chainStart`, the margins and `beatsPerRow`. The sweep only ever
+  erases columns it visits, so at a new zoom the old picture's bars stand in
+  whatever columns the new one happens not to reach. The per-pane draw state is
+  reset alongside, since a sweep position and a map of per-column peaks only
+  mean something at one zoom -- **in place** (`Object.assign`), because the
+  `ViewCtx`s the draw loop is holding reference those objects from the render
+  before the effect ran, and replacing the array would leave the sweep on the
+  old state.
 - **`showFrameTime` overlays what the draw loop costs**, to answer whether a
   repaint-everything model is affordable before restructuring the draw path for
   it (see *Discussed but not built*). Off by default.
@@ -764,6 +774,72 @@ per-pane, held in `views: ViewConfig[]`.
   - Accumulated over 250 ms and flushed, because a number changing every frame
     is unreadable -- and the **max** is the half that matters, since a repaint
     model would show up as occasional long frames rather than a raised average.
+  - **`ops` and `us/op` are what make the timing actionable.** Every canvas
+    primitive in the hot paths increments one counter, so the readout separates
+    "there is too much to draw" from "each thing is drawn too expensively".
+    Only the second is fixable without changing the picture, and the two call
+    for opposite work.
+  - **Measured 0.22 us/op, so the sweep was op-count bound, not state bound.**
+    ~7 ms at that rate is ~32,000 primitives a frame -- which is what the
+    per-column flush below was for.
+  - **Measured under a stress test: ~7 ms average, ~30 ms max, 55-60 fps** --
+    the sweep spending ~40% of a 60 Hz budget and dropping the occasional frame
+    *before* any repaint model was considered. **After the per-column flush
+    below: under 1 ms average, ~2 ms max, ~275 ops.** A hundredfold fewer
+    primitives, and the headroom question is now settled the other way.
+  - **`us/op` stops meaning anything once `ops` is small.** At ~275 the frame's
+    cost is dominated by what the counter doesn't count -- the per-sample peak
+    accumulation, `getCanvasPositions`, plain loop overhead -- so the figure
+    rose to 1-2 while the frame got seven times cheaper. Read it only when
+    `ops` is in the thousands.
+  - A literal full repaint is still out: rows x pane width columns per channel
+    per pane, of order 200k primitives, which at the 0.22 us/op measured when
+    the counter was meaningful is ~50 ms a frame. Affordable **on demand**,
+    never per frame. See *Discussed but not built*.
+- **`drawSweep` flushes once per pixel column, not once per sample.** It used
+  to compare the sweep position as a float, which changes on every sample, so a
+  column was erased and redrawn once per sample that landed in it -- several
+  times over at any zoom, and more the wider the pane. The `channelPeaks`
+  accumulator was already there for exactly this; only the boundary was wrong,
+  and the spectrogram had always flushed this way (`Math.floor`).
+  - **A column is painted at `pendingBeat`**, the last beat that landed in it,
+    when the sweep leaves -- not at the beat that triggered the flush, which
+    belongs to the *next* column and would draw every peak one column late.
+    `canvasPos` starts at -1 and `pendingBeat` at NaN so the first column of a
+    fresh pane isn't painted from an empty accumulator.
+  - **The picture gets more accurate, not just cheaper.** One stroke at the
+    column's true maximum replaces several overlapping antialiased strokes at
+    fractional x whose blend only approximated it.
+  - It costs up to one column of display latency -- the tens of microseconds of
+    audio in a pixel.
+  - **It also exposed the eraser, which had never fully erased.** `eraseColumn`
+    stroked a 1px line at a fractional x, which covers two columns at partial
+    opacity; while the sweep flushed once per *sample*, several of those piled
+    up per column and between them cleared it. One flush per column left a
+    single partial stroke, and the previous pass showed through -- worse the
+    further out you zoom, since that is where the pile-up had been deepest. The
+    eraser and the channel trace now share `columnLeft(x, span)` and both draw
+    filled rects on whole columns, so what is drawn is exactly what gets cleared
+    next time round.
+  - **Whole columns across, fractional down.** The horizontal edges have to land
+    on the pixel grid for the eraser to cover them; the vertical extent is the
+    *signal*, and rounding it would drop a quiet passage to nothing rather than
+    drawing it faintly.
+  - **`span` is how many columns the sweep just crossed, computed per copy on
+    screen**, and normally 1. It is greater where the zoom puts consecutive
+    samples more than a pixel apart, and those skipped columns have to be
+    erased too -- the same ghosting at the other end of the zoom range.
+    - **It cannot be taken once from the loop's own column index.** A row's `x`
+      is the loop position minus a *fractional* offset (`rowStart` and
+      `marginLeft` times `pixelsPerBeat`), so `floor(x)` and `floor(loopPixels)`
+      cross pixel boundaries at different moments. One span for every copy left
+      a column unvisited at some zooms -- and an unvisited column is never
+      erased, so a bar from an earlier picture stood there indefinitely. The
+      span comes from `lastFlushPixels` instead: the columns crossed are
+      `(floor(x - advance), floor(x)]`, evaluated at each copy's own `x`, which
+      tiles the column space exactly.
+    - A non-finite advance is the first flush and a negative one is the loop
+      wrapping; both mean "just this column". The pane's width bounds the rest.
 - **One `requestAnimationFrame` loop, in `App`.** It draws every pane and then
   drains the sample batch **once**, after all of them have read it. `Canvas.tsx`
   used to own the loop and clear the buffer itself; with more than one pane that
