@@ -40,7 +40,7 @@ use crate::structs::{
     SampleOutputBuffer, SoundingSample,
 };
 use crate::types::{Args, S};
-use crate::util::{beat_bisect, mod_add};
+use crate::util::{beat_bisect, mod_add, toggle_silent};
 use rand::Rng;
 use std::{
     collections::HashMap,
@@ -570,10 +570,12 @@ fn main() -> Result<(), coreaudio::Error> {
 
                 // Alternating halves of a double-length loop: the metronome
                 // plays for one loop and is silent for the next, so you play
-                // the second half against what you just recorded. Once per
-                // frame -- the drums read it too, and their trigger is out here.
-                let in_loop = beat % (config.beats_to_loop * 2.0) < config.beats_to_loop;
-                let toggled_off = config.click_toggle && !in_loop;
+                // the second half against what you just recorded. The click is
+                // synthesised at the instant it sounds, so this beat is its
+                // sounding beat; a drum voice asks separately, because its
+                // offset means those are not the same moment.
+                let toggled_off =
+                    config.click_toggle && toggle_silent(beat, config.beats_to_loop);
 
                 // Triggers, once per frame rather than once per output channel.
                 // Subtracting the shift reads the rhythm from earlier in the
@@ -623,7 +625,16 @@ fn main() -> Result<(), coreaudio::Error> {
                             // instead of being chopped off mid-sample. The beat
                             // is still recorded, so coming back doesn't fire a
                             // burst for everything missed.
-                            if !toggled_off {
+                            //
+                            // Asked about the beat this hit will *sound* on
+                            // rather than about `beat`: the offset fires the
+                            // trigger `offset_beats` early, so testing the
+                            // trigger instant sounded the note at the top of the
+                            // silent half and dropped the one at the top of the
+                            // sounding half -- exactly the wrong two.
+                            let voice_silent = config.click_toggle
+                                && toggle_silent(beat + offset_beats, config.beats_to_loop);
+                            if !voice_silent {
                                 sounding_samples.push(SoundingSample {
                                     sample: sample.clone(),
                                     pos: 0,

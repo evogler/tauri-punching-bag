@@ -1232,6 +1232,16 @@ than resetting each cycle. Empty means no modulation.
 transient lands on the beat. Seeking into the file would chop the front off a
 slow attack. `offset_beats = offset_ms / 1000 * bpm / 60`.
 
+**The `clickToggle` gate asks about the beat a hit *sounds* on, not the beat its
+trigger fires on.** Those are `offset_beats` apart by construction -- the offset
+is a look-ahead so the transient lands on the beat -- so testing at the trigger
+sounded the note at the top of the silent half and dropped the one at the top of
+the sounding half, exactly the wrong two. `toggle_silent(sounding_beat,
+beats_to_loop)` in `util.rs` is the one definition, used by the click (whose
+trigger instant *is* its sounding beat, being synthesised) and by each drum
+voice at `beat + offset_beats`. A `shift` needs no correction: it moves where
+the note sounds *and* when it triggers, together.
+
 `shift` and `gains` carry `#[serde(default)]` because `presets.ts` only merges top-level
 keys — a session saved before it existed has drum voices without the field. The
 TS side mirrors this with optional `shift?` / `gains?` read through `drumShift()`
@@ -1779,7 +1789,9 @@ palette still wraps.
 Also this day: `subdivisionOffset` deleted (it had a UI input and the draw code
 had never read it), every parameter now showing what it resolves to rather than
 only the randoms, `range` taking an optional step, and `yarn tauri` going
-through `scripts/tauri.mjs` so a successful build sweeps stale disk images.
+through `scripts/tauri.mjs` so a successful build sweeps stale disk images, the
+sweep eraser covering the pixel rows a loud bar antialiases into, and the
+`clickToggle` gate moving to the beat a drum hit sounds on.
 
 The **high pass** (see its own section) is new and unheard and unseen. Checked
 by temp test in Rust (run, then deleted): the passband is flat within 0.25 dB,

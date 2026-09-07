@@ -54,3 +54,28 @@ pub fn mod_add(a: usize, b: usize, max: usize) -> usize {
     }
     res
 }
+
+/// Whether the toggle's silent half covers a given beat.
+///
+/// `click_toggle` alternates halves of a double-length loop: the metronome and
+/// the drums play for one `beats_to_loop` and are silent for the next, so you
+/// play the second half against what you just recorded.
+///
+/// The argument is the beat the sound *lands* on, which is not the beat a
+/// trigger fires on. A drum voice's `offset` starts its sample early so the
+/// transient arrives on the beat, so the two are `offset_beats` apart -- and
+/// asking at the trigger put the note at the top of a silent half on the wrong
+/// side of the boundary and dropped the note at the top of a sounding one.
+pub fn toggle_silent(sounding_beat: f64, beats_to_loop: f64) -> bool {
+    let cycle = beats_to_loop * 2.0;
+    // No length means no halves. `beat % 0.0` is NaN and every NaN comparison
+    // is false, which used to read as "silent" and mute the click outright --
+    // the wrong way to fail for a field that is one keystroke from valid.
+    if !(cycle > 0.0) || !sounding_beat.is_finite() {
+        return false;
+    }
+    // rem_euclid rather than `%`: a voice shifted ahead of the launch beat can
+    // ask about a negative one, where `%` keeps the sign and lands every such
+    // beat in the sounding half regardless of where it actually falls.
+    sounding_beat.rem_euclid(cycle) >= beats_to_loop
+}
