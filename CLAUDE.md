@@ -403,20 +403,30 @@ Still outstanding, and the reason other machines are hard:
 
 ### Installing on a second Mac
 
-**Two DMGs sit in the build tree and only one of them is real.**
+**The build now sweeps stale disk images, so there should only ever be one.**
+`bundle/dmg/tauri-punching-bag_0.1.0_aarch64.dmg` is the release artifact.
 
-| Path | What it is |
-|---|---|
-| `bundle/dmg/tauri-punching-bag_0.1.0_aarch64.dmg` | the release artifact -- ship this one |
-| `bundle/macos/rw.tauri-punching-bag_0.1.0_x64.dmg` | a read-write scratch image the bundler left behind, dated **March 2023**, `x86_64` |
-
-A rebuild does not clean the `rw.` one up, so it sits in the tree looking like a
-build output indefinitely. Shipping it by mistake produced an app that first
+This used to be a real hazard. A rebuild never cleaned up after itself, so old
+images sat in the tree looking like build outputs indefinitely -- the bundler's
+`bundle/macos/rw.*_x64.dmg` scratch image from **March 2023**, and a **November
+2022** `x86_64` build under `target/debug/bundle/dmg/` whose name was *identical*
+in shape to a real artifact. Shipping one by mistake produced an app that first
 refused to launch and then, once launched, captured nothing -- no microphone
 prompt, no entry in Privacy & Security, silence with nothing in any log. Every
 one of those symptoms is *also* what a correct build looks like when Gatekeeper,
 TCC, or the sample rate is wrong, which is why it survived several rounds of
 plausible fixes aimed at the wrong thing.
+
+- **`yarn tauri` runs `scripts/tauri.mjs`, not the CLI directly.** It forwards
+  every argument untouched and only sweeps after a `build` that *succeeded* --
+  a failed build is left exactly as it fell, so there is something to look at,
+  and so a transient `bundle_dmg.sh` failure can't take the previous good
+  artifact with it. `yarn tauri dev` is unaffected.
+- **The sweep is by time, not by name.** Any `.dmg` under `src-tauri/target`
+  older than the moment the build started is from some other build and goes.
+  The `rw.` prefix is only the case we happened to know about; the image that
+  actually cost a day was named exactly like a real one, which a name pattern
+  would never have caught.
 
 **Identify the artifact before debugging anything else.** One command settles it:
 
