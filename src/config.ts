@@ -7,6 +7,8 @@ import {
   referencedNames,
   resolveRhythmText,
   parseNumberList,
+  isRandomText,
+  Rng,
 } from "./expression";
 
 // How a single input channel is drawn.
@@ -597,13 +599,17 @@ export const parameterText = (p: Parameter): string =>
 
 // Scalar first: `parseNumberList("4")` is `[4]`, a one-element *list*, so
 // trying it first would quietly turn every literal into one.
-const evaluateParameter = (p: Parameter, values: Params): number | number[] => {
+const evaluateParameter = (
+  p: Parameter,
+  values: Params,
+  rng?: Rng
+): number | number[] => {
   const text = parameterText(p);
   try {
-    return evaluate(text, values);
+    return evaluate(text, values, rng);
   } catch (scalarError) {
     try {
-      return parseNumberList(text, values);
+      return parseNumberList(text, values, rng);
     } catch (listError) {
       // The scalar error is almost always the informative one -- "unknown
       // parameter n" rather than whatever the list parser made of it.
@@ -633,8 +639,12 @@ export type ParameterResolution = {
  * which is the one outcome worse than an error. Fields referring to it go red
  * and keep their own last good values, exactly as when a parameter is deleted.
  */
+export const isRandomParameter = (p: Parameter): boolean =>
+  isRandomText(parameterText(p));
+
 export const resolveParameters = (
-  parameters: Parameter[]
+  parameters: Parameter[],
+  roll?: (name: string) => boolean
 ): ParameterResolution => {
   const values: Params = {};
   const failed: Record<string, string> = {};
@@ -651,8 +661,17 @@ export const resolveParameters = (
     const next: Parameter[] = [];
     let progressed = false;
     for (const p of remaining) {
+      // A random parameter's stored value *is* its value. The whole config is
+      // re-resolved on every keystroke, so evaluating `choose(1,2,3)` here
+      // would re-roll it constantly; a roll happens only when something asks
+      // for one, and until then this is a literal like any other.
+      if (isRandomParameter(p) && !roll?.(p.name) && p.value !== undefined) {
+        values[p.name] = p.value;
+        progressed = true;
+        continue;
+      }
       try {
-        values[p.name] = evaluateParameter(p, values);
+        values[p.name] = evaluateParameter(p, values, Math.random);
         progressed = true;
       } catch (e) {
         errors[p.name] = (e as Error).message;
@@ -675,6 +694,27 @@ export const resolveParameters = (
 
 export const parameterValues = (parameters: Parameter[]): Params =>
   resolveParameters(parameters).values;
+
+/**
+ * Re-rolls the random parameters `pick` names, writing each new draw back as
+ * that parameter's stored value.
+ *
+ * Nothing else has to be told. A parameter that references a rolled one, and
+ * every expression-backed field in either config, re-derives from the stored
+ * values on the next resolve -- which is exactly what happens when any
+ * parameter is edited by hand.
+ */
+export const rollParameters = (
+  parameters: Parameter[],
+  pick: (name: string) => boolean = () => true
+): Parameter[] => {
+  const { values } = resolveParameters(parameters, pick);
+  return parameters.map((p) =>
+    isRandomParameter(p) && pick(p.name) && p.name in values
+      ? { ...p, value: values[p.name] }
+      : p
+  );
+};
 
 // Failure keeps the last good `val` and leaves the text alone. Deleting a
 // parameter shouldn't wipe every field that referred to it -- the field goes

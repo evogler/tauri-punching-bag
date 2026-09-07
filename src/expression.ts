@@ -29,6 +29,40 @@ const FUNCTIONS: Record<string, (args: number[]) => number> = {
   },
 };
 
+// A source of randomness, passed in rather than reached for. Everything in this
+// file is otherwise a pure function of its text and its parameters, and the
+// callers depend on that: the whole config is re-resolved on every keystroke.
+export type Rng = () => number;
+
+// `choose(1,2,3)` picks one of the values; `range(1,3)` picks a number between
+// them. They take the rng as an argument so that *when* a roll happens is the
+// caller's decision -- a roll is sticky until something asks for another one,
+// and `resolveParameters` is where that is decided. Evaluating these on every
+// resolve would re-roll them on every keystroke instead.
+const RANDOM_FUNCTIONS: Record<string, (args: number[], rng: Rng) => number> = {
+  choose: (args, rng) =>
+    // Math.random() never returns 1, but a caller-supplied rng might.
+    args[Math.min(args.length - 1, Math.floor(rng() * args.length))],
+  range: (args, rng) => {
+    if (args.length !== 2) throw new Error("range takes two arguments");
+    return args[0] + rng() * (args[1] - args[0]);
+  },
+};
+
+// Whether a roll is what this text means. Tokenizing rather than matching the
+// word, so a parameter called `chooser` isn't mistaken for one -- and text that
+// doesn't tokenize at all is left to fail as an ordinary expression, where the
+// error message is about the actual problem.
+export const isRandomText = (text: string): boolean => {
+  try {
+    return tokenize(text).some(
+      (t) => t.kind === "name" && t.value in RANDOM_FUNCTIONS
+    );
+  } catch {
+    return false;
+  }
+};
+
 // Names the substitution would eat or that would shadow something. `x` is the
 // repeat separator in a number list; the function names would shadow the calls;
 // and h/k/r/s are parser2's sound letters, which `substituteParams` would
@@ -49,7 +83,8 @@ export const referencedNames = (text: string): string[] => {
   const names: string[] = [];
   for (const t of tokens) {
     if (t.kind !== "name") continue;
-    if (t.value === "x" || t.value in FUNCTIONS) continue;
+    if (t.value === "x") continue;
+    if (t.value in FUNCTIONS || t.value in RANDOM_FUNCTIONS) continue;
     names.push(t.value);
   }
   return names;
@@ -58,6 +93,7 @@ export const referencedNames = (text: string): string[] => {
 export const isValidParameterName = (name: string): boolean =>
   /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) &&
   !(name in FUNCTIONS) &&
+  !(name in RANDOM_FUNCTIONS) &&
   !RHYTHM_SOUNDS.includes(name.toLowerCase()) &&
   !/^[xX](\d|$)/.test(name);
 
@@ -104,7 +140,11 @@ export const tokenize = (text: string): Token[] => {
   return out;
 };
 
-export const evaluateTokens = (tokens: Token[], params: Params): number => {
+export const evaluateTokens = (
+  tokens: Token[],
+  params: Params,
+  rng?: Rng
+): number => {
   let i = 0;
   const eat = (op: string) => {
     const t = tokens[i];
@@ -170,6 +210,18 @@ export const evaluateTokens = (tokens: Token[], params: Params): number => {
       expect(")");
       return fn(args);
     }
+    const rand = RANDOM_FUNCTIONS[t.value];
+    if (rand) {
+      // Everywhere but a parameter, a field is re-resolved constantly and would
+      // draw a new number each time. Saying where a roll belongs beats a value
+      // that will not hold still.
+      if (!rng) throw new Error(`${t.value}() only works in a parameter`);
+      expect("(");
+      const args = [expr()];
+      while (eat(",")) args.push(expr());
+      expect(")");
+      return rand(args, rng);
+    }
     if (!(t.value in params)) throw new Error(`unknown parameter "${t.value}"`);
     const raw = params[t.value];
     // A list parameter in a scalar position. Saying so beats silently taking
@@ -186,8 +238,8 @@ export const evaluateTokens = (tokens: Token[], params: Params): number => {
   return value;
 };
 
-export const evaluate = (text: string, params: Params): number =>
-  evaluateTokens(tokenize(text), params);
+export const evaluate = (text: string, params: Params, rng?: Rng): number =>
+  evaluateTokens(tokenize(text), params, rng);
 
 // Both the entry separator and the repeat separator have to be found at paren
 // depth zero: `min(n,4) x 2` has a comma that belongs to the call, not the list.
@@ -215,9 +267,10 @@ export const MAX_LIST_LENGTH = 128;
 // list yet leaves the last good value in place.
 export const parseNumberList = (
   text: string,
-  params: Params = {}
+  params: Params = {},
+  rng?: Rng
 ): number[] => {
-  const out = parseTokenList(tokenize(text), params);
+  const out = parseTokenList(tokenize(text), params, rng);
   // An empty list would divide by zero downstream, so treat it as unfinished
   // typing instead of committing it.
   if (!out.length) throw new Error("empty list");
@@ -226,7 +279,7 @@ export const parseNumberList = (
 
 // What sits to the left of an `x`: a bracketed group, a list parameter, or an
 // ordinary expression. Groups nest, since the body is parsed by the same rules.
-const groupTokens = (tokens: Token[], params: Params): number[] => {
+const groupTokens = (tokens: Token[], params: Params, rng?: Rng): number[] => {
   const first = tokens[0];
   const last = tokens[tokens.length - 1];
   const bracketed =
@@ -236,7 +289,7 @@ const groupTokens = (tokens: Token[], params: Params): number[] => {
     last.kind === "op" &&
     last.value === "]";
   if (bracketed) {
-    const inner = parseTokenList(tokens.slice(1, -1), params);
+    const inner = parseTokenList(tokens.slice(1, -1), params, rng);
     if (!inner.length) throw new Error("empty group");
     return inner;
   }
@@ -249,12 +302,16 @@ const groupTokens = (tokens: Token[], params: Params): number[] => {
       return value.slice();
     }
   }
-  return [evaluateTokens(tokens, params)];
+  return [evaluateTokens(tokens, params, rng)];
 };
 
 // The one list parser, used for a whole field and for the body of a group --
 // which is what makes `[[.6,.4]x2, 1]x3` work without a second set of rules.
-const parseTokenList = (tokens: Token[], params: Params): number[] => {
+const parseTokenList = (
+  tokens: Token[],
+  params: Params,
+  rng?: Rng
+): number[] => {
   const out: number[] = [];
   for (const entry of splitTop(
     tokens,
@@ -269,14 +326,14 @@ const parseTokenList = (tokens: Token[], params: Params): number[] => {
     // The repeated thing is a *group*, not always a single number: `[.6,.4]x8`
     // and a list parameter both stand where a number used to. One number is
     // just the one-element case, so there is a single path here.
-    const group = groupTokens(valueTokens, params);
+    const group = groupTokens(valueTokens, params, rng);
     // A repeat has to be whole, and a parameter sweep hands us 3.5 on the way
     // past. Rounding keeps the field usable mid-sweep, where rejecting would
     // flash it red for every intermediate value.
     const count =
       countTokens === undefined
         ? 1
-        : Math.round(evaluateTokens(countTokens, params));
+        : Math.round(evaluateTokens(countTokens, params, rng));
     if (!(count >= 0)) throw new Error("negative repeat count");
     if (out.length + count * group.length > MAX_LIST_LENGTH)
       throw new Error("list too long");

@@ -1,5 +1,11 @@
-import { Parameter, parameterText, resolveParameters } from "./config";
-import { isValidParameterName } from "./expression";
+import {
+  Parameter,
+  isRandomParameter,
+  parameterText,
+  resolveParameters,
+  rollParameters,
+} from "./config";
+import { formatNumberList, isValidParameterName } from "./expression";
 import { invalidBorder, useFocusedValue } from "./Input";
 
 const rowStyle: React.CSSProperties = {
@@ -24,12 +30,23 @@ const nextName = (parameters: Parameter[]) => {
   return `p${i}`;
 };
 
+// What a parameter currently *is*, for a row whose text doesn't say. Only the
+// randoms show this: for everything else the text is the value, or is arithmetic
+// you can follow.
+const showValue = (value: number | number[] | undefined): string =>
+  value === undefined
+    ? "?"
+    : Array.isArray(value)
+    ? formatNumberList(value)
+    : String(Number(value.toPrecision(6)));
+
 const ParameterRow = ({
   parameter,
   others,
   accepts,
   failure,
   onChange,
+  onReroll,
   onRemove,
 }: {
   parameter: Parameter;
@@ -39,6 +56,7 @@ const ParameterRow = ({
   /** Why the committed value doesn't resolve, if it doesn't. */
   failure?: string;
   onChange: (next: Parameter) => void;
+  onReroll: () => void;
   onRemove: () => void;
 }) => {
   const [nameProps, setNameText] = useFocusedValue(parameter.name, {
@@ -52,6 +70,7 @@ const ParameterRow = ({
   // it's being retyped.
   const nameOk = (name: string) =>
     isValidParameterName(name) && !others.includes(name);
+  const random = isRandomParameter(parameter);
 
   return (
     <div style={rowStyle}>
@@ -76,12 +95,22 @@ const ParameterRow = ({
           // reported. `value` is left alone so the last good one survives.
           if (accepts(inputText)) onChange({ ...parameter, inputText });
         }}
-        title={`Value of ${parameter.name}. A number, a list like ".6,.4", or an expression over the other parameters`}
+        title={`Value of ${parameter.name}. A number, a list like ".6,.4", an expression over the other parameters, or a roll: "choose(1,2,3)", "range(1,3)"`}
         style={{
           width: "7em",
           ...invalidBorder(!accepts(valueProps.value)),
         }}
       />
+      {random && (
+        <>
+          <button onClick={onReroll} title={`Reroll ${parameter.name}`}>
+            🎲
+          </button>
+          <span style={{ color: "#aaa" }}>
+            {showValue(parameter.value)}
+          </span>
+        </>
+      )}
       <button onClick={onRemove} title={`Remove ${parameter.name}`}>
         ✕
       </button>
@@ -98,21 +127,40 @@ const ParameterRow = ({
 export const ParameterList = ({
   parameters,
   setParameters,
+  reroll,
 }: {
   parameters: Parameter[];
   setParameters: (next: Parameter[]) => void;
+  /** Re-rolls the randoms `pick` names; every random when it is omitted. */
+  reroll: (pick?: (name: string) => boolean) => void;
 }) => {
   // Parameters may refer to each other in any order, so long as the references
   // form a DAG. A candidate list is resolved on every keystroke to decide
   // whether the text can be committed -- cheap, and it means a cycle is
   // rejected where it is typed rather than stored and reported afterwards.
   const { failed } = resolveParameters(parameters);
+  // Rolling everything here is what makes a half-typed `choose(1,2` red: a
+  // random's stored value stands in for its text everywhere else, so nothing
+  // would otherwise ever try to parse it.
+  const rollAll = () => true;
   const acceptsFor = (i: number) => (inputText: string) => {
     const candidate = parameters.map((p, j) =>
       j === i ? { ...p, inputText } : p
     );
-    return !(candidate[i].name in resolveParameters(candidate).failed);
+    return !(candidate[i].name in resolveParameters(candidate, rollAll).failed);
   };
+  // Committing a roll's text has to roll it, or the row would sit there showing
+  // whatever the parameter happened to be before -- a number that need not even
+  // be one of the choices.
+  const commit = (i: number, next: Parameter) =>
+    setParameters(
+      rollParameters(
+        parameters.map((p, j) => (j === i ? next : p)),
+        (name) =>
+          name === next.name && parameterText(next) !== parameterText(parameters[i])
+      )
+    );
+  const anyRandom = parameters.some(isRandomParameter);
   return (
   <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
     {parameters.map((parameter, i) => (
@@ -122,9 +170,8 @@ export const ParameterList = ({
         accepts={acceptsFor(i)}
         failure={failed[parameter.name]}
         others={parameters.filter((_, j) => j !== i).map((p) => p.name)}
-        onChange={(next) =>
-          setParameters(parameters.map((p, j) => (j === i ? next : p)))
-        }
+        onChange={(next) => commit(i, next)}
+        onReroll={() => reroll((name) => name === parameter.name)}
         onRemove={() => setParameters(parameters.filter((_, j) => j !== i))}
       />
     ))}
@@ -137,6 +184,11 @@ export const ParameterList = ({
       >
         + ADD PARAMETER
       </button>
+      {anyRandom && (
+        <button onClick={() => reroll()} title="Reroll every random parameter (⌘R)">
+          🎲 REROLL ALL
+        </button>
+      )}
       {!parameters.length && (
         <span style={{ color: "#aaa", fontSize: "0.8em" }}>
           None -- fields hold plain numbers. With n = 16, bar = 4, rows can say

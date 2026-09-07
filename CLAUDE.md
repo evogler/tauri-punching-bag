@@ -123,10 +123,12 @@ Rules that will bite you:
 - **Which tab is open is plain React state, not a config key** -- transient UI,
   kept out of presets and the session on purpose.
 - `Divider` is the labelled hairline that groups settings inside one Section.
-- **⌘P pauses, ⌘L toggles looping.** One `keydown` listener, registered once and
-  reaching the current `set`/`get` through a ref -- those are new closures every
-  render, so depending on them would rebuild the listener each time. Both are
-  taken unconditionally, text fields included: neither is a text-editing key.
+- **⌘P pauses, ⌘L toggles looping, ⌘R rerolls every random parameter.** One
+  `keydown` listener, registered once and reaching the current `set`/`get`
+  through a ref -- those are new closures every render, so depending on them
+  would rebuild the listener each time. All three are taken unconditionally,
+  text fields included: none is a text-editing key. ⌘R checks `shiftKey` and
+  bows out, because the menu's ⌘⇧R (Restart) arrives at the webview too.
 - **The app menu carries Restart** (⌘⇧R), added to `Menu::os_default` rather
   than to a menu built from scratch -- building one drops Edit, and with it
   cut/copy/paste in every text field in the panel. `AppHandle::restart` reads
@@ -247,6 +249,40 @@ keeping the last good value. Deliberately not a scripting language.
   `normalizeView` wraps arrays (and bare numbers, for the three scalar fields)
   explicitly, and `migrateRust` does the same for the Rust-side keys. Wrapped
   rather than renamed, so saved layouts and tempos survive.
+- **A parameter can be a roll**: `choose(1,2,3)` picks one of the values,
+  `range(1,3)` picks a number between them. They are functions in
+  `expression.ts` like `min`/`max`/`round`, except that they take an `Rng`
+  argument rather than reaching for `Math.random` -- which is what puts *when* a
+  roll happens under the caller's control.
+- **A roll is sticky, and that is the whole design.** The random parameter's
+  stored `value` **is** its value: `resolveParameters` does not evaluate the
+  text at all unless asked to roll. Everything here is re-resolved on every
+  keystroke, every preset load and every `resolveJsConfig`, so a live `choose()`
+  would re-roll on all of them and no number in the app would hold still. As a
+  consequence a roll is written to the session and comes back the same at
+  launch, which is what you want from a setup you liked.
+- **Nothing needs to know what a random parameter feeds.** A reroll writes the
+  new draw back as the parameter's `value` and then goes through `setParameters`
+  like any hand edit, so `b = a*2`, every view field and every Rust-side
+  expression re-derive on the same update. `rollParameters(list, pick)` is the
+  whole mechanism; `reroll()` in `App.tsx` is one line.
+- **A random parameter is a DAG leaf when it isn't being rolled**, since its
+  text is never evaluated -- so `a = range(1, n)` resolves in the first pass
+  whatever `n` is doing. At *roll* time it is an ordinary node and `n` must
+  resolve first, which is why a cycle through a roll is still reported as one.
+- **`choose`/`range` throw everywhere except a parameter.** Without an rng
+  `evaluateTokens` reports `choose() only works in a parameter` rather than
+  producing a number, because a field is re-resolved constantly and would draw a
+  new value every time. Same reason the roll is sticky, one level up.
+- **The editor rolls to validate, and rolls on commit.** `accepts` resolves the
+  candidate list with `roll = () => true`, or a half-typed `choose(1,2` would
+  never be parsed by anything and so would never go red. And committing text
+  whose *text changed* rolls it, since the row would otherwise show whatever the
+  parameter was before -- a number that need not even be one of the choices.
+- `isRandomText` tokenizes rather than matching the word, so a parameter called
+  `chooser` isn't mistaken for a roll. `choose` and `range` join `x`, `min`,
+  `max`, `round` and the sound letters as reserved parameter names, and are
+  skipped by `referencedNames` like the other functions.
 - **Drum `offset`, `shift` and `gains` are deliberately still literals.** They're
   nested in the drums array and not in the re-resolution walk, so an expression
   there would silently go stale on a parameter change. Add them to
@@ -1578,6 +1614,23 @@ rather than using all of it, and the static waveform with hand-drawn beat
 markers. The static waveform is v2 by decision -- a long file is the open
 question there, and per-pixel peaks of a whole one is the wrong first answer.
 
+### 2026-09-07: random parameters
+
+`choose` / `range`, the per-row 🎲, reroll-all and ⌘R are new and **nobody has
+clicked any of it**. Covered by temp tests (run, then deleted): `choose` only
+ever returns one of its arguments and doesn't fall off the end at an rng of
+exactly 1, `range` stays inside its ends, a roll reads the other parameters,
+resolving fifty times in a row does not re-roll, a dependant follows every
+reroll, rerolling one leaves the others untouched, a list roll repeats like a
+list, a half-typed roll keeps its stored value but fails the editor's check, and
+a cycle through a roll is still reported as a cycle.
+
+What that does *not* establish: whether ⌘R actually reaches the webview in the
+bundle rather than being eaten, whether a rerolled tempo or rhythm pushes to the
+audio thread as promptly as a typed one does, and whether the roll being sticky
+across a session restore is what you want in practice or whether you'd rather it
+rolled fresh at launch.
+
 ## Discussed but not built
 
 - **An iOS / iPadOS port.** Wanted eventually, iPad first. Doable, and the code
@@ -1616,6 +1669,79 @@ question there, and per-pixel peaks of a whole one is the wrong first answer.
     absorb a constant. Wired or built-in only.
   - An Apple Developer Program membership stops being optional: iOS has no
     ad-hoc sideloading escape hatch.
+
+- **Staying in sync with a loop playing in Logic**, so you can watch your
+  playing against a part Logic is looping *live* rather than a bounce of it.
+  - **The clock is not the problem; the phase is.** On one audio device Logic's
+    playback and this app's `beat` come off the same crystal, so a tempo typed
+    in exactly never drifts from Logic's. All that is missing is where bar 1
+    fell, once. On separate devices the drift is back and the answer is an
+    Aggregate Device, as it is for multiple inputs.
+  - **Bouncing the loop and using the file player already solves this exactly**,
+    by construction -- `fileBeats` phase-locks it, A-B repeat picks the segment,
+    the stretch follows the tempo. Sync only matters when Logic has to stay
+    live: muting parts, editing the arrangement while you play.
+  - **MIDI clock over the IAC Driver is the first thing to try** (owner's call).
+    Logic transmits it from Project Settings -> Synchronization -> MIDI; read it
+    in Rust with `midir` or `coremidi`. 24 ppqn, and Start / Song Position
+    Pointer are what carry the phase. Its jitter is the usual complaint and does
+    not matter here, since it is only ever used to set phase -- and can be
+    averaged over several loop passes.
+  - **A tiny AU that broadcasts the host's transport** is the solid version: it
+    reads tempo, beat and playing state per render block and sends them to the
+    app over a local socket. Sample-accurate, and the app keeps its own device
+    and its own clock. Costs a second build target and its signing.
+  - **A sync tone through the mic** would reuse `calibration.rs`'s matched
+    filter and arrive by the same path as your playing, so the latency is one
+    already measured. Acoustically fragile; noted for completeness.
+  - **Ableton Link is the right protocol and Logic does not support it.**
+    Reachable only through a bridge app. ReWire is dead -- removed in Logic 10.5.
+  - **Whatever carries the phase needs a trim**, because "bar 1" means when
+    Logic's audio *sounds*, not when its transport says zero. One number, the
+    same shape as `pairCompensations`, measurable by the round trip already
+    built.
+
+- **Building the whole thing as an Audio Unit**, loadable in Logic and
+  GarageBand. Bigger than the sync question and it subsumes it -- a plugin gets
+  tempo and phase from the host for free.
+  - **It deletes the code blocking the iPad port.** The host owns the device, so
+    device enumeration, the sample-rate negotiation, the picker and
+    `audio-prefs.json` all stop existing, and `io_channels.rs` largely goes with
+    them. That is the same 428 lines the iOS entry above names as the damage,
+    and the same reason iOS was hard: an AUv3 is one target on both platforms.
+    "Plugin for Logic" and "app for iPad" are substantially one project.
+  - **AUv3, not AUv2** -- both hosts take it, and it is the only path to iPad.
+  - **What the plugin keeps is the display and the looper.** The click and the
+    drum parts are the two things Logic genuinely covers better. The looper is
+    *not*: Delay Designer works in units of time with an awkward UI and a 10
+    second ceiling, where this one is beat-locked and runs to ten minutes.
+  - **The UI is the hard part, by a distance.** Either host a `WKWebView` in the
+    `AUViewController` and keep the React panel and the whole canvas draw path
+    -- rebuilding the transport, since `invoke`/`get_samples` becomes
+    `WKScriptMessageHandler` and `evaluateJavaScript`, and 100 Hz JSON really
+    would want the decimated peaks first -- or rewrite the panel in SwiftUI,
+    which is much larger.
+  - **Rust has no first-class AU story.** `nih-plug` covers CLAP and VST3 and is
+    weakest exactly here. The pragmatic shape is a Swift `AUAudioUnit` subclass
+    over a Rust staticlib, which is what the pure-logic modules are already
+    shaped for.
+  - **Anything process-global breaks**, because a plugin is instantiated many
+    times per session. `sample_rate()`'s `OnceLock` in `constants.rs` is that
+    bug already written down and waiting. An audit, not a redesign, but it
+    precedes everything.
+  - **Sandboxing changes file loading.** An app extension cannot open a path;
+    the container app has to hand over a security-scoped bookmark, which the
+    file player and the drum samples both go through.
+  - **The host picks the buffer size**, possibly 32 frames rather than 2048.
+    Everything documented as "once per callback" then happens 64x as often --
+    all of it cheap, none of it confirmed.
+  - **What gets easier:** `buffer_compensation` and most of the calibration
+    evaporate, since the host positions the audio on its own timeline and
+    latency is declared through a property; and AU state saves *with the Logic
+    project*, which beats localStorage.
+  - **The shape is a second front-end over a shared Rust core**, not a port --
+    the ~1500 pure lines the iOS entry lists, plus whatever display logic can be
+    pushed down out of `App.tsx`.
 
 - **Per-channel latency offsets.** Wanted, low priority — the owner isn't
   worried about a few ms of mic distance.

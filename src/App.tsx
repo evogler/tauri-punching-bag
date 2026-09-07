@@ -30,6 +30,7 @@ import {
   Parameter,
   exprNumber,
   parameterValues,
+  rollParameters,
   resolveJsConfig,
   resolveRustConfig,
   viewRowBeats,
@@ -519,6 +520,12 @@ const App = () => {
       resolveRustConfig(rustConfig, parameterValues(parameters))
     );
   };
+
+  // A reroll is an ordinary parameter change -- the new draws are written back
+  // as the parameters' stored values and everything downstream re-resolves from
+  // them, which is why nothing here knows what a random parameter feeds.
+  const reroll = (pick?: (name: string) => boolean) =>
+    setParameters(rollParameters(jsConfig.parameters, pick));
 
   const set = <T,>(k: string, v: T) => {
     if (isRustConfigKey(k)) {
@@ -1817,16 +1824,27 @@ const App = () => {
       Object.assign(state, freshViewState());
   }, [background, layoutKey]);
 
-  // Transport shortcuts: cmd-P pauses, cmd-L toggles looping. The listener is
+  // Transport shortcuts: cmd-P pauses, cmd-L toggles looping, cmd-R rerolls
+  // every random parameter. The listener is
   // registered once and reaches the current config through a ref, for the same
   // reason the draw loop does -- `set` and `get` are new closures every render,
   // so depending on them would tear the listener down and rebuild it each time.
   const toggleRef = useRef((k: "paused" | "loopingOn") => {});
   toggleRef.current = (k) => set(k, !get(k));
+  const rerollRef = useRef(() => {});
+  rerollRef.current = () => reroll();
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!e.metaKey || e.ctrlKey || e.altKey) return;
       const key = e.key.toLowerCase();
+      if (key === "r") {
+        // cmd-shift-R is Restart, in the app menu. That arrives here too on the
+        // way past, so it has to be let through rather than rerolling.
+        if (e.shiftKey) return;
+        e.preventDefault();
+        rerollRef.current();
+        return;
+      }
       if (key !== "p" && key !== "l") return;
       // Both are the browser's (print, address bar) even inside a text field,
       // and neither means anything here, so they're taken unconditionally.
@@ -1908,6 +1926,7 @@ const App = () => {
           <ParameterList
             parameters={get("parameters")}
             setParameters={setParameters}
+            reroll={reroll}
           />
         </Section>
 
