@@ -77,11 +77,18 @@ export type Section = {
   // bars of groove, and a count-off can be `bar` whatever `bar` becomes.
   beats: NumberExpr;
   click: boolean;
+  // Whether this stretch is drawn. Off, no samples are stamped for it, so the
+  // cursor holds still through a count-off and the pane's timeline starts where
+  // the playing does. Optional, so a section written before this loads
+  // unchanged -- the same treatment `VisualGrid.alpha` gets.
+  show?: boolean;
   // Which drum voices sound, by index, the same convention a pane's `channels`
   // uses. So a count-off is an ordinary voice with its own rhythm, and nothing
   // here needs a rhythm or a sound of its own.
   drums: number[];
 };
+
+export const sectionShown = (section: Section) => section.show !== false;
 
 export const sectionBeats = (section: Section) =>
   exprNumber(section.beats);

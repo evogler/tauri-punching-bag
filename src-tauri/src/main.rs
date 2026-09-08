@@ -361,6 +361,14 @@ fn main() -> Result<(), coreaudio::Error> {
         // needs.
         let cycle_beats = section_bounds(&config.sections, &mut bounds);
         let sections_on = config.sections_on && cycle_beats > 0.0;
+        // Where the drawn part of the cycle begins. A count-off is a section
+        // nobody wants to watch, so the pane's timeline starts after it and the
+        // groove's downbeat lands at the top of the first row rather than a
+        // count-off's worth in.
+        let display_start = bounds
+            .iter()
+            .find(|(_, i)| config.sections[*i].show)
+            .map_or(0.0, |(end, i)| end - config.sections[*i].beats);
 
         // Coefficients once per callback, never per frame -- and hoisted here
         // for the same reason the pan gains are.
@@ -515,6 +523,15 @@ fn main() -> Result<(), coreaudio::Error> {
                 }
 
                 let visual_beat = beat - (config.buffer_compensation as f64) * beats_per_sample;
+                // Asked of the *visual* beat, not of `beat`: the stream is
+                // stamped in input time, so what matters is which section the
+                // audio being drawn was played in. It also means the tail of a
+                // hidden last section swallows the negative stamps for the
+                // first `buffer_compensation` frames after a restart.
+                let drawn = !sections_on
+                    || section_at(&bounds, visual_beat, cycle_beats)
+                        .map_or(false, |i| config.sections[i].show);
+                let stamp = visual_beat - display_start;
 
                 // Per frame, not per output channel -- this advances the ring.
                 if let Some(frames) = analysis_out.as_deref_mut() {
@@ -523,6 +540,18 @@ fn main() -> Result<(), coreaudio::Error> {
                     // properly in the frequency domain, and filtering twice
                     // would make its normalisation describe something else.
                     if analyzer.push(&input_raw) {
+                        // The analysis always runs, even for a hidden section:
+                        // its spectrum differencing is a running state, and
+                        // skipping a hop would leave the next one measured
+                        // against a window that never happened. What a hidden
+                        // section drops is the *output*, truncated back below --
+                        // which sets a length and never touches the allocator.
+                        let kept = (
+                            frames.beats.len(),
+                            frames.mags.len(),
+                            frames.flux.len(),
+                            frames.onsets.len(),
+                        );
                         // The hop that just completed describes the window
                         // centred half a window behind this frame, so its stamp
                         // is this frame's visual beat less that half window --
@@ -531,12 +560,10 @@ fn main() -> Result<(), coreaudio::Error> {
                         // column a half window late, which is ~92 pixels at
                         // 0.25x16 and 140bpm with the default 1024, and reads
                         // as the FFT being wrong rather than the stamp.
-                        frames.beats.push(
-                            visual_beat - (analyzer.window_len() as f64 / 2.0) * beats_per_sample,
-                        );
-                        analyzer.note_hop_beat(
-                            visual_beat - (analyzer.window_len() as f64 / 2.0) * beats_per_sample,
-                        );
+                        let hop_beat =
+                            stamp - (analyzer.window_len() as f64 / 2.0) * beats_per_sample;
+                        frames.beats.push(hop_beat);
+                        analyzer.note_hop_beat(hop_beat);
                         for ch in 0..analyzer.channels() {
                             let flux = analyzer.analyze_into(ch, &mut frames.mags, flux_band);
                             frames.flux.push(flux);
@@ -549,6 +576,15 @@ fn main() -> Result<(), coreaudio::Error> {
                                 onset_params,
                                 &mut frames.onsets,
                             );
+                        }
+                        // The onsets go with it: the picker runs a few hops
+                        // behind, so the ones emitted at the top of a drawn
+                        // section describe the hidden one before it.
+                        if !drawn {
+                            frames.beats.truncate(kept.0);
+                            frames.mags.truncate(kept.1);
+                            frames.flux.truncate(kept.2);
+                            frames.onsets.truncate(kept.3);
                         }
                         analyzer.advance_hop();
                     }
@@ -813,8 +849,8 @@ fn main() -> Result<(), coreaudio::Error> {
                 // and eventually push the callback back into the allocator.
                 // Dropping the newest frames leaves a gap the display catches up
                 // from in one poll, which beats stalling the audio thread.
-                if state_vec.beats.len() < max_visual_backlog() {
-                    state_vec.beats.push(visual_beat);
+                if drawn && state_vec.beats.len() < max_visual_backlog() {
+                    state_vec.beats.push(stamp);
                     for &ch in config.visible_channels.iter() {
                         // Channels past the input count are the synthetic buses,
                         // in the order the frontend labels them: drums, click,

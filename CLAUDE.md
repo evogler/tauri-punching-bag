@@ -776,6 +776,27 @@ a pause is a section with nothing on.
   times as long. Write `bar*16` and the repeat is visible in the text. The only
   thing that would justify the field is a repeat that had to *do* something
   different per pass, and the reroll happens at the cycle top instead.
+- **`show` is what keeps the cursor still through a count-off.** Off, no samples
+  are stamped for that stretch at all, and the pane's timeline is measured from
+  the start of the first shown section -- so the groove's downbeat lands at the
+  top of the first row rather than a count-off's worth in. Asked of the *visual*
+  beat rather than of `beat`, since the stream is stamped in input time and what
+  matters is which section the audio being drawn was played in.
+  - **A hidden section in the middle leaves a gap rather than closing up.** The
+    timeline keeps running underneath, so after a hidden pause the cursor
+    resumes where the music actually is; compressing would make the pane's beat
+    numbering disagree with what you are playing.
+  - **The analysis always runs, even for a hidden section**, because its
+    spectrum differencing is a running state and a skipped hop would leave the
+    next one measured against a window that never happened. What a hidden
+    section drops is the *output*, truncated back afterwards -- which sets a
+    length and never touches the allocator. The onsets go with it: the picker
+    runs a few hops behind, so the ones emitted at the top of a drawn section
+    describe the hidden one before it.
+  - **It also removes the smear at the pane's tail.** A hidden last section --
+    a pause, usually -- swallows the negative stamps of the first
+    `buffer_compensation` frames after a restart, which would otherwise wrap
+    round and draw at the end of the last row.
 - **A section carries nothing else, and that is the line.** The moment it holds
   its own tempo or its own grid this is a DAW. Everything else stays global and
   is varied through the parameters, which is the surface that makes it
@@ -815,9 +836,9 @@ a pause is a section with nothing on.
   prerequisite any nested field needs before it can hold an expression.
 - **For ~`buffer_compensation` after each restart the visual stamp is negative.**
   `getCanvasPositions` wraps it Euclidean, so those samples draw at the end of
-  the last row -- which is honest, they were captured before the restart. Expect
-  a brief smear at the pane's tail every cycle. Pre-existing behaviour of the
-  reset button, now hit every cycle instead of on a press.
+  the last row -- honest, since they were captured before the restart, but it
+  reads as a smear at the pane's tail. Ending the cycle with a section that has
+  `show` off swallows them.
 
 ### Looper
 

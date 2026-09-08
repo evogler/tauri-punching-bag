@@ -4,6 +4,7 @@ import {
   cycleBeatsOf,
   drumLabel,
   sectionBeats,
+  sectionShown,
 } from "./config";
 import { Params, evaluate } from "./expression";
 import { accepts, invalidBorder, useFocusedValue } from "./Input";
@@ -19,6 +20,7 @@ export const makeSection = (drums: DrumVoice[]): Section => ({
   on: true,
   beats: { inputText: "4", val: 4 },
   click: true,
+  show: true,
   // A new section starts with everything sounding, which is the section you
   // most often want; a count-off or a pause is then a matter of turning things
   // off rather than hunting for what to turn on.
@@ -91,6 +93,19 @@ const SectionRow = ({
           onChange={() => onChange({ ...section, click: !section.click })}
         />
         <span style={{ fontSize: "0.85em" }}>click</span>
+      </label>
+      <label
+        style={{ display: "flex", alignItems: "center", gap: "2px" }}
+        title="Draw this stretch. Off, the cursor holds still through it and the pane starts where the next drawn section does"
+      >
+        <input
+          type="checkbox"
+          checked={sectionShown(section)}
+          onChange={() =>
+            onChange({ ...section, show: !sectionShown(section) })
+          }
+        />
+        <span style={{ fontSize: "0.85em" }}>draw</span>
       </label>
       <div style={{ display: "flex", gap: "2px", flex: 1, flexWrap: "wrap" }}>
         {drums.map((voice, i) => (

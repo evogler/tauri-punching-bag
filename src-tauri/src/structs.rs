@@ -154,11 +154,23 @@ pub struct Section {
     pub on: bool,
     pub beats: f64,
     pub click: bool,
+    /// Whether this stretch is drawn. Off, no samples are stamped for it at
+    /// all, so the cursor holds still through a count-off and the pane's
+    /// timeline starts where the playing does.
+    ///
+    /// Defaulted true rather than required, so a section written before this
+    /// existed loads unchanged -- the same treatment `DrumVoice::shift` gets.
+    #[serde(default = "drawn")]
+    pub show: bool,
     /// Which drum voices sound, by index into `Config::drums` -- the same
     /// convention a pane's `channels` uses. A count-off is therefore an
     /// ordinary voice with its own rhythm, which is why nothing here needs a
     /// rhythm or a sound of its own.
     pub drums: Vec<usize>,
+}
+
+fn drawn() -> bool {
+    true
 }
 
 pub struct LoopBuffer {
