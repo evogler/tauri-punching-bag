@@ -770,12 +770,28 @@ a pause is a section with nothing on.
   the drums is the tangle this exists to avoid, so the key is retired and
   `migrateRust` turns a session that had it on into the equivalent two sections.
   Unrecognised keys are dropped, so the old key doesn't survive alongside.
-- **There is deliberately no repeat count.** A section says "for this many
-  beats, these sound", and the rhythms tile on their own cycles independently --
-  so running the groove four times is *indistinguishable* from making it four
-  times as long. Write `bar*16` and the repeat is visible in the text. The only
-  thing that would justify the field is a repeat that had to *do* something
-  different per pass, and the reroll happens at the cycle top instead.
+- **`sectionOrder` is the cycle written out**, as 1-based section numbers in the
+  same list syntax as `beatsPerRow`: `1, [2,3]x8` is a count-off and then eight
+  passes of a two-section groove. Empty means the sections in the order they are
+  written.
+  - **A single section needs no repeat count** -- a section says "for this many
+    beats, these sound" and the rhythms tile on their own cycles, so running the
+    groove four times is indistinguishable from making it four times as long.
+    Write `bar*16` and the repeat is visible in the text.
+  - **A *group* repeat is a different thing, and that is what the order field is
+    for.** `2,3,2,3,...` cannot be expressed by lengthening, because the two
+    sections mute different things. Generalising from the single-section case to
+    "no repeats needed" was wrong.
+  - **No new grammar.** `parseNumberList` already does groups, nesting, `x`
+    repeats, parameters and arithmetic, so `[[1,2]x2, 3]x n` works and
+    `MAX_LIST_LENGTH` caps the expanded cycle at 128 steps. Rust receives the
+    expanded list -- `unwrapValues` hands it the `val` -- so the audio thread
+    gained no concept at all beyond walking an order instead of the array.
+  - **An index past the end wraps**, so deleting a section cannot leave the
+    order pointing at nothing. The rule `rowColorFor` already follows.
+  - Like `rowColorPattern`, it **cannot be typed back to empty**;
+    `parseNumberList` refuses an empty list, so clearing the field leaves the
+    last good order rather than reverting to "in order".
 - **`show` is what keeps the cursor still through a count-off.** Off, no samples
   are stamped for that stretch at all, and the pane's timeline is measured from
   the start of the first shown section -- so the groove's downbeat lands at the
@@ -829,7 +845,9 @@ a pause is a section with nothing on.
     look-ahead: there is no time before beat 0 to fire it in, so that one lands
     `offset_beats` late.
 - **`section_bounds` writes into a reused vector** and returns the cycle length,
-  once per callback next to the pan gains. A section with no usable length is
+  once per callback next to the pan gains. It walks the *order*, so a section
+  appearing eight times costs eight entries and no allocation after the first.
+  A step with no usable length is
   *skipped* rather than clamped -- it would otherwise be a boundary the beat can
   never cross, and the cycle would stop advancing with nothing saying why.
 - `beats` is expression-backed and in `resolveRustConfig`'s walk, the
@@ -1867,6 +1885,16 @@ while one that had it off gains none.
 What no test can say: whether the reroll landing a few milliseconds into the
 cycle is audible at the top of a count-off, and whether the whole thing is
 actually a good way to practise.
+
+`show` and `sectionOrder` followed the same day, the second because the
+"no repeat count" argument above was only true of a *single* section. Also
+temp-tested (run, then deleted): the drawn timeline starts where the playing
+does and a count-off stamps nothing, a hidden section in the middle leaves a gap
+rather than closing up, a hidden last section swallows the negative stamps after
+a restart, a group repeat alternates rather than lengthening, the repeat count
+can be a parameter, groups nest, an index past the end wraps, a section left out
+of the order simply does not play, and an order against no sections answers
+nothing rather than panicking.
 
 Drum `gains` became expression-backed in the same pass. Checked by temp test
 (run, then deleted): a pre-expression bare array still reads and is wrapped on

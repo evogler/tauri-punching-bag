@@ -1,12 +1,14 @@
 import {
   DrumVoice,
+  NumberListExpr,
   Section,
   cycleBeatsOf,
+  cycleSteps,
   drumLabel,
   sectionBeats,
   sectionShown,
 } from "./config";
-import { Params, evaluate } from "./expression";
+import { Params, evaluate, parseNumberList } from "./expression";
 import { accepts, invalidBorder, useFocusedValue } from "./Input";
 
 const rowStyle: React.CSSProperties = {
@@ -31,15 +33,15 @@ const SectionRow = ({
   section,
   drums,
   params,
-  from,
+  number,
   onChange,
   onRemove,
 }: {
   section: Section;
   drums: DrumVoice[];
   params: Params;
-  /** Where this section starts in the cycle, for the readout. */
-  from: number;
+  /** 1-based, which is how the order field refers to it. */
+  number: number;
   onChange: (next: Section) => void;
   onRemove: () => void;
 }) => {
@@ -69,10 +71,10 @@ const SectionRow = ({
         title={section.on ? "Skip this section" : "Use this section"}
       />
       <span
-        style={{ width: "4.5em", color: "#aaa", fontSize: "0.8em" }}
-        title="Where this section starts in the cycle"
+        style={{ width: "2em", color: "#aaa", fontSize: "0.8em" }}
+        title="Refer to this section by this number in the order field"
       >
-        {section.on ? `@${Number(from.toPrecision(6))}` : "--"}
+        {number}
       </span>
       <input
         {...beatsProps}
@@ -142,27 +144,35 @@ const SectionRow = ({
 export const SectionList = ({
   sections,
   setSections,
+  order,
+  setOrder,
   drums,
   params,
 }: {
   sections: Section[];
   setSections: (next: Section[]) => void;
+  order: NumberListExpr;
+  setOrder: (next: NumberListExpr) => void;
   drums: DrumVoice[];
   params: Params;
 }) => {
-  let running = 0;
-  const starts = sections.map((s) => {
-    const at = running;
-    if (s.on && sectionBeats(s) > 0) running += sectionBeats(s);
-    return at;
+  const [orderProps, setOrderText] = useFocusedValue(order.inputText, {
+    toString: (x) => x as string,
   });
-  const cycle = cycleBeatsOf(sections);
+  // Empty is not typeable -- parseNumberList refuses an empty list -- so the
+  // way back to "in order" is to clear the field, which simply stops
+  // committing and leaves the last good value. Same shape as rowColorPattern.
+  const orderInvalid =
+    orderProps.value.trim() !== "" &&
+    !accepts(() => parseNumberList(orderProps.value, params));
+  const steps = cycleSteps(sections, order);
+  const cycle = cycleBeatsOf(sections, order);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
       {sections.length > 0 && (
         <div style={{ ...rowStyle, color: "#aaa", fontSize: "0.8em" }}>
           <span style={{ width: "1.2em" }} />
-          <span style={{ width: "4.5em" }}>at</span>
+          <span style={{ width: "2em" }}>#</span>
           <span style={{ width: "5em" }}>beats</span>
           <span style={{ flex: 1 }}>what sounds</span>
         </div>
@@ -173,13 +183,33 @@ export const SectionList = ({
           section={section}
           drums={drums}
           params={params}
-          from={starts[i]}
+          number={i + 1}
           onChange={(next) =>
             setSections(sections.map((s, j) => (j === i ? next : s)))
           }
           onRemove={() => setSections(sections.filter((_, j) => j !== i))}
         />
       ))}
+      {sections.length > 1 && (
+        <div style={{ ...rowStyle, marginTop: "2px" }}>
+          <label>order</label>
+          <input
+            {...orderProps}
+            onChange={(e) => {
+              const text = e.target.value;
+              setOrderText(text);
+              try {
+                setOrder({ inputText: text, val: parseNumberList(text, params) });
+              } catch (e) {}
+            }}
+            title={
+              'Which sections play, and how often, by number. Groups repeat: ' +
+              '"1, [2,3]x8" is section 1 then eight passes of 2 and 3. Empty plays them in order'
+            }
+            style={{ flex: 1, minWidth: 0, ...invalidBorder(orderInvalid) }}
+          />
+        </div>
+      )}
       <div style={rowStyle}>
         <button
           onClick={() => setSections([...sections, makeSection(drums)])}
@@ -189,13 +219,15 @@ export const SectionList = ({
         </button>
         {sections.length ? (
           <span style={{ color: "#aaa", fontSize: "0.8em" }}>
-            {Number(cycle.toPrecision(6))} beats, then it starts again -- every
+            {steps.map((s) => s.section + 1).join(" ") || "nothing"} --{" "}
+            {Number(cycle.toPrecision(6))} beats, then it starts again: every
             random parameter rerolled, the beat back to one, the looper cleared.
           </span>
         ) : (
           <span style={{ color: "#aaa", fontSize: "0.8em" }}>
             None -- everything sounds continuously. A count-off is a section with
-            only a count-off voice on; a pause is a section with nothing on.
+            only a count-off voice on and "draw" unticked; a pause is a section
+            with nothing on.
           </span>
         )}
       </div>

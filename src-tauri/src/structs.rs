@@ -232,6 +232,12 @@ pub struct Config {
     /// what the app did before sections existed.
     pub sections_on: bool,
     pub sections: Vec<Section>,
+    /// The cycle written out: 1-based section numbers, expanded on the frontend
+    /// by the same `parseNumberList` that reads `beatsPerRow`. So `1, [2,3]x8`
+    /// is a count-off and then eight passes of a two-section groove -- a
+    /// *group* repeat, which is the one thing making a section longer cannot
+    /// express. Empty means the sections in the order they are written.
+    pub section_order: Vec<f64>,
     pub click_volume: f64,
     /// Musical placement of the click's rhythm, in beats -- the same thing a
     /// drum voice's `shift` is, and subtracted the same way. There is no

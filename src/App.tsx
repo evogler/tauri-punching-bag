@@ -2027,6 +2027,8 @@ const App = () => {
             <SectionList
               sections={get("sections")}
               setSections={(next) => set("sections", next)}
+              order={get("sectionOrder")}
+              setOrder={(next) => set("sectionOrder", next)}
               drums={rustConfig.drums}
               params={params}
             />

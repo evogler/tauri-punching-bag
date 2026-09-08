@@ -119,6 +119,8 @@ const migrateRust = (rust: Record<string, unknown>): Record<string, unknown> => 
     ];
     out.sectionsOn = true;
   }
+  if ("sectionOrder" in out)
+    out.sectionOrder = wrapList(out.sectionOrder, { inputText: "", val: [] });
   // A hand-written preset, or one saved before the length took expressions.
   if (Array.isArray(out.sections))
     out.sections = (out.sections as unknown[]).map((sec) =>

@@ -57,20 +57,51 @@ pub fn mod_add(a: usize, b: usize, max: usize) -> usize {
 
 use crate::structs::Section;
 
-/// Where each enabled section ends, as a running total in beats, paired with
-/// its index in the config's list.
+/// Where each step of the cycle ends, as a running total in beats, paired with
+/// the section it plays.
+///
+/// `order` is the cycle written out -- 1-based section numbers, already
+/// expanded by `parseNumberList`, so `1, [2,3]x8` arrives here as sixteen
+/// alternating steps after the first. Empty means the sections in the order
+/// they are written, which is also what an unfinished field falls back to.
 ///
 /// Written into a caller-owned vector because this runs once per callback and
-/// the audio thread never reaches for the allocator; it only grows when a
-/// section is added. Returns the length of the whole cycle.
+/// the audio thread never reaches for the allocator; it only grows when the
+/// cycle gets longer.
 ///
-/// A section with no usable length is skipped rather than being clamped: it
-/// would otherwise be a boundary the beat can never cross, and the cycle would
-/// stop advancing with nothing anywhere saying why.
-pub fn section_bounds(sections: &[Section], out: &mut Vec<(f64, usize)>) -> f64 {
+/// A step with no usable length is skipped rather than clamped: it would
+/// otherwise be a boundary the beat can never cross, and the cycle would stop
+/// advancing with nothing anywhere saying why.
+pub fn section_bounds(
+    sections: &[Section],
+    order: &[f64],
+    out: &mut Vec<(f64, usize)>,
+) -> f64 {
     out.clear();
     let mut total = 0.0;
-    for (i, s) in sections.iter().enumerate() {
+    let steps = if order.is_empty() {
+        sections.len()
+    } else {
+        order.len()
+    };
+    for step in 0..steps {
+        let i = if order.is_empty() {
+            step
+        } else {
+            let n = order[step];
+            if !n.is_finite() {
+                continue;
+            }
+            // Wrapped rather than clamped, so deleting a section cannot leave
+            // the order pointing at nothing -- the rule `rowColorFor` already
+            // follows for its palette.
+            let len = sections.len().max(1) as isize;
+            (n.round() as isize - 1).rem_euclid(len) as usize
+        };
+        let s = match sections.get(i) {
+            Some(s) => s,
+            None => continue,
+        };
         if !s.on || !(s.beats > 0.0) || !s.beats.is_finite() {
             continue;
         }

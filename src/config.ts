@@ -96,9 +96,41 @@ export const sectionBeats = (section: Section) =>
 // What one section costs, and what the whole cycle does. Both here rather than
 // in the panel because the section list and the cycle readout want the same
 // answer.
-export const cycleBeatsOf = (sections: Section[]) =>
-  sections.reduce(
-    (total, s) => (s.on && sectionBeats(s) > 0 ? total + sectionBeats(s) : total),
+// The cycle expanded into the steps it actually plays: which section, and
+// where in the cycle it starts. The one place the order is read, so the panel
+// and the readout can't disagree about what is going to happen.
+export const cycleSteps = (
+  sections: Section[],
+  order: NumberListExpr | number[] = []
+): { section: number; from: number }[] => {
+  const list = exprList(order);
+  const steps: { section: number; from: number }[] = [];
+  let total = 0;
+  const indices = list.length
+    ? // Wrapped rather than clamped, so deleting a section can't leave the
+      // order pointing at nothing -- the rule rowColorFor already follows.
+      list.map((n) =>
+        sections.length
+          ? (((Math.round(n) - 1) % sections.length) + sections.length) %
+            sections.length
+          : 0
+      )
+    : sections.map((_, i) => i);
+  for (const i of indices) {
+    const s = sections[i];
+    if (!s || !s.on || !(sectionBeats(s) > 0)) continue;
+    steps.push({ section: i, from: total });
+    total += sectionBeats(s);
+  }
+  return steps;
+};
+
+export const cycleBeatsOf = (
+  sections: Section[],
+  order: NumberListExpr | number[] = []
+) =>
+  cycleSteps(sections, order).reduce(
+    (total, step) => total + sectionBeats(sections[step.section]),
     0
   );
 
@@ -275,6 +307,11 @@ export const defaultRustConfig = {
   // The practice cycle. Off, everything sounds continuously.
   sectionsOn: false,
   sections: [] as Section[],
+  // The cycle written out: 1-based section numbers, in the same list syntax as
+  // beatsPerRow -- so `1, [2,3]x8` is a count-off and then eight passes of a
+  // two-section groove. A *group* repeat, which is the one thing making a
+  // section longer cannot express. Empty means the sections in order.
+  sectionOrder: { inputText: "", val: [] as number[] } as NumberListExpr,
   clickVolume: numExpr(0.3),
   clickShift: numExpr(0),
   drumOn: true,
@@ -965,6 +1002,10 @@ export const resolveRustConfig = (
       (n) => Number.isFinite(n) && n > 0 && n < 100000
     ),
   }));
+  out.sectionOrder = resolveList(
+    asListExpr(rust.sectionOrder ?? { inputText: "", val: [] }),
+    params
+  );
   out.drums = rust.drums.map((d) => ({
     ...d,
     rhythm: resolveRhythm(d.rhythm, params),

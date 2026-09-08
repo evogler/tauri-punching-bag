@@ -90,6 +90,7 @@ pub fn default_config() -> Config {
         click_on: true,
         sections_on: false,
         sections: vec![],
+        section_order: vec![],
         click_volume: 0.3,
         click_shift: 0.0,
         drum_on: true,

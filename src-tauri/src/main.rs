@@ -359,7 +359,8 @@ fn main() -> Result<(), coreaudio::Error> {
         // The practice cycle: count-off, groove, pause, whatever is in the
         // list. Resolved once per callback like everything else the frame loop
         // needs.
-        let cycle_beats = section_bounds(&config.sections, &mut bounds);
+        let cycle_beats =
+            section_bounds(&config.sections, &config.section_order, &mut bounds);
         let sections_on = config.sections_on && cycle_beats > 0.0;
         // Where the drawn part of the cycle begins. A count-off is a section
         // nobody wants to watch, so the pane's timeline starts after it and the
