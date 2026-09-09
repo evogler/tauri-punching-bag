@@ -40,7 +40,7 @@ use crate::structs::{
     SampleOutputBuffer, SoundingSample,
 };
 use crate::types::{Args, S};
-use crate::util::{beat_bisect, mod_add, section_at, section_bounds};
+use crate::util::{beat_bisect, display_start, mod_add, section_at, section_bounds};
 use rand::Rng;
 use std::{
     collections::HashMap,
@@ -362,14 +362,7 @@ fn main() -> Result<(), coreaudio::Error> {
         let cycle_beats =
             section_bounds(&config.sections, &config.section_order, &mut bounds);
         let sections_on = config.sections_on && cycle_beats > 0.0;
-        // Where the drawn part of the cycle begins. A count-off is a section
-        // nobody wants to watch, so the pane's timeline starts after it and the
-        // groove's downbeat lands at the top of the first row rather than a
-        // count-off's worth in.
-        let display_start = bounds
-            .iter()
-            .find(|(_, i)| config.sections[*i].show)
-            .map_or(0.0, |(end, i)| end - config.sections[*i].beats);
+        let display_start = display_start(&config.sections, &bounds, sections_on);
 
         // Coefficients once per callback, never per frame -- and hoisted here
         // for the same reason the pan gains are.

@@ -792,6 +792,12 @@ a pause is a section with nothing on.
   - Like `rowColorPattern`, it **cannot be typed back to empty**;
     `parseNumberList` refuses an empty list, so clearing the field leaves the
     last good order rather than reverting to "in order".
+- **Everything is gated on `sectionsOn`, `display_start` included.** With the
+  switch off nothing is muted, the cycle never wraps and every beat is drawn --
+  what the app did before sections existed. `display_start` was the one place
+  that forgot to ask, so a leftover hidden section went on shifting the whole
+  picture by its length with nothing sounding differently to say why. It takes
+  the flag as an argument now, rather than leaving the guard to the call site.
 - **`show` is what keeps the cursor still through a count-off.** Off, no samples
   are stamped for that stretch at all, and the pane's timeline is measured from
   the start of the first shown section -- so the groove's downbeat lands at the

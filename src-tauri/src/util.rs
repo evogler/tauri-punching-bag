@@ -111,6 +111,28 @@ pub fn section_bounds(
     total
 }
 
+/// Where the drawn part of the cycle begins, in beats.
+///
+/// A count-off is a section nobody wants to watch, so the pane's timeline
+/// starts after it and the groove's downbeat lands at the top of the first row
+/// rather than a count-off's worth in.
+///
+/// Takes `sections_on` rather than leaving it to the caller because forgetting
+/// it is a silent bug and not an obvious one: with the cycle switched off, a
+/// leftover hidden section would go on shifting the whole picture by its
+/// length, with nothing sounding differently to say why.
+pub fn display_start(sections: &[Section], bounds: &[(f64, usize)], sections_on: bool) -> f64 {
+    if !sections_on {
+        return 0.0;
+    }
+    bounds
+        .iter()
+        .find(|(_, i)| sections.get(*i).map_or(false, |s| s.show))
+        .map_or(0.0, |(end, i)| {
+            end - sections.get(*i).map_or(0.0, |s| s.beats)
+        })
+}
+
 /// Which section a beat falls in, as an index into the config's list.
 ///
 /// The beat is reduced into the cycle first, so this answers for a *sounding*
