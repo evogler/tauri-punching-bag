@@ -32,6 +32,27 @@ const TRANSIENT_JS_KEYS: JsConfigKey[] = [];
 // shouldn't make loading it later pause the app.
 const TRANSIENT_RUST_KEYS: RustConfigKey[] = ["paused"];
 
+// Keys that describe the *machine* rather than the music. A preset travels
+// between machines and between input/output pairs, where a latency figure
+// measured somewhere else is noise -- `audio-prefs.json` already holds this one
+// per device pair, which is the right home for it.
+//
+// Excluded from presets and the session, and carried *across* a preset load
+// rather than reset with everything else. Both halves are needed: without the
+// exclusion a preset overwrote the measured value, and the write-back effect
+// then saved that number into `audio-prefs.json` for the current pair --
+// clobbering a calibration you would have to measure again. Without the
+// carry-across, merging over the defaults resets it to 4330 and the same effect
+// saves *that*.
+export const LOCAL_RUST_KEYS: RustConfigKey[] = ["bufferCompensation"];
+
+// What a preset load must not touch: the transport it was started from, and
+// anything belonging to this machine.
+export const KEPT_RUST_KEYS: RustConfigKey[] = [
+  ...TRANSIENT_RUST_KEYS,
+  ...LOCAL_RUST_KEYS,
+];
+
 export type Preset = {
   rust: Partial<RustConfig>;
   js: Partial<JsConfig>;
@@ -262,7 +283,7 @@ export const makePreset = (
   rust: pickKnownKeys<Partial<RustConfig>>(
     rustConfig,
     isRustConfigKey,
-    TRANSIENT_RUST_KEYS
+    KEPT_RUST_KEYS
   ),
   js: pickKnownKeys<Partial<JsConfig>>(jsConfig, isJsConfigKey, TRANSIENT_JS_KEYS),
 });
@@ -287,7 +308,7 @@ const sanitizePreset = (preset: unknown): Preset | null => {
     rust: pickKnownKeys<Partial<RustConfig>>(
       rustOut,
       isRustConfigKey,
-      TRANSIENT_RUST_KEYS
+      KEPT_RUST_KEYS
     ),
     js: pickKnownKeys<Partial<JsConfig>>(
       migrateViews(

@@ -59,7 +59,13 @@ import { appWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { SlidingDivision } from "./SlidingDivision";
 import { PresetBar } from "./PresetBar";
-import { Preset, makePreset, readSession, writeSession } from "./presets";
+import {
+  KEPT_RUST_KEYS,
+  Preset,
+  makePreset,
+  readSession,
+  writeSession,
+} from "./presets";
 import { GridList } from "./GridList";
 import { SectionList } from "./SectionList";
 import { RowColorList } from "./RowColorList";
@@ -1027,10 +1033,11 @@ const App = () => {
     invoke("set_audio_prefs", { prefs: next }).catch(() => {});
   };
 
-  // The stored compensation for whatever device actually opened wins over the
-  // restored session, once -- the session is the same on every machine, this
-  // number is not. A ref rather than state because applying it must not depend
-  // on having applied it.
+  // `audio-prefs.json` is the only home for this: it is excluded from presets
+  // and from the session (see LOCAL_RUST_KEYS), so the config boots at the
+  // default and the stored figure for whatever device actually opened is
+  // applied over it, once. A ref rather than state because applying it must not
+  // depend on having applied it.
   const appliedCompRef = useRef(false);
   useEffect(() => {
     if (appliedCompRef.current || !activeDevices) return;
@@ -1142,9 +1149,15 @@ const App = () => {
   const loadPreset = (preset: Preset) => {
     const next = resolveJsConfig({ ...defaultJsConfig, ...preset.js });
     setJsConfig(next);
+    // Last, so they win even over an older preset that still carries them:
+    // whether you are paused is not something a preset gets to decide, and the
+    // latency of the interface in front of you is not something it can know.
+    const kept = Object.fromEntries(
+      KEPT_RUST_KEYS.map((k) => [k, rustConfig[k]])
+    );
     updateRustConfig(
       resolveRustConfig(
-        { ...defaultRustConfig, ...preset.rust },
+        { ...defaultRustConfig, ...preset.rust, ...kept },
         parameterValues(next.parameters)
       )
     );

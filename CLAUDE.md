@@ -95,9 +95,21 @@ Rules that will bite you:
   `Input` can be typed against those keys; the panel reaches them through the
   view-scoped pair `viewSetGet(i)` returns, which falls through to the global
   `get`/`set` for everything else.
-- **Transient keys.** `presets.ts` excludes `canvasWidth`/`canvasHeight`
-  (derived from window size) and `paused` (transport state) from both presets
-  and the saved session.
+- **Transient keys.** `presets.ts` excludes `paused` (transport state) from both
+  presets and the saved session. `canvasWidth`/`canvasHeight` are gone from the
+  config entirely -- each pane is measured from its own box now.
+- **Machine keys.** `LOCAL_RUST_KEYS` is `bufferCompensation`, excluded from
+  presets and the session *and* carried across a preset load. A preset travels
+  between machines and between input/output pairs, where a latency measured
+  somewhere else is noise; `audio-prefs.json` holds it per device pair, which is
+  the right home. Both halves are load-bearing, and the failure was destructive
+  either way: without the exclusion a preset overwrote the measured value, and
+  the write-back effect then saved *that* into `audio-prefs.json` for the
+  current pair -- a calibration you would have to measure again. Without the
+  carry-across, merging over the defaults resets it to 4330 and the same effect
+  saves that instead. `KEPT_RUST_KEYS` is the two lists together and is what
+  `loadPreset` spreads *last*, so they win even over an older preset that still
+  carries them.
 - **Never reuse a config key name with different semantics or a different
   default.** Restore merges the saved value *over* the default, so a session
   written by an older build silently wins. This bit once: `loopFeedback` was a
