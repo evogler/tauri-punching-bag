@@ -403,7 +403,9 @@ const App = () => {
     if (BROWSER_DEBUG_MODE) return;
     invoke<FileInfo>("set_mp3_buffer", { filename })
       .then((info) => {
-        setFileInfo(info);
+        // No path is not a failure, and the zeroed FileInfo it answers with
+        // would print as a 0-frame file.
+        setFileInfo(filename ? info : null);
         setFileError(null);
       })
       .catch((e) => {
@@ -466,14 +468,6 @@ const App = () => {
     };
   }, []);
 
-  const fileRestored = useRef(false);
-  useEffect(() => {
-    if (fileRestored.current) return;
-    fileRestored.current = true;
-    const path = get("filePath");
-    if (path) loadFile(path);
-    // Once, on mount: Rust boots with no file, whatever the session says.
-  }, []);
 
   useEffect(() => {
     const unsubscribe = appWindow.onFileDropEvent((event) => {
@@ -527,6 +521,27 @@ const App = () => {
   // them, which is why nothing here knows what a random parameter feeds.
   const reroll = (pick?: (name: string) => boolean) =>
     setParameters(rollParameters(jsConfig.parameters, pick));
+
+  // Rust holds decoded samples and not the path, so the path has to be pushed
+  // across whenever it changes -- not once on mount, which is what this was.
+  // Picking a file called `loadFile` itself, so the only path that ever changed
+  // it without decoding was *loading a preset*: the new preset's `fileBeats`
+  // and stretch then applied to whatever file was already in memory, which came
+  // out as the old file playing back stretched wrong.
+  //
+  // A ref rather than a dependency because `loadFile` closes over the state
+  // setters and is a new function every render; the path is the only thing that
+  // should make this fire.
+  const filePushed = useRef<string | null>(null);
+  const filePath = get("filePath");
+  useEffect(() => {
+    if (BROWSER_DEBUG_MODE) return;
+    if (filePushed.current === filePath) return;
+    filePushed.current = filePath;
+    // The empty path is pushed too, and clears the buffer on the Rust side. A
+    // preset with no file has to be able to stop the last one playing.
+    loadFile(filePath);
+  }, [filePath]);
 
 
   const set = <T,>(k: string, v: T) => {
@@ -1114,12 +1129,22 @@ const App = () => {
 
   const getCurrentPreset = () => makePreset(rustConfig, jsConfig);
 
+  // Merged over the *defaults*, not over what is loaded now, which is the same
+  // rule session restore follows. Merging over the current config made a preset
+  // mean "these settings, plus whatever you happen to have" -- so a preset
+  // saved before a feature existed could not turn that feature off, and loading
+  // A then B gave a hybrid that neither one describes. A practice cycle
+  // outliving a preset that has none was this.
+  //
+  // The cost is that a key added since a preset was saved comes back at its
+  // default rather than keeping the current value. That is the honest answer
+  // and the one restore already gives.
   const loadPreset = (preset: Preset) => {
-    const next = resolveJsConfig({ ...jsConfig, ...preset.js });
+    const next = resolveJsConfig({ ...defaultJsConfig, ...preset.js });
     setJsConfig(next);
     updateRustConfig(
       resolveRustConfig(
-        { ...rustConfig, ...preset.rust },
+        { ...defaultRustConfig, ...preset.rust },
         parameterValues(next.parameters)
       )
     );

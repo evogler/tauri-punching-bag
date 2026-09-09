@@ -32,6 +32,37 @@ pub struct FileInfo {
 
 #[tauri::command]
 pub fn set_mp3_buffer(app_handle: tauri::AppHandle, filename: String) -> Result<FileInfo, String> {
+    // An empty path is "no file", which a config carrying no file has to be
+    // able to say. Without it, loading a preset that has none left Rust playing
+    // whatever was loaded before -- against the new preset's beats and stretch,
+    // which is what made it come back sounding stretched.
+    if filename.is_empty() {
+        let mp3_buffer_state: tauri::State<Mp3BufferState> = app_handle.state();
+        // Emptied by swapping in and dropping *after* unlocking: the render
+        // callback holds this mutex for its whole run, so freeing a file's worth
+        // of samples inside it is time the audio thread waits. Same reason the
+        // stretch swap does it this way.
+        let (old_buffer, old_natural);
+        {
+            let mut mp3_buffer = mp3_buffer_state.0.lock().unwrap();
+            old_buffer = std::mem::take(&mut mp3_buffer.buffer);
+            old_natural = std::mem::replace(&mut mp3_buffer.natural, Arc::new(vec![]));
+            mp3_buffer.ratio = 1.0;
+            // So a render already in flight for the old file is dropped rather
+            // than landing on top of the empty one.
+            mp3_buffer.generation += 1;
+            mp3_buffer.pos = 0.0;
+        }
+        drop(old_buffer);
+        drop(old_natural);
+        return Ok(FileInfo {
+            frames: 0,
+            seconds: 0.0,
+            source_rate: 0.0,
+            source_channels: 0,
+            device_rate: sample_rate(),
+        });
+    }
     let decoded = decode_audio_file(&filename)?;
     let samples = to_device_stereo(&decoded);
     let frames = samples.len() / 2;

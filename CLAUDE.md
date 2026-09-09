@@ -106,6 +106,14 @@ Rules that will bite you:
   silenced every echo after the first, which looked like the echo count being
   ignored. Renaming it to `loopEchoGain` was the fix, because unrecognized keys
   *are* dropped. Rename rather than redefine.
+- **Both session restore and preset load merge over the *defaults*.** Preset
+  load used to merge over the config in use, which made a preset mean "these
+  settings, plus whatever you happen to have": a preset saved before a feature
+  existed could not turn that feature off, and loading A then B gave a hybrid
+  neither one describes. A practice cycle outliving a preset that had none was
+  this, and so was a file going on playing. The cost is that a key added since a
+  preset was saved comes back at its default -- the honest answer, and the one
+  restore already gave.
 - **Session restore** merges over defaults, so new keys keep their default and
   removed keys are dropped. A restored session pushes one `set_config` on mount,
   because Rust boots from its own `default_config()`.
@@ -1475,7 +1483,18 @@ moving its pitch. **`docs/` has nothing on this; `stretch.rs` is the reference.*
 
 - **`filePath` lives in the js config** so a session comes back with its file
   loaded -- Rust holds decoded samples and not the path, so the frontend pushes
-  it back through `set_mp3_buffer` once on mount. `set_mp3_buffer` returns a
+  it back through `set_mp3_buffer` **whenever the path changes**, tracked by a
+  ref against the last one pushed. It used to be pushed once on mount, and
+  picking a file decoded it directly, which left exactly one way for the path to
+  change without a decode: *loading a preset*. The new preset's `fileBeats` and
+  stretch then applied to whatever file was still in memory, which came out as
+  the old file playing back stretched wrong.
+- **An empty path is "no file", and `set_mp3_buffer` takes it.** A preset that
+  has no file has to be able to stop the last one, so the empty path clears the
+  buffer rather than erroring. It swaps the samples out and drops them *after*
+  unlocking, for the same reason the stretch swap does -- the render callback
+  holds that mutex for its whole run. `generation` is bumped so a render already
+  in flight for the old file lands nowhere. `set_mp3_buffer` returns a
   `FileInfo` (frames, seconds, source rate and channels, device rate), which is
   what the panel prints and what `set tempo from file` divides.
 
