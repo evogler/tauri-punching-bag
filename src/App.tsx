@@ -2229,6 +2229,31 @@ const App = () => {
                 : "12 dB/octave, on the picture only. The looper still records dry."}
             </div>
           </Section>
+          <Section label="speaker bleed">
+            <Input
+              label="hide own output"
+              _key="bleedCancelOn"
+              set={set}
+              get={get}
+              title="Take the click and the drums back out of the picture when you are playing on speakers rather than headphones"
+            />
+            <Slider
+              label="amount"
+              value={get("bleedCancelAmount")}
+              min={0}
+              max={4}
+              step={0.05}
+              onChange={(n) => set("bleedCancelAmount", n)}
+              title="How much of the emitted envelope to take off the drawn magnitude. Turn it up until the click stops drawing"
+            />
+            <div style={{ color: "#aaa", fontSize: "0.8em" }}>
+              {!get("bleedCancelOn")
+                ? "Off -- on headphones there is no bleed to hide."
+                : get("bleedCancelAmount") === 0
+                ? "On, but the amount is 0. Turn it up until the click stops drawing."
+                : "Picture only -- the looper still records what the microphone heard."}
+            </div>
+          </Section>
           <Section label="looping">
             <Input label="looping (⌘L)" _key="loopingOn" set={set} get={get} />
             <Input label="beatsToLoop" _key="beatsToLoop" params={params} set={set} get={get} />

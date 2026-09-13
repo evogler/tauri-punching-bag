@@ -183,6 +183,19 @@ fn main() -> Result<(), coreaudio::Error> {
     let mut analyzer = Analyzer::new(sample_rate());
 
     let mut click_sound_counter: i32 = 0;
+    // Peak-hold envelope of what the speaker emitted, for the bleed
+    // subtraction. Instant attack and an exponential release: long enough to
+    // cover the room's tail on a click, far short of a beat at any tempo worth
+    // practising at, so it cannot duck the gap between hits.
+    let mut bleed_env: f32 = 0.0;
+    // 15 ms. Long enough that one setting of the amount covers a whole click
+    // and the room's tail behind it -- at 3 ms the envelope falls away under
+    // the burst and the amount needed triples -- and short enough that it has
+    // decayed to nothing well before the next beat at any tempo. Simulated: a
+    // hit 100 ms after a click keeps its full height.
+    let bleed_release = (-1.0f64 / (0.015 * sample_rate())).exp() as f32;
+    // How far ahead of the echo to arm the envelope. See `peek_lead`.
+    let bleed_lead = (0.005 * sample_rate()) as usize;
     let mut rng = rand::thread_rng();
 
     let log_state = LogState(Arc::new(Mutex::new(io_log)));
@@ -373,6 +386,8 @@ fn main() -> Result<(), coreaudio::Error> {
         // The buffer holds whatever is *sounded*, so when the audio is left dry
         // the picture's echoes have to be filtered on the way out instead.
         let high_pass_echoes = high_pass_on && !config.high_pass_audio;
+        let bleed_cancel_on = config.bleed_cancel_on;
+        let bleed_cancel_amount = config.bleed_cancel_amount;
         for hp in input_high_pass.iter_mut().chain(loop_high_pass.iter_mut()) {
             hp.set_cutoff(config.high_pass_hz, sample_rate());
         }
@@ -499,6 +514,30 @@ fn main() -> Result<(), coreaudio::Error> {
                 // what the old code did.
                 // Summed per output side rather than into one mono value, which
                 // is what lets a channel sit anywhere in the stereo field.
+                // What the speaker emitted `buffer_compensation` frames ago,
+                // which is exactly what the microphone is handing us the echo
+                // of now -- that compensation *is* the measured round trip.
+                // Peeked rather than pushed, because this frame's buses are
+                // synthesised further down.
+                //
+                // The three synthesised buses and not the output channel,
+                // deliberately: the output also carries the monitor and the
+                // looper's echoes, and subtracting those would take your own
+                // playing out of your own trace.
+                let emitted = {
+                    let [d, c, f] = bus_delay.peek_lead(bleed_lead);
+                    (d + c + f).abs()
+                };
+                // Run whether or not it is switched on, like the filters and
+                // for the same reason -- an envelope caught up mid-phrase is
+                // one that was never stale.
+                bleed_env = emitted.max(bleed_env * bleed_release);
+                let duck = if bleed_cancel_on {
+                    bleed_env * bleed_cancel_amount
+                } else {
+                    0.0
+                };
+
                 let mut monitor_out: [S; 2] = [0.0, 0.0];
                 for ch in 0..input_frame.len() {
                     let raw = buffers[ch].pop_front().unwrap_or(0.0) * config.audio_in_gain;
@@ -509,6 +548,16 @@ fn main() -> Result<(), coreaudio::Error> {
                     let filtered = input_high_pass[ch].process(raw);
                     input_raw[ch] = raw;
                     input_frame[ch] = if high_pass_on { filtered } else { raw };
+                    // Take the known bleed off the magnitude, keeping the sign
+                    // so the value still sums with the looper's echoes below.
+                    // Floored at zero rather than let through negative, which
+                    // would draw the click straight back at whatever the
+                    // overshoot was.
+                    if duck > 0.0 {
+                        let v = input_frame[ch];
+                        let shown = v.abs() - duck;
+                        input_frame[ch] = if shown > 0.0 { shown.copysign(v) } else { 0.0 };
+                    }
                     let audio = if high_pass_audio { filtered } else { raw };
                     input_audio[ch] = audio;
                     let (left, right) = pan_gains[ch];

@@ -255,6 +255,19 @@ export const defaultRustConfig = {
   // Also filter what is heard -- the monitor and what the looper records -- so
   // the filter can be auditioned rather than only looked at.
   highPassAudio: false,
+  // Discount the picture by what the app itself put through the speaker. For
+  // practising on speakers, where the click and the drums come back in through
+  // the microphone and draw bars of their own over the thing you are trying to
+  // look at.
+  //
+  // This subtracts an *envelope*, not a waveform -- `bleed_cancel_amount` in
+  // structs.rs has the why, which is that the click is white noise and so
+  // cannot be cancelled by anything that isn't aligned to the frame.
+  bleedCancelOn: false,
+  // Plain numbers rather than expressions, because the control is a slider and
+  // there is nowhere to type one -- and because the right value is a property
+  // of the room, not something arithmetic over the parameters could know.
+  bleedCancelAmount: 0,
   audioMonitorOn: false,
   beatsToLoop: numExpr(4),
   // How many times a phrase comes back, one `beatsToLoop` apart each time.

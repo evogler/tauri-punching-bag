@@ -86,6 +86,13 @@ pub fn default_config() -> Config {
         // put the fundamental far enough down to stop dominating the picture.
         high_pass_hz: 800.0,
         high_pass_audio: false,
+        bleed_cancel_on: false,
+        // 0 rather than a guess: the right amount depends on the speaker's
+        // volume, the microphone's gain and the distance between them, so there
+        // is no default that means anything. Starting at nothing also makes the
+        // first drag monotonic -- the bars only ever shrink -- which is what
+        // makes it tunable by eye.
+        bleed_cancel_amount: 0.0,
         looping_on: false,
         click_on: true,
         sections_on: false,

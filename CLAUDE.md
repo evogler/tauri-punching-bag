@@ -799,6 +799,70 @@ it isn't throwaway work.
   costs up to 30 MB; storing the filtered signal instead would change what the
   looper sounds like without being asked.
 
+### Speaker bleed
+
+`bleedCancelOn` / `bleedCancelAmount`, in the Rust config, applied per input
+channel in the callback. For practising on speakers rather than headphones,
+where the click and the drums come back in through the microphone and draw bars
+of their own over the thing you are trying to look at. Display only, like the
+high pass, and off by default.
+
+- **It subtracts an *envelope*, not a waveform, and the click is why.** The
+  click is `rng.gen()` -- white noise -- so its autocorrelation is one frame
+  wide, and a subtraction misaligned by a single frame is uncorrelated with what
+  it is trying to remove and *adds* 3 dB. Simulated against a modelled speaker
+  and room: a least-squares one-tap subtraction leaves the click bar at 0.83-1.00x
+  at every alignment including a perfect one, because the speaker smears the
+  burst over several frames regardless. Nothing that subtracts the signal itself
+  works here without a measured impulse response. Taking the *magnitude* down by
+  what we know we emitted needs no phase alignment at all, and the picture is a
+  column peak, so it draws the same answer.
+- **So there is no polarity to get backwards**, which a waveform subtraction
+  would have had -- speaker and microphone polarity are both unknown, and the
+  wrong sign draws the click *taller*. An envelope has no sign. The amount is
+  unsigned for that reason.
+- **The reference is free, and it is already delayed by the right amount.**
+  `BusDelay` holds the drums, click and file for `buffer_compensation` frames so
+  they draw on the beat they sounded on -- and that compensation *is* the
+  measured round trip, so what it hands back is exactly the output the
+  microphone is returning the echo of now. `peek_lead` reads it without
+  advancing, because the input loop runs at the top of a frame and `push` at the
+  bottom.
+- **The three synthesised buses, not the output channel.** The output also
+  carries the monitor and the looper's echoes, and subtracting those would take
+  your own playing out of your own trace.
+- **The envelope is armed 5 ms early**, by reading *forward* into the delay ring
+  at output that has not echoed back yet. Without it the subtraction survives
+  three frames of error in `buffer_compensation` and the leading edge of every
+  click punches through; with it the window is about -2 ms to +5 ms. 5 ms
+  because that is already the spread `MAX_SPREAD_MS` refuses to answer beyond,
+  so it is the app's own standing claim about how well the round trip is known.
+- **15 ms release, instant attack.** At 3 ms the envelope falls away under the
+  burst and the amount needed triples; at 30 ms it starts eating what you play
+  after the beat. Measured at 15: the click sinks to a tenth of its bar at an
+  amount of 0.64, and a hit landing *on* the click keeps 0.88 of its height, one
+  20 ms later 0.94, one 100 ms later all of it. That last set is the number that
+  matters -- a hit on the beat is the whole point of the display, and it is
+  barely touched.
+- **Tuned by eye, and that is the design.** The right amount is a property of
+  the speaker's volume, the microphone's gain and the distance between them, so
+  there is no default that means anything and it starts at 0. Turn it up until
+  the click stops drawing and stop there: overshooting costs height on your own
+  hits, and the simulation above is the difference between 0.88x and 0.40x.
+- **Display only.** `input_audio` and `input_raw` are untouched, so the looper
+  records what the microphone actually heard and the analyzer still measures it
+  -- the same line the high pass draws, for the same reason.
+  - **So the looper's echoes still carry the bleed.** One buffer holds the
+    sounded signal, and unlike the high pass there is no LTI argument to rescue
+    it: this subtracts a *different* signal rather than filtering the stored one.
+    Cancelling it in the echoes means running the reference through the same
+    taps, which is a second history buffer. Not built.
+  - The reference is not high-passed while `input_frame` may be, so toggling the
+    high pass changes the amount needed. One slider, retuned by eye.
+- **The envelope follower runs whether or not the switch is on**, like the
+  filters and for the same reason: one caught up mid-phrase is one that was
+  never stale.
+
 ### Input capture
 
 - **The sample rate is the input device's, not a constant.**
@@ -1957,6 +2021,14 @@ and several of them have since been confirmed. What is genuinely open is here:
   to calibrate against, since the callback knows its trigger times exactly.
 - **`buffer_compensation` at 48 kHz.** Tuned by ear at 44.1 kHz, so ~8 ms short
   on a 48 kHz device. `measure latency` answers this in about ten seconds.
+- **Speaker bleed has never been tried against a real speaker.** The arithmetic
+  is simulated against a modelled room -- that waveform subtraction cannot work
+  on a noise click, that envelope subtraction sinks the click bar to a tenth
+  while a hit on the beat keeps 0.88 of its height, and what the lead and the
+  release buy. What no simulation can say is whether a real room's bleed
+  behaves like the model, whether one amount holds across the click and the
+  drums together, or whether the picture that comes out is actually easier to
+  play against.
 - **The unmanaged second Mac has not been retried since the ad-hoc era.** The
   notarized build is expected to install with a plain drag, and the managed work
   Mac now does, but that particular machine has not been asked again.
@@ -2329,11 +2401,35 @@ See *Updates*.
   The onset picker could *propose* markers once they exist, but manual ones come
   first: they're the ground truth any detector would be checked against, and the
   point of the tool is that it's authoritative.
-- **Cancelling the app's own output out of the input.** The click, the drums and
-  now the file all bleed into the microphone on speakers, and the callback knows
-  exactly what it emitted -- so in principle it could be subtracted. Not
-  attempted; the room's impulse response sits between the two, which is the
-  whole difficulty. Headphones remain the answer.
+- **Cancelling the app's own output out of the *sound*.** The picture half is
+  built -- see *Speaker bleed* -- but it works by taking the magnitude down,
+  which is no use to the looper or the monitor, where the waveform itself has to
+  come out. That needs the real thing: the speaker and room's impulse response,
+  convolved with what was emitted and subtracted sample by sample.
+  - **The measurement is already being taken and thrown away.** A swept sine
+    correlated against its own reference is the textbook way to measure an
+    impulse response, and `measure_probe` in `calibration.rs` computes exactly
+    that correlation over 500 ms of lags -- then keeps the index of the tallest
+    bin and drops the vector. Two changes make it usable: keep `corr`, and store
+    it signed rather than `acc.abs()`, which throws away the polarity a
+    subtraction needs.
+  - **Truncated to 5-10 ms, not the whole tail.** What makes a bar tall is the
+    direct path and the speaker's own ringing; the reverb tail is diffuse and
+    low. A few hundred taps per channel, which is affordable -- and `realfft` is
+    already in the tree if partitioned convolution is ever wanted.
+  - **Static, fitted once, never adapting.** An adaptive filter is the wrong
+    tool here twice over: you are deliberately playing *along with* the
+    reference, which is permanent double-talk, and a metronome is about as
+    non-exciting an input as exists, so the correlation matrix is near-singular
+    and anything at the period gets attributed ambiguously. It would learn to
+    cancel your own playing. The calibration measures in silence, which is the
+    one moment the problem is perfectly conditioned.
+  - **Expect 20-25 dB and no more**, because the speaker is nonlinear and a
+    linear filter cannot touch that. Real echo cancellers get the rest from a
+    nonlinear residual suppressor, which is spectral gating, which smears
+    transients -- the same objection that ruled out a phase vocoder for the
+    stretch. Not worth having here.
+  - Headphones remain the answer for the sound.
 - **Decimated sample transport.** Send per-block peaks from Rust instead of raw
   samples. The frontend already reduces to per-pixel peaks, so the picture is
   identical for ~8× less JSON. Worth doing before going past a few channels.

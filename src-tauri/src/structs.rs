@@ -226,6 +226,30 @@ pub struct Config {
     /// looper keeps recording the dry signal and the picture's echoes are
     /// filtered on the way out instead.
     pub high_pass_audio: bool,
+    /// Discount the picture by the app's own output, for practising on
+    /// speakers: the click and the drums come back through the microphone and
+    /// draw bars of their own, which is the thing that makes your own playing
+    /// hard to pick out.
+    ///
+    /// Display only. `input_audio` and `input_raw` are untouched, so the looper
+    /// still records what the microphone actually heard and the analyzer still
+    /// measures it -- the same line the high pass draws, for the same reason.
+    pub bleed_cancel_on: bool,
+    /// How much of the emitted envelope to take off the drawn magnitude.
+    ///
+    /// **This subtracts an envelope, not a waveform**, and the click is why.
+    /// It is `rng.gen()` -- white noise -- so its autocorrelation is a spike
+    /// one frame wide: a subtraction misaligned by even a single frame is
+    /// uncorrelated with what it is trying to remove and *adds* 3 dB instead.
+    /// `buffer_compensation` is only good to about three frames, and the
+    /// speaker smears the burst over several more, so nothing that subtracts
+    /// the signal itself can work here without a measured impulse response.
+    /// Taking the magnitude down by what we know we emitted needs no phase
+    /// alignment at all, and for a peak display it draws the same picture.
+    ///
+    /// Tuned by eye -- turn it up until the click stops drawing. Unsigned,
+    /// because an envelope has no polarity to get backwards.
+    pub bleed_cancel_amount: f32,
     pub looping_on: bool,
     pub click_on: bool,
     /// Run the practice cycle. Off, everything sounds continuously, which is
@@ -405,6 +429,32 @@ impl BusDelay {
     /// Takes this frame's buses and returns the set from `frames` ago. With no
     /// compensation set there's nothing to line up, so it passes straight
     /// through.
+    /// The delayed buses, read `lead` frames *early*, without advancing.
+    ///
+    /// The input loop runs at the top of a frame and `push` at the bottom, so
+    /// anything reading the input needs the delayed buses before this frame's
+    /// have been synthesised. Reading the slot twice is safe because `push`
+    /// reads it before it overwrites it.
+    ///
+    /// `lead` walks forward into the ring, which is *newer* output -- sound
+    /// that has not echoed back yet. That is the point: an envelope taken from
+    /// it rises `lead` frames before the echo it describes arrives, so the
+    /// leading edge of a click cannot punch through under a
+    /// `buffer_compensation` that undershoots the real round trip. Simulated:
+    /// with no lead the subtraction survives three frames of error and with
+    /// 5 ms it survives 5 ms, which is exactly the spread the calibration
+    /// already refuses to answer beyond.
+    ///
+    /// With no compensation set `push` passes this frame straight through,
+    /// which is not a delayed signal at all -- so this answers silence, and
+    /// the bleed subtraction is inert rather than wrong.
+    pub fn peek_lead(&self, lead: usize) -> [f32; BUS_COUNT] {
+        if self.slots.is_empty() {
+            return [0.0; BUS_COUNT];
+        }
+        self.slots[(self.pos + lead.min(self.slots.len() - 1)) % self.slots.len()]
+    }
+
     pub fn push(&mut self, frame: [f32; BUS_COUNT]) -> [f32; BUS_COUNT] {
         if self.slots.is_empty() {
             return frame;
