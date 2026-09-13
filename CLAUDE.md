@@ -839,11 +839,27 @@ high pass, and off by default.
   so it is the app's own standing claim about how well the round trip is known.
 - **15 ms release, instant attack.** At 3 ms the envelope falls away under the
   burst and the amount needed triples; at 30 ms it starts eating what you play
-  after the beat. Measured at 15: the click sinks to a tenth of its bar at an
-  amount of 0.64, and a hit landing *on* the click keeps 0.88 of its height, one
-  20 ms later 0.94, one 100 ms later all of it. That last set is the number that
-  matters -- a hit on the beat is the whole point of the display, and it is
-  barely touched.
+  after the beat, and a hit on the beat is the whole point of the display.
+- **It scales the magnitude, it does not subtract from it.** `m / (m + duck)`,
+  so the signal is left alone where it stands well above the duck and faded
+  smoothly where it does not. Subtracting was the first attempt and it is a
+  cliff: everything quieter than the duck floors at exactly zero, so a passage
+  played *under* the bleed is not reduced but erased. What that draws is a black
+  band at every beat with the playing gone from inside it -- which is worse than
+  the problem, and is what the first build actually did.
+- **The ceiling is real and the ratio is honest about it.** Where the bleed is
+  genuinely louder than the playing -- a laptop speaker inches from the laptop
+  microphone, say -- the two are not separable by any arithmetic on magnitudes,
+  because the information that tells them apart is in the phase. This draws a
+  reduced bar rather than pretending by blanking one. Removing bleed that is
+  *over* the playing needs the impulse response; see *Discussed but not built*.
+- **The amount is cubed on the way in from the slider**, which is the difference
+  between a usable control and an unusable one. The reference is the emitted
+  signal and is order 1; the microphone's copy of it is order 0.01; so the
+  multiplier that lines them up is a few thousandths, and a linear slider's
+  first step past zero was already ten times too much. The config holds the
+  real multiplier and the panel takes its cube root back, so the stored number
+  stays the meaningful one.
 - **Tuned by eye, and that is the design.** The right amount is a property of
   the speaker's volume, the microphone's gain and the distance between them, so
   there is no default that means anything and it starts at 0. Turn it up until
@@ -857,8 +873,12 @@ high pass, and off by default.
     it: this subtracts a *different* signal rather than filtering the stored one.
     Cancelling it in the echoes means running the reference through the same
     taps, which is a second history buffer. Not built.
-  - The reference is not high-passed while `input_frame` may be, so toggling the
-    high pass changes the amount needed. One slider, retuned by eye.
+  - **The reference goes through the same high pass the picture does**, on its
+    own filter instance. Without that the envelope describes a signal nobody is
+    looking at: a kick drum is almost entirely under a 400 Hz cutoff, so it
+    contributes its full amplitude to an unfiltered envelope and nearly nothing
+    to the filtered picture, and the duck comes out enormous for the whole
+    length of the sample.
 - **The envelope follower runs whether or not the switch is on**, like the
   filters and for the same reason: one caught up mid-phrase is one that was
   never stale.
@@ -2413,6 +2433,11 @@ See *Updates*.
     bin and drops the vector. Two changes make it usable: keep `corr`, and store
     it signed rather than `acc.abs()`, which throws away the polarity a
     subtraction needs.
+  - **The chirp's band is the catch.** It sweeps 500-8000 Hz, so the
+    correlation only knows the response inside that band -- and the click is
+    white, with most of its energy outside it. Cancelling a noise click needs a
+    full-band measurement: widen the probe, or measure against the click itself,
+    which is already a known white signal emitted on every beat.
   - **Truncated to 5-10 ms, not the whole tail.** What makes a bar tall is the
     direct path and the speaker's own ringing; the reverb tail is diffuse and
     low. A few hundred taps per channel, which is affordable -- and `realfft` is

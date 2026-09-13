@@ -2237,21 +2237,27 @@ const App = () => {
               get={get}
               title="Take the click and the drums back out of the picture when you are playing on speakers rather than headphones"
             />
+            {/* Cubed, because the useful range spans decades and the bottom of
+                it is where the control lives. The reference is the emitted
+                signal, which is order 1, and the microphone's copy of it is
+                order 0.01 -- so the multiplier that lines them up is a few
+                thousandths, and a linear slider's first step past zero is
+                already ten times too much. */}
             <Slider
               label="amount"
-              value={get("bleedCancelAmount")}
+              value={Math.round(Math.cbrt(get("bleedCancelAmount") / 4) * 200) / 200}
               min={0}
-              max={4}
-              step={0.05}
-              onChange={(n) => set("bleedCancelAmount", n)}
-              title="How much of the emitted envelope to take off the drawn magnitude. Turn it up until the click stops drawing"
+              max={1}
+              step={0.005}
+              onChange={(s) => set("bleedCancelAmount", s ** 3 * 4)}
+              title="How much of the emitted envelope to take off the drawn magnitude. Turn it up until the click stops drawing, and stop there"
             />
             <div style={{ color: "#aaa", fontSize: "0.8em" }}>
               {!get("bleedCancelOn")
                 ? "Off -- on headphones there is no bleed to hide."
                 : get("bleedCancelAmount") === 0
                 ? "On, but the amount is 0. Turn it up until the click stops drawing."
-                : "Picture only -- the looper still records what the microphone heard."}
+                : `Scaling by ${get("bleedCancelAmount").toPrecision(2)} of the emitted envelope. Picture only -- the looper still records what the microphone heard.`}
             </div>
           </Section>
           <Section label="looping">

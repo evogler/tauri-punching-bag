@@ -175,6 +175,10 @@ fn main() -> Result<(), coreaudio::Error> {
         (0..input_channels).map(|_| HighPass::new()).collect();
     let mut loop_high_pass: Vec<HighPass> =
         (0..input_channels).map(|_| HighPass::new()).collect();
+    // One more for the bleed reference, so the envelope describes the emitted
+    // signal as the *picture* sees it. One instance, not one per channel: the
+    // reference is a single mono signal.
+    let mut bleed_high_pass = HighPass::new();
     // The drums and the click are generated here rather than captured, so they
     // have to be held back to land on the same visual beat as the input.
     let mut bus_delay = BusDelay::new();
@@ -388,7 +392,11 @@ fn main() -> Result<(), coreaudio::Error> {
         let high_pass_echoes = high_pass_on && !config.high_pass_audio;
         let bleed_cancel_on = config.bleed_cancel_on;
         let bleed_cancel_amount = config.bleed_cancel_amount;
-        for hp in input_high_pass.iter_mut().chain(loop_high_pass.iter_mut()) {
+        for hp in input_high_pass
+            .iter_mut()
+            .chain(loop_high_pass.iter_mut())
+            .chain(std::iter::once(&mut bleed_high_pass))
+        {
             hp.set_cutoff(config.high_pass_hz, sample_rate());
         }
 
@@ -526,7 +534,16 @@ fn main() -> Result<(), coreaudio::Error> {
                 // playing out of your own trace.
                 let emitted = {
                     let [d, c, f] = bus_delay.peek_lead(bleed_lead);
-                    (d + c + f).abs()
+                    let dry = d + c + f;
+                    // Through the same high pass the picture is drawn through,
+                    // or the envelope describes a signal nobody is looking at.
+                    // A kick drum is almost entirely under a 400 Hz cutoff: it
+                    // contributes its full amplitude to an unfiltered envelope
+                    // and almost nothing to the filtered picture, so the
+                    // subtraction comes out enormous for the whole length of
+                    // the sample. Run unconditionally, like the others.
+                    let filtered = bleed_high_pass.process(dry);
+                    if high_pass_on { filtered.abs() } else { dry.abs() }
                 };
                 // Run whether or not it is switched on, like the filters and
                 // for the same reason -- an envelope caught up mid-phrase is
@@ -548,15 +565,23 @@ fn main() -> Result<(), coreaudio::Error> {
                     let filtered = input_high_pass[ch].process(raw);
                     input_raw[ch] = raw;
                     input_frame[ch] = if high_pass_on { filtered } else { raw };
-                    // Take the known bleed off the magnitude, keeping the sign
-                    // so the value still sums with the looper's echoes below.
-                    // Floored at zero rather than let through negative, which
-                    // would draw the click straight back at whatever the
-                    // overshoot was.
+                    // Scale the magnitude down rather than subtracting the
+                    // duck off it. Subtracting is a cliff: everything quieter
+                    // than the duck floors at exactly zero, so a passage played
+                    // under the bleed is not reduced but *erased*, and what you
+                    // see is a black band at every beat rather than a smaller
+                    // click. This ratio leaves the signal alone where it stands
+                    // well above the duck, fades it smoothly where it doesn't,
+                    // and can never reach zero while there is something there.
+                    //
+                    // It is also honest about the ceiling: where the bleed is
+                    // genuinely louder than the playing, no amount of magnitude
+                    // arithmetic can separate them, and this draws a reduced
+                    // bar instead of pretending by blanking one.
                     if duck > 0.0 {
                         let v = input_frame[ch];
-                        let shown = v.abs() - duck;
-                        input_frame[ch] = if shown > 0.0 { shown.copysign(v) } else { 0.0 };
+                        let m = v.abs();
+                        input_frame[ch] = v * (m / (m + duck));
                     }
                     let audio = if high_pass_audio { filtered } else { raw };
                     input_audio[ch] = audio;
