@@ -525,9 +525,16 @@ exactly that tarball (both the signature and the trusted comment's global
 signature, Ed25519 over a blake2b-512 prehash), the key ids match, and the
 `.app` *inside* the tarball is 0.2.0, hardened, `TeamIdentifier=9KMDH5UH9Z`,
 `accepted` by `spctl` as a Notarized Developer ID and stapled -- so it clears
-Gatekeeper offline once the updater swaps it in. What is **not** verified is the
-round trip: nothing has been published, so no build has ever actually seen an
-update and installed it.
+Gatekeeper offline once the updater swaps it in.
+
+**The round trip is confirmed, 2026-09-13.** v0.2.0 was published and installed
+on the work Mac; v0.2.1 was published; the app raised the native dialog on
+launch showing v0.2.1's release notes, installed on yes, and came back as
+v0.2.1 -- **with audio still working and no new microphone prompt.** That last
+clause is the part worth keeping: it is the payoff of the Developer ID being
+stable, and it is a *stronger* result than the rebuild test it settles, because
+the bundle was replaced wholesale by a build from another machine and the grant
+still held.
 
 ### The App Store, if it ever happens
 
@@ -1950,11 +1957,9 @@ and several of them have since been confirmed. What is genuinely open is here:
   to calibrate against, since the callback knows its trigger times exactly.
 - **`buffer_compensation` at 48 kHz.** Tuned by ear at 44.1 kHz, so ~8 ms short
   on a 48 kHz device. `measure latency` answers this in about ten seconds.
-- **A TCC microphone grant surviving a rebuild.** The whole practical point of
-  a stable signature, and the one thing signing was supposed to fix that has
-  not been watched yet: build twice, grant once, and see whether the second
-  build still records without re-prompting. Everything else about the signing
-  is confirmed -- see the 2026-09-12 note.
+- **The unmanaged second Mac has not been retried since the ad-hoc era.** The
+  notarized build is expected to install with a plain drag, and the managed work
+  Mac now does, but that particular machine has not been asked again.
 
 Confirmed working in the app, whatever the older notes below say: the file
 player, A-B repeat, the time stretch, drum offsets, panning, the drums and click
@@ -2186,12 +2191,11 @@ previous build could be launched at all. That is the strongest single result
 here, because it is the one machine whose refusal was enforced by policy rather
 than talked round.
 
-What is still open is the TCC grant surviving a rebuild -- see *Verification*.
-Two smaller unknowns came out of the same work: whether the microphone still
-prompts cleanly now the signature changed (a stale record keyed to the bundle id
-outlives it; `tccutil reset Microphone com.vogler.dev`), and whether the
-ordinary drag install really is enough on an *unmanaged* second Mac, which has
-not been retried since the ad-hoc era recipe was written.
+**The signature is stable enough to carry a TCC grant across a whole new build**
+-- confirmed the same day by the updater round trip, where v0.2.0 became v0.2.1
+in place and the microphone kept working with no new prompt. That was the point
+of paying for the certificate, and it is now a fact rather than an expectation.
+See *Updates*.
 
 ## Discussed but not built
 
