@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api";
+import { getVersion } from "@tauri-apps/api/app";
 import {
   checkUpdate,
   installUpdate,
@@ -37,6 +38,15 @@ const message = (e: unknown) =>
 
 export const Updater = () => {
   const [state, setState] = useState<State>({ kind: "idle" });
+
+  // What is actually running, read from the bundle rather than from anything
+  // this side could get out of step with. Without it an update that installed
+  // and an update that silently did nothing look identical -- which is the
+  // whole question you open this section to answer.
+  const [version, setVersion] = useState("");
+  useEffect(() => {
+    getVersion().then(setVersion).catch(() => {});
+  }, []);
 
   // An updater failure is silent by construction -- the app goes on working
   // perfectly while quietly never updating again -- so the error is surfaced
@@ -92,6 +102,7 @@ export const Updater = () => {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ opacity: 0.8 }}>{version && `v${version}`}</span>
         <button onClick={check} disabled={busy}>
           check for updates
         </button>
