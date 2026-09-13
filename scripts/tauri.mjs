@@ -261,13 +261,19 @@ const writeReleaseManifest = (startedAt) => {
     ...dmgsUnder(target).filter((f) => statSync(f).mtimeMs >= startedAt),
   ];
 
+  // Two commands rather than one, and `--notes` rather than letting it prompt.
+  // `gh release create` with assets attached goes interactive without notes,
+  // and that path uploads each asset twice -- which fails with
+  // `ReleaseAsset.name already exists` blaming a duplicate that does not exist
+  // on disk, and rolls the whole release back. Splitting them also means
+  // `--clobber` can make a half-finished upload re-runnable.
+  const quoted = `'${notes.replace(/'/g, "'\\''")}'`;
   console.log(
     `\nwrote ${manifest.slice(root.length + 1)} for v${version}. to publish:\n` +
-      `  gh release create v${version} --title v${version} \\\n` +
-      assets
-        .map((a) => `    ${a.slice(root.length + 1)}`)
-        .join(" \\\n") +
-      `\n`
+      `  gh release create v${version} --title v${version} --notes ${quoted}\n` +
+      `  gh release upload v${version} \\\n` +
+      assets.map((a) => `    ${a.slice(root.length + 1)}`).join(" \\\n") +
+      ` \\\n    --clobber\n`
   );
 };
 

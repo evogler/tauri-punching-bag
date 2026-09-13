@@ -496,11 +496,21 @@ chases a new disk image.
   exactly that reason -- the *Failing loudly* argument, one layer out. The error
   is shown in the updates section rather than the config banner, because the
   launch check fires it every time the machine is offline.
-- **`scripts/tauri.mjs` writes `latest.json` and prints the `gh release create`
-  line rather than running it.** Publishing is the step that puts code on other
+- **`scripts/tauri.mjs` writes `latest.json` and prints the publish commands
+  rather than running them.** Publishing is the step that puts code on other
   people's machines; it stays something you do on purpose. A tarball with no
   `.sig` beside it means the key vars were not set, and it says so instead of
   writing a manifest the updater would reject.
+- **It prints two commands, not one, and always passes `--notes`.**
+  `gh release create` with assets attached goes *interactive* when notes are
+  missing, and that path uploads every asset twice -- which fails with
+  `ReleaseAsset.name already exists`, blaming a duplicate that does not exist on
+  disk, and then rolls the whole release back. Splitting create from upload also
+  lets `--clobber` make a half-finished upload re-runnable. Hit once, on the
+  first publish attempt.
+- **Publish the artifacts from one build.** Every build produces a fresh tarball
+  and a fresh signature, so a manifest from one build with a tarball from
+  another verifies on nobody's machine. Rebuild, and re-copy all three.
 - **The platform key is derived, not typed** (`darwin-aarch64`). The updater
   matches it exactly, and an x86_64 or universal build needs its own entry.
 - **`notes` comes from the last commit subject, so commit before building a
