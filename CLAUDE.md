@@ -454,6 +454,82 @@ blocks an ad-hoc un-notarized bundle outright.
   changing the signature, `tccutil reset Microphone com.vogler.dev` is what
   makes the prompt appear again.
 
+### Updates
+
+`updater` in `tauri.conf.json`, `src/Updater.tsx` for the manual half, and a
+`latest.json` written by `scripts/tauri.mjs`. Aimed at friends rather than at
+the machines you own: you cannot walk over to someone else's Mac, and nobody
+chases a new disk image.
+
+- **A second keypair, unrelated to Apple's.** The Developer ID proves to *macOS*
+  that the app is from you; this minisign key proves to *the app* that an update
+  is from you. `tauri signer generate -w ~/.tauri/punching-bag.key`; the public
+  half goes in `updater.pubkey`, the private half stays out of the repo and its
+  password lives in `.env.signing` beside the Apple credentials.
+  - **Losing it is worse than losing the `.p12`.** Every existing install
+    rejects every future update, permanently, and each machine needs a manual
+    reinstall to get back on the train. Back it up.
+  - **Stealing it is worse still**: it signs code that auto-installs on other
+    people's machines. It is the one secret here that is worth a password.
+- **The version has to actually move.** The updater compares `package.version`
+  against the manifest and does nothing when they match -- silently, which reads
+  as a broken endpoint. Bump it in `tauri.conf.json` (and `package.json`, kept
+  in step) as part of releasing, not after.
+- **The endpoint is GitHub Releases**, which works only because the repo is
+  public: v1's `UpdaterConfig` takes `active`, `dialog`, `endpoints`, `pubkey`
+  and `windows` and **no headers**, so there is no way to authenticate to a
+  private one -- a token would have to sit in the URL, baked into the binary.
+  Going private means a static host instead, or Tauri v2, whose updater plugin
+  does take headers.
+- **`dialog: true` and the manual check are independent paths**, and the flag
+  gates only the first. The launch check runs `prompt_for_install`; a JS
+  `checkUpdate()` is picked up by a listener that never reads `dialog` at all.
+  So both work at once, and the manual path raises no native dialog -- which is
+  why `Updater.tsx` renders its own line rather than reusing one.
+  - **The dialog path installs *and* asks to restart; the JS path does neither.**
+    It emits `DONE` and returns, so an update installed from the panel would sit
+    on disk unmentioned until the next launch. `Updater.tsx` calls `restart_app`
+    itself -- the same command the menu's Restart uses, so the *bundle* comes
+    back rather than the bare binary.
+- **An updater failure is silent by construction**: the app goes on working
+  perfectly and simply never updates again. `onUpdaterEvent` is listened to for
+  exactly that reason -- the *Failing loudly* argument, one layer out. The error
+  is shown in the updates section rather than the config banner, because the
+  launch check fires it every time the machine is offline.
+- **`scripts/tauri.mjs` writes `latest.json` and prints the `gh release create`
+  line rather than running it.** Publishing is the step that puts code on other
+  people's machines; it stays something you do on purpose. A tarball with no
+  `.sig` beside it means the key vars were not set, and it says so instead of
+  writing a manifest the updater would reject.
+- **The platform key is derived, not typed** (`darwin-aarch64`). The updater
+  matches it exactly, and an x86_64 or universal build needs its own entry.
+- **`notes` comes from the last commit subject, so commit before building a
+  release.** Build first and the release notes describe the commit *before* the
+  work being released -- which is wrong in a way nobody would notice until a
+  friend read them. Editing `latest.json` by hand before publishing is the other
+  answer.
+
+Verified 2026-09-13, on the first updater-enabled build: the minisign signature
+in `latest.json` checks out against the public key in `tauri.conf.json` for
+exactly that tarball (both the signature and the trusted comment's global
+signature, Ed25519 over a blake2b-512 prehash), the key ids match, and the
+`.app` *inside* the tarball is 0.2.0, hardened, `TeamIdentifier=9KMDH5UH9Z`,
+`accepted` by `spctl` as a Notarized Developer ID and stapled -- so it clears
+Gatekeeper offline once the updater swaps it in. What is **not** verified is the
+round trip: nothing has been published, so no build has ever actually seen an
+update and installed it.
+
+### The App Store, if it ever happens
+
+Updates would go through the store and the updater above would have to come
+*out* -- App Store apps may not download and run new code. The real cost is the
+**sandbox**: the microphone entitlement carries over, but arbitrary file paths
+do not, so the file player and the drum samples would need the user-selected
+entitlement plus security-scoped bookmarks saved with the session. `filePath`
+surviving a restart is exactly what a sandbox forbids. That is the same work the
+AU port needs, so it would be done once for both. Different certificates and a
+second build target on top.
+
 ### Installing on a second Mac
 
 **The build now sweeps stale disk images, so there should only ever be one.**
@@ -496,9 +572,22 @@ later one fail for a *different* reason than the first -- which is why this
 reads as transient and is not. The way it gets genuinely stuck is the app
 *running* from the mounted image: `hdiutil detach` then answers `Resource busy`
 and no amount of re-running will ever clear it. `lsof +D /Volumes/...` names the
-process. `scripts/tauri.mjs` detaches before a build, and when it cannot, prints
-what is holding the volume; it only touches volumes backed by an image under
-`src-tauri/target`.
+process.
+
+`scripts/tauri.mjs` frees the name before a build, and **refuses to build when
+it cannot** -- the disk image is the last step, so otherwise you pay the
+compile, the signing and a notarization round trip to arrive at a failure that
+was knowable at the start.
+
+- **The volume is identified by name, not by its backing image.** Matching only
+  images under `src-tauri/target` misses the case that actually bit: *any* copy
+  of a released disk image, mounted from anywhere -- Downloads, a USB stick,
+  whatever was being carried to another machine -- claims the same name. An
+  image under `src-tauri/target` is additionally swept whatever it is called,
+  which is the scratch-image case.
+- Verified both ways by mounting an image from outside the target tree: it is
+  detached and the build proceeds, and when a process holds the volume the
+  build is refused with the holder named.
 
 **App Management, once the app has been launched from a disk image.** The real
 error is

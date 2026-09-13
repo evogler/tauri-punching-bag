@@ -6,6 +6,7 @@ import {
   useRef,
 } from "react";
 import { invoke } from "@tauri-apps/api";
+import { Updater } from "./Updater";
 import {
   defaultRustConfig,
   RustConfig,
@@ -2290,6 +2291,15 @@ const App = () => {
               get={get}
             />
           </Section>
+
+          {/* With the device picker and Restart, because this is the tab that
+              already holds what belongs to this install rather than to the
+              music -- and installing an update restarts the app. */}
+          {!BROWSER_DEBUG_MODE && (
+            <Section label="updates">
+              <Updater />
+            </Section>
+          )}
         </TabPanel>
 
         <TabPanel active={panelTab === "visual"}>

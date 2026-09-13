@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "tauri-punching-bag",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "tauri": {
     "allowlist": {
@@ -54,7 +54,12 @@
       "csp": null
     },
     "updater": {
-      "active": false
+      "active": true,
+      "dialog": true,
+      "endpoints": [
+        "https://github.com/evogler/tauri-punching-bag/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJBMERDRUQxNDM0QjAyMjMKUldRakFrdEQwYzROS3A4S0MxUDFOb2crZC9FVytiSGhIazdpd1ZhT3daM2ZlMDdOamtqUnVlZmMK"
     },
     "windows": [
       {
