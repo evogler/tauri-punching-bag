@@ -21,8 +21,10 @@ Rust deps are already built. Three warnings are pre-existing and expected
 (`unused import: std::time::Instant`, `unused imports: AudioUnit and Error`, and
 `method hop_frames is never used`).
 
-If the DMG step fails with `error running bundle_dmg.sh`, it's usually
-transient — just re-run.
+If the DMG step fails with `error running bundle_dmg.sh`, **do not just re-run
+it** — see *The disk image step*. That message covers every possible cause, the
+two real ones are a stale mounted volume and a missing App Management grant, and
+neither is fixed by trying again.
 
 ## Architecture
 
@@ -399,27 +401,57 @@ were stopping it:
   `src-tauri/Info.plist` into the generated one; that file exists now solely to
   carry this key. Verify a build with
   `plutil -p .../tauri-punching-bag.app/Contents/Info.plist | grep -i usage`.
-- **The hardened runtime is on** (`codesign -dv` reports
-  `flags=0x10002(adhoc,runtime)`), and under it a process cannot open an input
-  device without `com.apple.security.device.audio-input`. It was commented out.
+- **The hardened runtime is on** (`codesign -dv` reported
+  `flags=0x10002(adhoc,runtime)` then, `flags=0x10000(runtime)` now that the
+  signature is real), and under it a process cannot open an input device
+  without `com.apple.security.device.audio-input`. It was commented out. The
+  hardened runtime is also a precondition for notarization, so it stopped being
+  optional.
 - **`com.apple.private.tcc.allow-prompting` was the only entitlement applied.**
   That is an Apple *private* entitlement; third parties can't use it, it did
   nothing here, and it would make a real Developer ID signature invalid. Removed
   -- don't put it back.
 
-Still outstanding, and the reason other machines are hard:
+### Signing and notarization
 
-- **Signing is ad-hoc** (`signingIdentity: "-"`, `TeamIdentifier=not set`). TCC
-  keys a grant to the code signature, and an ad-hoc signature changes every
-  build, so a granted permission won't survive a rebuild. On another Mac,
-  Gatekeeper blocks an ad-hoc, un-notarized bundle outright.
-- Interim workaround on another Mac: `xattr -dr com.apple.quarantine <app>`,
-  then right-click → Open.
-- Real fix: an Apple Developer Program membership, a Developer ID Application
-  certificate in `signingIdentity`, and `APPLE_ID` / `APPLE_PASSWORD` set so the
-  build stops logging `skipping app notarization`.
-- A stale TCC record survives all of this, keyed by the bundle id. After
-  changing any of the above, `tccutil reset Microphone com.vogler.dev` is what
+**Signed with a Developer ID and notarized, as of 2026-09-12.** This replaced
+ad-hoc signing, which was the reason other machines were hard: TCC keys a grant
+to the code signature, an ad-hoc signature changes every build, and Gatekeeper
+blocks an ad-hoc un-notarized bundle outright.
+
+- **`signingIdentity` is `"Developer ID Application: Eric Vogler (9KMDH5UH9Z)"`**
+  in `tauri.conf.json`, and the team id is the certificate's OU -- read it with
+  `security find-certificate -c "<name>" -p | openssl x509 -noout -subject`
+  rather than from the parenthetical in the identity string, which is a
+  different number on a development certificate.
+- **Tauri v1 notarizes the `.app` and not the disk image it then builds around
+  it.** The app's own ticket is stapled, so it launches; the image carries a
+  signature and no ticket, and the image is what Gatekeeper judges *first* on a
+  download -- it refuses to mount one with "Apple could not verify this is free
+  of malware". `scripts/tauri.mjs` submits and staples the image after a
+  successful build, and says loudly when it could not rather than failing a
+  build whose app is fine. Stapling both also means neither check needs the
+  network.
+- **Notarization needs `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` in the
+  environment**, and the password is an *app-specific* one from
+  appleid.apple.com, not the account password. Without them the bundler logs
+  `skipping app notarization` and carries on succeeding, so the absence is
+  quiet. `scripts/tauri.mjs` loads them from a gitignored `.env.signing`; an
+  exported variable wins over the file. Check the credentials in a second
+  without a build: `xcrun notarytool history` answers `No submission history`
+  when they are right and an auth error when they are not.
+- **`@tauri-apps/cli` had to go 1.0.5 -> 1.6.3 first.** 1.0.5 shells out to
+  `xcrun altool`, which Apple retired on 1 Nov 2023, so notarization could not
+  have worked at all. Still Tauri v1 and no code migration: the Rust crate was
+  already resolving to 1.8.3 and only the JS CLI was stale. `strings` on
+  `node_modules/@tauri-apps/cli-darwin-arm64/cli.darwin-arm64.node` names which
+  tool a given CLI will call.
+- **The private key cannot be re-downloaded and Apple caps how many Developer ID
+  certificates you may hold.** Export it as a `.p12` and keep it. Losing it
+  means a new signature, which means every machine treats this as a different
+  app again and every TCC grant is void.
+- **A stale TCC record survives all of this**, keyed by the bundle id. After
+  changing the signature, `tccutil reset Microphone com.vogler.dev` is what
   makes the prompt appear again.
 
 ### Installing on a second Mac
@@ -449,6 +481,56 @@ plausible fixes aimed at the wrong thing.
   actually cost a day was named exactly like a real one, which a name pattern
   would never have caught.
 
+### The disk image step
+
+`bundle_dmg.sh` reports exactly one thing, `error running bundle_dmg.sh`, for
+every way it can fail. Run the CLI directly to see the real error --
+`node_modules/.bin/tauri build --verbose`, which prints the shell trace and so
+the `hdiutil` line that actually failed. Two causes, and the second is the one
+that costs a day.
+
+**A mounted volume of the same name.** The script creates
+`/Volumes/tauri-punching-bag` and cannot when that name is taken. Its `rw.*.dmg`
+scratch image stays attached after a failed run, so one failure makes every
+later one fail for a *different* reason than the first -- which is why this
+reads as transient and is not. The way it gets genuinely stuck is the app
+*running* from the mounted image: `hdiutil detach` then answers `Resource busy`
+and no amount of re-running will ever clear it. `lsof +D /Volumes/...` names the
+process. `scripts/tauri.mjs` detaches before a build, and when it cannot, prints
+what is holding the volume; it only touches volumes backed by an image under
+`src-tauri/target`.
+
+**App Management, once the app has been launched from a disk image.** The real
+error is
+
+```
+could not access /Volumes/tauri-punching-bag/tauri-punching-bag.app - Operation not permitted
+```
+
+and it is macOS TCC (`kTCCServiceSystemPolicyAppBundles`) refusing *any* write
+to that path -- `ditto` is refused identically, so it is not an `hdiutil`
+problem. **Grant App Management to the terminal** that runs the build (System
+Settings → Privacy & Security → App Management; it was Ghostty here, and the
+grant took effect without restarting it).
+
+- **It is keyed to the exact path, which is what makes it so confusing.** Three
+  runs pin it down: the same volume name with a plain folder works, the same
+  volume name with the app renamed to `renamed.app` works, and only
+  `/Volumes/tauri-punching-bag/tauri-punching-bag.app` is refused. Protection
+  attaches to that path because an app was once launched from it -- the
+  provenance record behind the `putting executable into provenance` message
+  below.
+- **So it appears only after someone mounts the DMG and runs the app**, which is
+  exactly what testing the artifact involves. It will keep coming back on any
+  machine where that hasn't been granted.
+- **Do not chase LaunchServices.** There *is* a stale registration for that path
+  and `lsregister -u` clears it, and it changes nothing -- the protection is in
+  TCC, not in LaunchServices. Nor is `tccutil reset SystemPolicyAppBundles
+  <terminal>` enough on its own: it produced no prompt and no change. The grant
+  has to be made in System Settings.
+- The Claude Code sandbox is *not* involved. Checked with
+  `dangerouslyDisableSandbox`, which failed identically.
+
 **Identify the artifact before debugging anything else.** One command settles it:
 
 ```
@@ -458,10 +540,23 @@ codesign -dvvv /Applications/tauri-punching-bag.app
 - `Format=... (x86_64)` -- wrong DMG. Current builds are `arm64`.
 - `Info.plist entries=17` -- wrong DMG. A build carrying the microphone key has 27.
 - `CodeDirectory v=20400` -- wrong DMG; current is `v=20500`.
+- `TeamIdentifier=not set` -- a build from before the Developer ID. Current is
+  `9KMDH5UH9Z`, and this is the strongest of the four: it cannot be faked by a
+  stale artifact, because no stale artifact has it.
 
-Without a terminal, 7 MB versus 36 MB is the same check.
+**Do not use file size for this.** The old note here said 7 MB versus 36 MB, and
+that has inverted: a current signed build compresses to **6.8 MB** (the app is
+14 MB on the volume), so the figure that used to mean "the known-bad x86_64
+image" now describes a correct one. Run `codesign -dvvv`.
 
-**The install recipe that works**, once the artifact is right:
+**The install should now be an ordinary drag**, since the bundle is notarized
+and stapled: mount the image, drag the app to Applications, open it. The staple
+means Gatekeeper can clear it without a network round trip, so this holds
+offline too.
+
+Everything below is the **ad-hoc era recipe**, kept because it is what to reach
+for if a signature or a notarization ever regresses -- and because two of its
+three "failures" were never failures at all.
 
 ```
 rm -rf /Applications/tauri-punching-bag.app          # never merge onto an old one
@@ -472,7 +567,7 @@ xattr -dr com.apple.quarantine /Applications/tauri-punching-bag.app
 open /Applications/tauri-punching-bag.app            # then Open Anyway, possibly twice
 ```
 
-On macOS 15 the escape hatch is **System Settings → Privacy & Security → Open
+On macOS 15 the escape hatch was **System Settings → Privacy & Security → Open
 Anyway**, which only appears *after* a launch has been refused; right-click →
 Open no longer works. Expect to use it more than once.
 
@@ -483,14 +578,16 @@ Open no longer works. Expect to use it more than once.
 - `unable to initialize qtn_proc` and `putting executable into provenance` in
   the log -- what syspolicyd prints for a file with *no* quarantine attribute.
   They mean the removal worked.
-- `spctl -a` reporting `rejected` -- expected for anything ad-hoc and
-  un-notarized, and unrelated to whether the signature is valid. `codesign
-  -vvv --deep --strict` is the question worth asking; it reports `valid on
-  disk` for a good ad-hoc bundle.
+- `spctl -a` reporting `rejected` -- that *was* expected for every ad-hoc,
+  un-notarized build, and unrelated to whether the signature was valid, so
+  `codesign -vvv --deep --strict` was the question worth asking instead. It is
+  no longer a false alarm: a notarized build reports `accepted` with
+  `source=Notarized Developer ID`, so a `rejected` now means something really is
+  wrong.
 
-**A self-signed certificate is a free stable identity**, and is worth reaching
-for before the Developer ID if the only goal is running the app on a machine you
-control. Keychain Access → Certificate Assistant → Create a Certificate, with
+**A self-signed certificate is a free stable identity**, superseded here by the
+Developer ID but still the answer if the membership ever lapses and the only
+goal is running the app on a machine you control. Keychain Access → Certificate Assistant → Create a Certificate, with
 **Identity Type: Self Signed Root** and **Certificate Type: Code Signing**, then
 `codesign --force --options runtime --entitlements Entitlements.plist --sign
 "<name>"`. `Warning: unable to build chain to self-signed root` is expected and
@@ -1754,9 +1851,11 @@ and several of them have since been confirmed. What is genuinely open is here:
   to calibrate against, since the callback knows its trigger times exactly.
 - **`buffer_compensation` at 48 kHz.** Tuned by ear at 44.1 kHz, so ~8 ms short
   on a 48 kHz device. `measure latency` answers this in about ten seconds.
-- **The bundle on other machines.** Ad-hoc signing still means Gatekeeper
-  refuses it on a machine that hasn't been talked round, and a managed Mac
-  refuses it outright.
+- **A TCC microphone grant surviving a rebuild.** The whole practical point of
+  a stable signature, and the one thing signing was supposed to fix that has
+  not been watched yet: build twice, grant once, and see whether the second
+  build still records without re-prompting. Everything else about the signing
+  is confirmed -- see the 2026-09-12 note.
 
 Confirmed working in the app, whatever the older notes below say: the file
 player, A-B repeat, the time stretch, drum offsets, panning, the drums and click
@@ -1857,7 +1956,9 @@ What that detour does and does not establish:
   or EDR agent enforcing notarization is the likely reason; Homebrew is
   unaffected because CLI binaries do not go through LaunchServices. Not worth
   working around -- a notarized Developer ID build is the answer, if IT's policy
-  is the standard one rather than an allowlist.
+  is the standard one rather than an allowlist. **Confirmed 2026-09-13**: the
+  first notarized build installed and ran there with no argument, so the policy
+  was the standard one and notarization was the whole of it.
 
 ### 2026-09-06, later: the file player
 
@@ -1968,6 +2069,31 @@ before storage to within 1e-4. What no test can say is whether 800 Hz is a
 useful default, or whether the filtered picture is easier to play against than
 the raw one.
 
+### 2026-09-12: signing and notarization
+
+The app and the disk image are both signed with a Developer ID, notarized and
+stapled, and `yarn tauri build` does the whole chain unattended. See *Signing
+and notarization* for the mechanics and *The disk image step* for the two ways
+it fails.
+
+Verified mechanically on the build machine: the signature chains to the Apple
+Root CA with a secure timestamp, `codesign -dv` reports `flags=0x10000(runtime)`
+rather than the old `adhoc,runtime`, `TeamIdentifier` is set, `spctl -a` answers
+`accepted` with `source=Notarized Developer ID` for both artifacts, and both
+staples validate. Notarization returned `Accepted` on every submission.
+
+**Confirmed on the managed work Mac, 2026-09-13** -- installed and ran, where no
+previous build could be launched at all. That is the strongest single result
+here, because it is the one machine whose refusal was enforced by policy rather
+than talked round.
+
+What is still open is the TCC grant surviving a rebuild -- see *Verification*.
+Two smaller unknowns came out of the same work: whether the microphone still
+prompts cleanly now the signature changed (a stale record keyed to the bundle id
+outlives it; `tccutil reset Microphone com.vogler.dev`), and whether the
+ordinary drag install really is enough on an *unmanaged* second Mac, which has
+not been retried since the ad-hoc era recipe was written.
+
 ## Discussed but not built
 
 - **An iOS / iPadOS port.** Wanted eventually, iPad first. Doable, and the code
@@ -2005,7 +2131,9 @@ the raw one.
     with codec renegotiation and interference, and a compensation can only
     absorb a constant. Wired or built-in only.
   - An Apple Developer Program membership stops being optional: iOS has no
-    ad-hoc sideloading escape hatch.
+    ad-hoc sideloading escape hatch. **No longer a blocker** -- the membership
+    and a Developer ID exist as of 2026-09-12, though iOS needs its own
+    distribution certificate and provisioning profile on top of it.
 
 - **Staying in sync with a loop playing in Logic**, so you can watch your
   playing against a part Logic is looping *live* rather than a bounce of it.

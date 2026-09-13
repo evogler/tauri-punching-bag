@@ -21,3 +21,6 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Apple notarization credentials (app-specific password). Never commit.
+.env.signing

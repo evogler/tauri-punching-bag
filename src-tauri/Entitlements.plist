@@ -3,8 +3,9 @@
 <plist version="1.0">
 <dict>
     <!-- The bundle is signed with the hardened runtime on (codesign reports
-         flags=0x10002(adhoc,runtime)), and under that a process cannot open an
-         input device without this. -->
+         the `runtime` flag), and under that a process cannot open an input
+         device without this. The hardened runtime is also a precondition for
+         notarization, so it is not optional now even if it once looked it. -->
     <key>com.apple.security.device.audio-input</key>
     <true/>
 </dict>
