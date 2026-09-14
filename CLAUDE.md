@@ -2240,11 +2240,48 @@ and several of them have since been confirmed. What is genuinely open is here:
   is exactly what it was built for. Not looked at at all: the looper path, and
   the live readout -- whose first version only showed a number while it was
   *learning*, which is almost never.
-- **The looper on speakers, 2026-09-13.** Cancelling the bleed out of what the
-  looper records works: previously it fed back and was loud after ten passes,
-  now the loop fades and a clap is gone in about five. What remains is a
-  high-mid band accumulating over a couple of minutes, which is what
-  `loopFeedbackGuardOn` was then built for -- simulated only, not yet heard.
+- **The looper on speakers, 2026-09-13, and then a regression.** Cancelling the
+  bleed out of what the looper records **works**: previously it fed back and was
+  loud after ten passes, now the loop fades and a clap is gone in about five.
+  What remained was a high-mid band accumulating over a couple of minutes.
+  `loopFeedbackGuardOn` was built for exactly that, and the owner's report on
+  first use was that **it seems to have got worse**. Left there deliberately,
+  to come back to.
+
+  **Where it was left.** Nothing is forced on: `bleedCancelAudioOn` and
+  `loopFeedbackGuardOn` both default to false. But a saved session carries
+  whatever was switched on, so *turning both off is the way back* to the state
+  that was working.
+
+  **What "worse" refers to is not established**, and that is the first thing to
+  settle rather than guess at. The switches bisect it directly, in this order:
+  1. `loopFeedbackGuardOn` off, everything else as it was. If that fixes it, the
+     guard is the culprit and the suspects below apply.
+  2. Then `bleedCancelAudioOn` off as well, which returns to the picture-only
+     feature that was confirmed good at roughly two thirds removed.
+  3. If it is *still* worse, the regression is in the restructure that came with
+     the audio path, not in either switch -- see the last suspect.
+
+  **Suspects, most likely first.**
+  - **The guard cutting music rather than feedback.** It deepens the loudest
+    band that has grown three intervals running, and a part being built up grows
+    exactly like a runaway does. `STEP_DB` is 1 dB per second with `RELEASE_DB`
+    only 0.05, so a wrong cut takes twenty times as long to give back as it took
+    to make -- that asymmetry is worth revisiting first, and `MAX_CUT_DB` of 24
+    is deep.
+  - **The guard acting on a loop that was already decaying.** It was simulated
+    against a loop that genuinely ran away; it has never been seen against one
+    the bleed canceller had already brought under control, which is the real
+    case.
+  - **Tracking judging itself in the raw domain.** The channel loop was
+    restructured when the audio path went in: the reference is now raw and the
+    *prediction* is high-passed, instead of the reference being high-passed.
+    Mathematically identical for the subtraction, by the LTI argument -- but the
+    tracking guard's own `pred_pow` / `err_pow` are now compared on raw signals,
+    so low-frequency room noise the filter cannot model inflates the residual
+    and holds the guard shut. With the high pass on, that noise used to be
+    excluded. This one would show as tracking quietly doing less, and it is the
+    only change that could make the *picture* worse.
 - **The unmanaged second Mac has not been retried since the ad-hoc era.** The
   notarized build is expected to install with a plain drag, and the managed work
   Mac now does, but that particular machine has not been asked again.
