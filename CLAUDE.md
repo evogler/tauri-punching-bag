@@ -2286,6 +2286,35 @@ as if they had been typed.
   together, because resolving either alone leaves a rhythm stale in the one
   config nothing on this side re-reads. Startup, `setParameters` and
   `loadPreset` all go through it.
+- **The matrix is a pop-up, and the columns in it are drawn evenly whatever
+  the pulse.** The panes are where you look at where a note landed; this is
+  where you say what the notes are, and a swung pulse drawn to scale would make
+  the short columns the hard ones to hit. The pulse is written above each
+  column so the unevenness stays legible, and the grid's own settings moved
+  into the pop-up with the cells -- the row in the drums tab is a summary and
+  an *Edit...* button, since a grid owns several parts and a matrix, and a
+  settings row has room for neither.
+- **Beat markers under restart, and none under carry-over.** With every pass
+  identical the beats are exact and worth drawing, and with an uneven pulse
+  against even columns they land *between* columns at irregular places, which
+  is what makes them necessary rather than decorative. With the pulse carried
+  over a beat lands in a different column on every pass, so the strip says so
+  and the period readout stands in for the markers.
+- **One paint value, three lenses, and the same drag writes all of them.** The
+  lens switch chooses which field a click or a drag lands in; a hits drag takes
+  its value from the cell it started on, so dragging off a hit erases the run.
+  A number typed per cell was the alternative and is unusable at 128 columns --
+  and "make these four hits quiet" wants one gesture, not four. The value draws
+  as the cell's shade in the lens's own hue, with the number printed while
+  there are sixteen columns or fewer.
+- **Gains and chances only touch a cell that already sounds**, which is what
+  keeps the gains lens from writing a gain into every cell just by being
+  opened: `gains` appears only once somebody paints one, and *clear gains* is
+  the way back to a hand-typed list.
+- **A new row and a new column arrive silent.** The first pass made them sound,
+  because a silent row had nothing to say it had been added; the matrix is that
+  something, and it inverts the argument -- you add a part in order to program
+  it, and lengthening a pattern must not add hits nobody asked for.
 - **A row names its voice by index**, like `sections[].drums`, so deleting a
   voice has to fix the indices up -- `removeDrumVoice` does both edits as one
   operation. **`sections[].drums` has exactly the same bug and still does

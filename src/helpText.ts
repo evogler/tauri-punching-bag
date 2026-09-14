@@ -169,6 +169,38 @@ export const HELP: Record<string, HelpEntry> = {
     title: "What it comes to",
     body: "The columns the grid actually plays and how long that is in beats. With the pulse carried over this is more columns than you drew, since the pattern has to be written out until it comes back round.",
   },
+  "drumGrids.edit": {
+    title: "Edit…",
+    body: "Opens the matrix: the parts down the side, the columns across, and a cell for each. Click or drag across the cells to say which columns sound.",
+  },
+  "drumGrids.lensHits": {
+    title: "Hits",
+    body: "Which columns sound. A cell is on or off, and off is a note with no chance of sounding -- which is how a grid writes a pattern with gaps as an ordinary rhythm.",
+  },
+  "drumGrids.lensGains": {
+    title: "Gains",
+    body: "How loud each hit is, on top of the part's own volume. Only cells that already sound -- a silent column has nothing to accent. Nothing is written until you paint one, so a gains list you typed by hand is left alone until then; `clear gains` hands it back.",
+  },
+  "drumGrids.lensChances": {
+    title: "Chances",
+    body: "How likely each hit is to sound, from 0 to 1. Only cells that already sound; painting 0 turns one off, since an unticked column and a chance of 0 are the same thing.",
+  },
+  "drumGrids.paint": {
+    title: "What you are painting",
+    body: "The value a click or a drag writes into a cell. One value at a time rather than a number typed per cell, so the same drag that places hits also places accents.",
+  },
+  "drumGrids.clearGains": {
+    title: "Clear gains",
+    body: "Takes every gain off this grid, so it stops writing a gains list at all and whatever was typed into the parts' own gains fields applies again.",
+  },
+  "drumGrids.beats": {
+    title: "Where the beats fall",
+    body: "Columns are drawn evenly whatever the pulse, so with a swung or uneven pulse the whole beats land between columns, at irregular places. With the pulse carried over there are no markers: the beat lands in a different column on every pass, and a marker that is right one pass in two is worse than none.",
+  },
+  "drumGrids.spans": {
+    title: "The pulse, column by column",
+    body: "How long each column is, in beats. The columns are drawn evenly -- the panes are where you look at where a note landed, and this is where you say what the notes are -- so this row is where the unevenness shows.",
+  },
 
   sectionsOn: {
     title: "Run the cycle",
