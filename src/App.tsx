@@ -2245,6 +2245,13 @@ const App = () => {
               get={get}
               title="Follow the response as it drifts -- your hands over the keyboard are part of it. Only learns from moments it can already explain, so it holds still while you play"
             />
+            <Input
+              label="out of the looper"
+              _key="bleedCancelAudioOn"
+              set={set}
+              get={get}
+              title="Also take it out of what is recorded and monitored, which breaks the loop's feedback path. Changes what the looper records"
+            />
             <BleedMeter enabled={get("bleedCancelOn")} />
           </Section>
           <Section label="looping">

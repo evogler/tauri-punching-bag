@@ -856,11 +856,14 @@ designs are written out at the end because both look right on paper.
   already uses.** The probe is measured raw and the runtime reference is
   filtered, and `H(x - h*d) = H(x) - h*H(d)` -- so the same response is correct
   in both domains, and toggling the filter cannot invalidate a measurement.
-- **Display only.** `input_audio` and `input_raw` are untouched, so the looper
-  records what the microphone actually heard and the analyzer still measures it
-  -- the same line the high pass draws, for the same reason. The looper's
-  *echoes* therefore still carry the bleed; cancelling it there means running
-  the reference through the same taps, which is a second history buffer.
+- **The picture by default; the sound only if asked** (`bleedCancelAudioOn`,
+  below). `input_raw` is untouched either way, so the analyzer always measures
+  what the microphone actually heard.
+- **The echo is predicted once and filtered afterwards, not predicted from a
+  filtered reference.** The picture may be high-passed while the sound is not,
+  and the high pass is LTI, so `H(h*d) = h*H(d)` -- one prediction, run through
+  a per-channel `HighPass`, serves both domains. It is also why the probe can be
+  measured raw and used under any filter setting.
 - **A laptop speaker is the hardest case for the linear part.** The built-in
   output runs its own dynamic EQ and limiting, and that is a nonlinearity which
   *changes with the content* -- so the response measured against noise is not
@@ -933,11 +936,48 @@ bounded refinement around it, never a fresh search.
 - **It pulls gently back toward the measured weights** on every adapting frame,
   so "wandered somewhere strange" decays into "the filter you measured" rather
   than persisting.
-- **The live readout is honest in a way the old one was not.** The reduction is
-  accumulated *only over guard-satisfied frames* -- the frames with little of
-  you in them -- which are the only frames on which such a figure means
-  anything. The continuous version's meter reported +2 dB where the truth was
-  -9, which is what disqualified it.
+- **Reporting and learning are two different bars.** `REPORT_GUARD` is 1 and
+  `TRACK_GUARD` is 10: a frame where the echo merely outweighs what is left is
+  one where the figure means something, while learning from it would be noisy.
+  Held to the learning bar the readout goes blank exactly while you are playing,
+  which is when you want to look at it -- that was the first version, and the
+  owner reported simply not being able to find a live number.
+- **Both bars are still gated on the echo dominating**, which is what makes the
+  figure honest. The continuous-adaptation version's meter reported +2 dB where
+  the truth was -9, because it averaged over everything; that is what
+  disqualified it.
+
+#### Out of the looper, not just the picture
+
+`bleedCancelAudioOn`, off by default, applies the same subtraction to
+`input_audio` -- what the monitor plays and what the looper records.
+
+- **The looper is the reason, and what it fixes is real feedback.** The buffer
+  is a plain history of the microphone, the speaker plays that history back, and
+  the microphone records it again. On a laptop that path closes: `channel[i] =
+  audio_out * 12.0` puts the looper through a factor of twelve on its way out,
+  so a coupling of a tenth is already a loop gain above one.
+- **So the reference gained a fourth bus.** `BUS_COUNT` is 4: drums, click,
+  file, and the looper's feed at `loop_out * 12` -- carrying the twelve, or it
+  describes a sound nobody made. The *monitor* is still deliberately excluded:
+  that one is your own live playing on its way to the speaker, and subtracting
+  it would take you out of your own trace.
+- **Summed across the two sides, like `file_bus`.** Exact for a centred mono
+  input, which is the laptop case and the case this was asked for; an
+  approximation for anything hard-panned, because one probe measured one summed
+  path and two speakers emitting different signals need two filters.
+- **It is suppression, not a cure, and the numbers are modest.** Simulated with
+  part of the response deliberately outside the filter's window, so the
+  achievable cancellation is capped the way a real room caps it: the loop runs
+  away above a coupling of about 0.12 uncancelled and about 0.25 cancelled.
+  Roughly double the coupling, or twice the loop volume, before it goes. The
+  speaker's distortion is not cancelled and feeds back on its own account.
+- **Alternating record and playback kills it dead instead**, by construction,
+  and is the owner's own plan. The two are complementary: alternating gives up
+  continuous recording -- which is what makes overlapping phrases work -- and
+  this does not.
+- Separate from `bleedCancelOn` because it changes what the looper *records*,
+  which is the line the high pass draws too.
 
 #### Two designs that were tried first
 
@@ -2516,23 +2556,23 @@ See *Updates*.
   The onset picker could *propose* markers once they exist, but manual ones come
   first: they're the ground truth any detector would be checked against, and the
   point of the tool is that it's authoritative.
-- **Cancelling the app's own output out of the *sound*.** The picture half is
-  built and measured -- see *Speaker bleed* -- and the filter it fits is a real
-  impulse response, so the hard part is done. What is missing is applying it to
-  `input_audio` as well as `input_frame`, so the looper stops recording the
-  click and the monitor stops feeding it back.
-  - **The bar is much higher than for the picture.** A bar that is 20 dB down is
-    invisible; a click that is 20 dB down is still audible in a quiet passage,
-    and the residual has a spectrum rather than just a level. The measured
-    ceiling is the speaker's nonlinearity -- 43 dB in simulation against 6%
-    distortion, and a real laptop speaker driven hard is worse.
+- **Cancelling the app's own output out of the sound, properly.** The switch
+  exists (`bleedCancelAudioOn`, see *Out of the looper*) and is enough to move
+  the looper's feedback threshold by about a factor of two. What it is not is
+  *clean*: a bar 20 dB down is invisible, a click 20 dB down is still audible in
+  a quiet passage, and the residual has a spectrum rather than only a level.
   - **Everything past the linear filter costs transients.** Real echo
     cancellers get their last 20 dB from a nonlinear residual suppressor, which
     is spectral gating, which smears exactly what this app exists to let you
     place. The same objection that ruled out a phase vocoder for the stretch.
-  - **It would want the filter persisted first** (see *Speaker bleed*), because
-    recording a take through a filter measured for a different volume is a
-    quieter kind of wrong than drawing one.
+  - **A second reference would be the honest fix for panned material**, since
+    two speakers emitting different signals are two paths and one probe
+    measured their sum. Stereo echo cancellation is genuinely hard -- with
+    correlated references the solution is not unique -- and it buys nothing for
+    the click and drums, which are emitted mono.
+  - **It would want the filter persisted first**, because recording a take
+    through a filter measured for a different volume is a quieter kind of wrong
+    than drawing one.
   - Headphones remain the answer for the sound.
 - **Decimated sample transport.** Send per-block peaks from Rust instead of raw
   samples. The frontend already reduces to per-pixel peaks, so the picture is

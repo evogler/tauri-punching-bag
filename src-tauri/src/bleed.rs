@@ -126,6 +126,14 @@ const TRACK_DECAY: f32 = 1.0 - 7.6e-5;
 /// 4 Hz and would otherwise be unreadable.
 const REPORT_SMOOTHING: f32 = 0.2;
 
+/// How well the filter has to be doing before its reduction is worth
+/// *reporting*, as opposed to worth learning from. Much lower than
+/// `TRACK_GUARD`: a frame where the echo merely outweighs what is left is a
+/// frame where the figure means something, while learning from it would be
+/// noisy. Without this split the readout goes blank exactly when you are
+/// playing, which is when you want to look at it.
+const REPORT_GUARD: f32 = 1.0;
+
 /// Per sample decay on the reference's peak energy, ~5 s at 44.1 kHz -- long
 /// enough to span several beats, so it describes "how loud does this app get"
 /// rather than "how loud is it this instant".
@@ -244,12 +252,24 @@ impl BleedCanceller {
         self.power_peak = (self.power_peak * TRACK_POWER_DECAY).max(self.power);
     }
 
-    /// Runtime: predict this channel's echo and take it off, and -- if `track`
-    /// -- follow the path as it moves.
+    /// This channel's echo, in the domain the probe was measured in: no input
+    /// trim, no high pass. One multiply-add per tap and no state, so the same
+    /// answer can serve the picture and the sound without predicting twice.
+    pub fn predict(&self, ch: usize) -> f32 {
+        if ch >= self.channels || !self.trained {
+            return 0.0;
+        }
+        let w = &self.weights[ch * self.taps..(ch + 1) * self.taps];
+        let x = &self.hist[self.pos + 1..=self.pos + self.taps];
+        w.iter().zip(x.iter()).map(|(a, b)| a * b).sum()
+    }
+
+    /// Follow the path as it moves, and keep the live figures. Takes the
+    /// prediction back rather than recomputing it.
     ///
-    /// `gain` is `audio_in_gain`, which the picture has been scaled by and the
-    /// probe was not. Applied here rather than folded into the weights so that
-    /// turning the input trim up does not silently invalidate a measurement.
+    /// `gain` is `audio_in_gain`, which the input has been scaled by and the
+    /// probe was not. Kept out of the weights so that turning the input trim up
+    /// does not silently invalidate a measurement.
     ///
     /// **Tracking exists because the path genuinely moves.** Hands over the
     /// keyboard are 5-15 cm from both transducers on a laptop and reflect a
@@ -265,10 +285,12 @@ impl BleedCanceller {
     /// continuous version had to be thrown away. Playing raises the residual
     /// and the update stops; a path that moves too far at once also stops it,
     /// which degrades to the frozen filter rather than to a wrong one.
-    pub fn cancel(&mut self, ch: usize, input: f32, gain: f32, track: bool) -> f32 {
-        if ch >= self.channels || !self.trained {
-            return input;
+    pub fn track(&mut self, ch: usize, input: f32, predicted: f32, gain: f32, adapt: bool) {
+        if ch >= self.channels || !self.trained || gain <= 0.0 {
+            return;
         }
+        let echo = predicted * gain;
+        let out = input - echo;
         let Self {
             taps,
             hist,
@@ -289,40 +311,36 @@ impl BleedCanceller {
         } = self;
         let x = &hist[*pos + 1..=*pos + *taps];
         let w = &mut weights[ch * *taps..(ch + 1) * *taps];
-        let predicted: f32 = w.iter().zip(x.iter()).map(|(a, b)| a * b).sum();
-        let echo = predicted * gain;
-        let out = input - echo;
-
-        if !track || gain <= 0.0 {
-            return out;
-        }
         *frames += 1;
         // Peak-hold with a slow decay, on both sides. See `TRACK_DECAY`.
         pred_pow[ch] = (pred_pow[ch] * TRACK_DECAY).max(echo * echo);
         err_pow[ch] = (err_pow[ch] * TRACK_DECAY).max(out * out);
-        // Loud enough to be worth learning from, and explained well enough to
-        // be safe to learn from. The first is about the reference, the second
-        // about you.
-        if *power > TRACK_MIN_POWER * *power_peak
-            && *power_peak > EPS
-            && pred_pow[ch] > *track_guard * err_pow[ch]
-        {
-            *adapted += 1;
-            // The only frames on which a reduction figure means anything, for
-            // the same reason they are the only ones worth learning from.
+        // Loud enough for the frame to say anything at all -- about the
+        // reference, not about you.
+        let loud = *power > TRACK_MIN_POWER * *power_peak && *power_peak > EPS;
+        // Reported far more readily than it is learned from. A frame where the
+        // echo merely outweighs what is left is one where the figure means
+        // something; holding the *readout* to the learning bar blanks it
+        // exactly while you are playing, which is when you want to look at it.
+        if loud && pred_pow[ch] > REPORT_GUARD * err_pow[ch] {
             *seen += (input as f64) * (input as f64);
             *left += (out as f64) * (out as f64);
+        }
+        // Explained well enough to be safe to learn from -- this one is about
+        // you, and it is the whole of why tracking cannot eat your playing.
+        if adapt && loud && pred_pow[ch] > *track_guard * err_pow[ch] {
+            *adapted += 1;
             let step = *track_mu * (out / gain) / (*power + TRACK_REG * *power_peak);
             let home = &measured[ch * *taps..(ch + 1) * *taps];
             for ((wi, xi), m) in w.iter_mut().zip(x.iter()).zip(home.iter()) {
                 *wi += step * xi + TRACK_HOME * (m - *wi);
             }
         }
-        out
     }
 
-    /// Once per callback, never per frame: dB removed on the frames the guard
-    /// judged, and the fraction of frames it let through.
+    /// Once per callback, never per frame: dB removed over the frames worth
+    /// judging, and the fraction of frames it was allowed to *learn* from --
+    /// two different bars, see `REPORT_GUARD`.
     pub fn tracking_report(&mut self) -> (f32, f32) {
         if self.seen > 0.0 && self.left > 0.0 {
             let db = (10.0 * (self.seen / self.left).log10()) as f32;
@@ -529,6 +547,7 @@ impl BleedTraining {
         r
     }
 }
+
 
 
 

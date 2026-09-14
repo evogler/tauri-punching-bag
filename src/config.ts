@@ -268,6 +268,12 @@ export const defaultRustConfig = {
   // response, not a perturbation of it. Guarded so that the worst it can do is
   // stop following -- see bleed.rs.
   bleedTrackOn: true,
+  // Take the bleed out of what is *sounded* too -- the monitor, and what the
+  // looper records. The looper is the reason: on a laptop its own playback is
+  // re-recorded through the microphone every pass, which is real acoustic
+  // feedback and it builds. Separate switch, because it changes what the looper
+  // records and that is not something to do unasked.
+  bleedCancelAudioOn: false,
   audioMonitorOn: false,
   beatsToLoop: numExpr(4),
   // How many times a phrase comes back, one `beatsToLoop` apart each time.

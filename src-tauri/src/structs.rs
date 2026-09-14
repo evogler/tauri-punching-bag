@@ -241,9 +241,19 @@ pub struct Config {
     /// still records what the microphone actually heard and the analyzer still
     /// measures it -- the same line the high pass draws, for the same reason.
     pub bleed_cancel_on: bool,
-    /// Follow the path as it moves -- see `cancel` in `bleed.rs`. On by
+    /// Follow the path as it moves -- see `track` in `bleed.rs`. On by
     /// default: it is guarded so that the worst it can do is stop following.
     pub bleed_track_on: bool,
+    /// Take the bleed out of what is *sounded* as well as what is drawn -- the
+    /// monitor, and what the looper records.
+    ///
+    /// The looper is the reason it exists. On a laptop the buffer is a plain
+    /// history of the microphone, the speaker plays that history back, and the
+    /// microphone records it again: real acoustic feedback, one pass at a time,
+    /// and it builds. Cancelling the loop's own return before the write breaks
+    /// that path. Separate from `bleed_cancel_on` because this changes what the
+    /// looper *records*, which is not something to do without being asked.
+    pub bleed_cancel_audio_on: bool,
     pub looping_on: bool,
     pub click_on: bool,
     /// Run the practice cycle. Off, everything sounds continuously, which is
@@ -394,7 +404,10 @@ pub struct Buffers {
 /// beat without moving anything else.
 /// drums, click, file -- the synthetic buses, in the order the frontend labels
 /// them and the order `main.rs` fills them.
-pub const BUS_COUNT: usize = 3;
+/// Drums, click, file, and the looper's own feed. The first three are drawn as
+/// synthetic channels; the fourth exists only so the bleed canceller can be
+/// told what the speaker is playing back at the microphone.
+pub const BUS_COUNT: usize = 4;
 
 pub struct BusDelay {
     slots: Vec<[f32; BUS_COUNT]>,

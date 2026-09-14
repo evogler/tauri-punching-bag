@@ -108,12 +108,16 @@ export const BleedMeter = ({ enabled }: { enabled: boolean }) => {
         )}
       {enabled && result?.phase === "done" && !running &&
         note(
-          result.liveDuty > 0.01
-            ? `Following the room: ${result.liveDb.toFixed(1)} dB removed, ` +
-              `learning from ${(result.liveDuty * 100).toFixed(0)}% of frames.`
-            : "Holding the measured filter -- it only learns from moments it can " +
-              "already explain, so it stops while you play.",
-          result.liveDuty > 0.01 ? "#8c8" : "#aaa"
+          result.liveDb === 0
+            ? "Nothing to measure yet -- the click or the drums have to be sounding."
+            : `Removing ${result.liveDb.toFixed(1)} dB right now` +
+              (result.liveDuty > 0.01
+                ? `, and following the room (learning from ${(
+                    result.liveDuty * 100
+                  ).toFixed(0)}% of frames).`
+                : ". Holding the measured filter -- it only learns from moments it " +
+                  "can already explain, so it stops while you play."),
+          result.liveDb >= 6 ? "#8c8" : result.liveDb > 0 ? "#cc8" : "#aaa"
         )}
       {enabled && result?.phase === "done" &&
         note("Picture only -- the looper still records what the microphone heard.")}

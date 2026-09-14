@@ -184,7 +184,13 @@ fn main() -> Result<(), coreaudio::Error> {
     // One more for the bleed reference, so the envelope describes the emitted
     // signal as the *picture* sees it. One instance, not one per channel: the
     // reference is a single mono signal.
-    let mut bleed_high_pass = HighPass::new();
+    // One per channel, over the *prediction* rather than the signal. The high
+    // pass is linear and time-invariant, so filtering the predicted echo is the
+    // same as having predicted from a filtered reference -- which is what lets
+    // one prediction serve the picture and the sound when only one of them is
+    // filtered.
+    let mut pred_high_pass: Vec<HighPass> =
+        (0..input_channels).map(|_| HighPass::new()).collect();
     // The drums and the click are generated here rather than captured, so they
     // have to be held back to land on the same visual beat as the input.
     let mut bus_delay = BusDelay::new();
@@ -318,8 +324,8 @@ fn main() -> Result<(), coreaudio::Error> {
                     // between them, which is the one error that would be
                     // invisible and fatal.
                     let emitted = {
-                        let [d, c, f] = bus_delay.peek_lead(bleed_lead);
-                        d + c + f
+                        let [d, c, f, l] = bus_delay.peek_lead(bleed_lead);
+                        d + c + f + l
                     };
                     bleed_cancel.push(emitted);
                     // Every channel, and every channel drained whatever it is
@@ -334,7 +340,7 @@ fn main() -> Result<(), coreaudio::Error> {
                     // the click this has to cancel is white, and a chirp
                     // measures nothing outside its own band.
                     let probe = (rng.gen::<f32>() * 2.0 - 1.0) * TRAIN_LEVEL;
-                    bus_delay.push([probe, 0.0, 0.0]);
+                    bus_delay.push([probe, 0.0, 0.0, 0.0]);
                     for channel in data.channels_mut() {
                         channel[i] = probe;
                     }
@@ -469,13 +475,15 @@ fn main() -> Result<(), coreaudio::Error> {
         // the picture's echoes have to be filtered on the way out instead.
         let high_pass_echoes = high_pass_on && !config.high_pass_audio;
         let bleed_cancel_on = config.bleed_cancel_on && bleed_cancel.trained();
-        let bleed_track_on = bleed_cancel_on && config.bleed_track_on;
+        let bleed_audio_on = config.bleed_cancel_audio_on && bleed_cancel.trained();
+        let bleed_any_on = bleed_cancel_on || bleed_audio_on;
+        let bleed_track_on = bleed_any_on && config.bleed_track_on;
         // Once per callback, like everything else that leaves the audio thread.
         *bleed_live.lock().unwrap() = bleed_cancel.tracking_report();
         for hp in input_high_pass
             .iter_mut()
             .chain(loop_high_pass.iter_mut())
-            .chain(std::iter::once(&mut bleed_high_pass))
+            .chain(pred_high_pass.iter_mut())
         {
             hp.set_cutoff(config.high_pass_hz, sample_rate());
         }
@@ -609,22 +617,19 @@ fn main() -> Result<(), coreaudio::Error> {
                 // synthesised further down.
                 //
                 // The three synthesised buses and not the output channel,
-                // deliberately: the output also carries the monitor and the
-                // looper's echoes, and subtracting those would take your own
-                // playing out of your own trace.
+                // deliberately: the output also carries the *monitor*, which
+                // is your own live playing on its way to the speaker, and
+                // subtracting that would take you out of your own trace. The
+                // looper is in it because its return is a genuine echo of the
+                // speaker, and on a laptop it is the one that feeds back.
+                //
+                // Raw, in the domain the probe was measured in. The high pass
+                // is applied to the *prediction* instead -- see the channel
+                // loop -- because only then can one prediction serve both the
+                // picture and the sound.
                 let emitted = {
-                    let [d, c, f] = bus_delay.peek_lead(bleed_lead);
-                    let dry = d + c + f;
-                    // Through the same high pass the picture is drawn through.
-                    // The filter is linear and time-invariant, so regressing
-                    // the filtered input on the filtered reference recovers the
-                    // *same* acoustic response the raw pair would have --
-                    // H(x - h*d) = H(x) - h*H(d). The weights therefore survive
-                    // the high pass being switched on and off, and the
-                    // canceller is working on exactly the signal being drawn.
-                    // Run unconditionally, like the other filters.
-                    let filtered = bleed_high_pass.process(dry);
-                    if high_pass_on { filtered } else { dry }
+                    let [d, c, f, l] = bus_delay.peek_lead(bleed_lead);
+                    d + c + f + l
                 };
                 // Pushed whether or not it is switched on, so the history is
                 // never stale when it is.
@@ -639,22 +644,40 @@ fn main() -> Result<(), coreaudio::Error> {
                     // the picture and, if the audio is following, the sound.
                     let filtered = input_high_pass[ch].process(raw);
                     input_raw[ch] = raw;
-                    input_frame[ch] = if high_pass_on { filtered } else { raw };
+
                     // Subtract the speaker's own output back out, sample by
                     // sample and phase-accurate, leaving whatever was played
-                    // underneath it standing. Display only -- `input_audio` and
-                    // `input_raw` are untouched, so the looper still records
-                    // what the microphone heard.
-                    if bleed_cancel_on {
-                        input_frame[ch] =
-                            bleed_cancel.cancel(
-                                ch,
-                                input_frame[ch],
-                                config.audio_in_gain,
-                                bleed_track_on,
-                            );
+                    // underneath it standing. Predicted once, then filtered to
+                    // match whichever signal it is about to come off -- the
+                    // filter is LTI, so H(h*d) = h*H(d) and the same prediction
+                    // is correct in both domains. Run unconditionally, like the
+                    // other filters, so its state is never stale.
+                    let predicted = bleed_cancel.predict(ch);
+                    let predicted_hp = pred_high_pass[ch].process(predicted);
+                    if bleed_any_on {
+                        bleed_cancel.track(
+                            ch,
+                            raw,
+                            predicted,
+                            config.audio_in_gain,
+                            bleed_track_on,
+                        );
                     }
-                    let audio = if high_pass_audio { filtered } else { raw };
+                    let echo_drawn =
+                        (if high_pass_on { predicted_hp } else { predicted }) * config.audio_in_gain;
+                    let echo_heard = (if high_pass_audio { predicted_hp } else { predicted })
+                        * config.audio_in_gain;
+
+                    input_frame[ch] = if high_pass_on { filtered } else { raw };
+                    if bleed_cancel_on {
+                        input_frame[ch] -= echo_drawn;
+                    }
+                    // `input_raw` is deliberately left alone either way: the
+                    // analyzer measures what the microphone actually heard.
+                    let mut audio = if high_pass_audio { filtered } else { raw };
+                    if bleed_audio_on {
+                        audio -= echo_heard;
+                    }
                     input_audio[ch] = audio;
                     let (left, right) = pan_gains[ch];
                     monitor_out[0] += audio * left;
@@ -980,8 +1003,20 @@ fn main() -> Result<(), coreaudio::Error> {
 
                 // Delayed by the compensation so they sit on the beat they
                 // sounded on, not the one the input stamp is shifted to.
-                let [drum_visual, click_visual, file_visual] =
-                    bus_delay.push([drum_frame, click_frame, file_bus]);
+                // The looper's contribution to the speaker, at the scale it
+                // actually reaches it: `channel[i] = audio_out * 12.0` puts the
+                // loop through that multiplier and the drums and click in after
+                // it, so the reference has to carry the 12 or it describes a
+                // sound nobody made. Summed across the sides, like `file_bus` --
+                // exact for a centred mono input, which is the laptop case, and
+                // an approximation for anything hard-panned.
+                let loop_bus: S = if config.looping_on {
+                    (loop_out[0] + loop_out[1]) * 0.5 * 12.0
+                } else {
+                    0.0
+                };
+                let [drum_visual, click_visual, file_visual, _] =
+                    bus_delay.push([drum_frame, click_frame, file_bus, loop_bus]);
 
                 // A wedged frontend must not be able to grow this without bound:
                 // it would cost memory, make the next drain's reserve enormous,
