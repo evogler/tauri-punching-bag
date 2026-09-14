@@ -289,6 +289,37 @@ export const ColorInput = ({
   );
 };
 
+// A plain string field. Deliberately outside the type dispatch below for the
+// same reason ColorInput is: `filePath` is a string too, so "every string is a
+// name" would be wrong the moment anything else took one. There is no parse and
+// so nothing to keep half-typed -- every keystroke is already a valid value.
+export const TextInput = ({
+  label,
+  value,
+  onChange,
+  placeholder,
+  help,
+}: {
+  label: string;
+  value: string;
+  onChange: (text: string) => void;
+  placeholder?: string;
+  help: string;
+}) => {
+  const showHelp = useHelp();
+  return (
+    <div style={rowStyle} {...showHelp(help)}>
+      <label>{label}</label>
+      <input
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ width: "8em" }}
+      />
+    </div>
+  );
+};
+
 // Expression-backed fields carry no `type`, which is what tells them apart from
 // a rhythm; whether the resolved value is an array picks the widget.
 const isExprField = (val: any) =>

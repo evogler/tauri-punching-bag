@@ -76,6 +76,39 @@ type PaneSize = { width: number; height: number; scale: number };
 // nothing is laid out to these numbers.
 const UNMEASURED_PANE: PaneSize = { width: 300, height: 150, scale: 1 };
 
+// A pane's own label: modest, in a corner, and no more. Both numbers are in CSS
+// pixels and are multiplied by the pane's measured ratio at draw time, the way
+// `gridWidth` is -- text sized in surface pixels would come out half-height on
+// a Retina pane and full height on an external monitor, for the same setting.
+// The inset puts it over the lead-in margin, which is the dimmed, duplicated
+// part of the picture and so the least worth covering.
+const PANE_NAME_SIZE = 11;
+const PANE_NAME_INSET = 6;
+// Drawn well below full opacity so it reads as a label on the surface rather
+// than as something the app measured.
+const PANE_NAME_ALPHA = 0.5;
+
+// Black or white, whichever reads against the background, rather than a config
+// key of its own: a label has one job, and a second colour picker for it is a
+// setting nobody wants to be asked about. Rec. 601 luma, the usual rule for a
+// light-or-dark decision; anything unparseable falls back to white, which is
+// right for the dark backgrounds this app is used on.
+const inkFor = (bg: string): string => {
+  const hex = bg.trim().replace(/^#/, "");
+  const full =
+    hex.length === 3
+      ? hex
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      : hex;
+  const n = Number.parseInt(full, 16);
+  if (full.length !== 6 || Number.isNaN(n)) return "#ffffff";
+  const luma =
+    0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+  return luma > 140 ? "#000000" : "#ffffff";
+};
+
 // Per-pane mutable draw state. Every pane needs its own: the sweep flush
 // boundary falls where a pixel column ends, and panes disagree about that
 // because they each have their own pixelsPerBeat.
@@ -399,6 +432,9 @@ const App = () => {
     rowHeight: number;
     // `gridWidth` converted from CSS pixels into this pane's surface pixels.
     gridLineWidth: number;
+    // The ratio this pane was measured at: what converts any other width
+    // written in CSS pixels -- the name's size and inset -- into surface ones.
+    scale: number;
     width: number;
     height: number;
     state: ViewDrawState;
@@ -431,6 +467,7 @@ const App = () => {
   // What the sweep paints over old samples with. The whole-cycle refresh clears
   // to the same thing, so both modes sit on the same background.
   const background = get("waveformBackground");
+  const paneInk = inkFor(background);
   const gridWidth = get("gridWidth");
   // What the panel's readout resolves a CSS width against: the ratio the panes
   // were measured at, not `window.devicePixelRatio` read again, so the number
@@ -563,6 +600,7 @@ const App = () => {
       visualGain: exprNumber(cfg.visualGain),
       rowHeight: cellHeight / beatsPerRow.length,
       gridLineWidth: gridWidth * scale,
+      scale,
       width: cellWidth,
       height: cellHeight,
       state: viewStates.current[index],
@@ -1349,6 +1387,26 @@ const App = () => {
     ctx.globalAlpha = 1;
   };
 
+  // The pane's label. Painted on the *visible* canvas after the layer blit, for
+  // the same reason the grids are: the layer is erased a column at a time by
+  // the sweep, so anything put there is eaten within a pass, and anything
+  // composited onto it repeatedly climbs to full opacity. Last of all, so a
+  // grid line never crosses the text.
+  const drawPaneName = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
+    // Empty is the default and means draw nothing -- what every pane did before
+    // names existed.
+    const name = v.cfg.name?.trim();
+    if (!name) return;
+    drawOps.current++;
+    ctx.save();
+    ctx.globalAlpha = PANE_NAME_ALPHA;
+    ctx.fillStyle = paneInk;
+    ctx.font = `${PANE_NAME_SIZE * v.scale}px system-ui, -apple-system, sans-serif`;
+    ctx.textBaseline = "top";
+    ctx.fillText(name, PANE_NAME_INSET * v.scale, PANE_NAME_INSET * v.scale);
+    ctx.restore();
+  };
+
   // The default: each column is erased and redrawn as the cursor reaches it, so
   // the newest sample always sits right at the sweep.
   const drawSweep = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
@@ -1621,6 +1679,7 @@ const App = () => {
     ctx.globalAlpha = 1;
     ctx.drawImage(layer.canvas, 0, 0);
     drawGrids(ctx, v);
+    drawPaneName(ctx, v);
   };
 
   // One loop driving every pane, so the batch is drained once, after all of them

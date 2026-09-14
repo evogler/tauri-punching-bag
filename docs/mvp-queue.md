@@ -176,3 +176,13 @@ clean, 3 expected warnings. Open: the drum row now has six controls and gets
 cramped at a narrow panel, and a dropped hit is invisible rather than drawn
 differently.
 
+**2. Pane names — landed 2026-09-14.** A `name` on `ViewConfig`, drawn top-left
+on the visible canvas after the layer blit and the grids, sized in CSS pixels
+times the pane's own ratio, inked black or white off `waveformBackground`'s luma
+rather than taking a colour key. Empty is the default and draws nothing.
+`TextInput` in `Input.tsx` is new, called by name like `ColorInput` rather than
+dispatched on type. Temp-tested restore, arrangement growth/shrink and
+`copyView` isolation, then deleted. Built clean, 3 expected warnings. Open: the
+corner, 11px and 0.5 alpha are taste calls made without seeing them, and a long
+name is clipped at the pane edge rather than truncated.
+

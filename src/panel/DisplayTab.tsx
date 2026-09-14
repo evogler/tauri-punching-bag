@@ -2,7 +2,7 @@ import { MAX_ANALYSIS_CHANNELS, VIEW_KINDS, ViewKind } from "../config";
 import { ChannelPicker } from "../ChannelPicker";
 import { GridList } from "../GridList";
 import { Help } from "../help";
-import { Input } from "../Input";
+import { Input, TextInput } from "../Input";
 import { RowColorList } from "../RowColorList";
 import { RowPerNote } from "../RowPerNote";
 import { Slider } from "../Slider";
@@ -85,6 +85,16 @@ export const DisplayTab = (p: PanelProps) => {
       {/* Its own section, named for the pane, so it is plain that everything
           below the pane buttons belongs to the one selected. */}
       <Section label={paneCount > 1 ? `Pane ${activeView + 1}` : "Pane"}>
+        {/* First, because it says which pane the rest of this belongs to --
+            and a name is the one setting here that is about the pane rather
+            than about what it draws. */}
+        <TextInput
+          label="Name"
+          value={activeCfg?.name ?? ""}
+          onChange={(name) => viewIO.set("name", name)}
+          placeholder="none"
+          help="pane.name"
+        />
         <Divider label="What it shows" />
         <Help id="channels" style={{ ...rowStyle, alignItems: "center" }}>
           <label>Channels</label>

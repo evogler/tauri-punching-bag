@@ -249,6 +249,10 @@ const normalizeView = (
   const merged = { ...base, ...(view as Partial<ViewConfig>) };
   return {
     ...merged,
+    // A pane saved before names existed has none, and the merge above already
+    // gives it the default; the guard is for a stored value of the wrong shape,
+    // which the draw path would otherwise hand to `fillText`.
+    name: typeof merged.name === "string" ? merged.name : base.name,
     channels: Array.isArray(merged.channels) ? merged.channels : base.channels,
     beatsPerRow: wrapList(merged.beatsPerRow, base.beatsPerRow),
     rowColorPattern: wrapList(merged.rowColorPattern, base.rowColorPattern),

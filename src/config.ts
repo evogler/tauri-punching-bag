@@ -503,6 +503,10 @@ export const ROW_COLORS = [
 // back and forth between 16ths and triplets is the whole point of having more
 // than one.
 export type ViewConfig = {
+  // What this pane is called, drawn small in its own top corner. Frontend only
+  // -- a label never reaches the audio thread -- and empty means draw nothing,
+  // which is exactly what every pane did before this existed.
+  name: string;
   // What the y axis of the pane means: amplitude, or frequency. Everything
   // else -- rows, margins, grids, the sweep -- is shared between the two.
   kind: ViewKind;
@@ -639,6 +643,7 @@ export const ANALYSIS_BINS = 64;
 export const ANALYSIS_WINDOWS = [256, 512, 1024, 2048, 4096];
 
 export const defaultViewConfig = (): ViewConfig => ({
+  name: "",
   kind: "waveform",
   channels: [0],
   spectrogramChannel: 0,

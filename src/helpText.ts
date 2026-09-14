@@ -245,6 +245,10 @@ export const HELP: Record<string, HelpEntry> = {
     body: "Off, every pane shows the same beats, each against its own ruling. On, the panes share one long timeline: the playing runs through pane 1's rows, then pane 2's.",
   },
   panes: { title: "Pane", body: "Which pane the settings below edit." },
+  "pane.name": {
+    title: "Name",
+    body: "What this pane is called, drawn small in its top corner so a wall of panes can be told apart. Empty draws nothing.",
+  },
   channels: {
     title: "Channels",
     body: "What this pane draws: your inputs, and the drums, click and file as the app plays them. The dot is the channel's color, set in the Setup tab.",

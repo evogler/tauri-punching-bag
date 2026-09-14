@@ -1527,6 +1527,21 @@ per-pane, held in `views: ViewConfig[]`.
 - **A view's arrays must never be shared between panes.** `copyView` deep-copies
   for exactly this reason -- two panes pointing at one `grids` array means
   editing either edits both.
+- **A pane can carry a name**, drawn small in its own top-left corner. Empty is
+  the default and draws nothing, which is how every pane behaved before this
+  existed. It is painted on the *visible* canvas after the layer blit and after
+  the grids, never into the layer -- the sweep erases the layer a column at a
+  time, so a name put there is eaten within a pass, and anything composited onto
+  it repeatedly climbs to full opacity. The same two reasons the grids moved.
+  **Sized in CSS pixels and multiplied by the pane's measured ratio**, like
+  `gridWidth` and unlike the waveform stroke: text in surface pixels comes out
+  half-height on a Retina pane and full height on an external monitor for the
+  same setting. Its colour is black or white by the luma of
+  `waveformBackground` rather than a config key of its own -- a label has one
+  job -- and the corner it sits in is over the lead-in margin, which is the
+  dimmed, duplicated part of the picture and so the least worth covering.
+  Being a view key it travels in presets, so a shared preset carries someone
+  else's names; that is the same trade every other per-pane setting makes.
 - **Sessions from before views** carried these keys at the top level of the js
   config. `migrateViews` folds them into `views[0]` *before* `pickKnownKeys`
   runs, since that drops keys it doesn't recognise -- without it an upgrade
