@@ -79,7 +79,11 @@ pub fn get_samples_from_filename(filename: &String) -> Result<Vec<f32>, String> 
 pub fn decode_audio_file(filename: &String) -> Result<AudioFile, String> {
     let src_result = std::fs::File::open(&filename);
     if let Err(e) = src_result {
-        return Err(format!("Failed to open file: {}", e));
+        // The path, not just the reason. A preset can arrive from another
+        // machine carrying an absolute path into somebody else's home
+        // directory, and "no such file" alone leaves you no idea where it
+        // looked -- which is the whole question at that point.
+        return Err(format!("could not open {}: {}", filename, e));
     }
     let src = src_result.unwrap();
 

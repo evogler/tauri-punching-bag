@@ -4,6 +4,7 @@ use crate::constants::{sample_rate, ANALYSIS_RESERVE_HOPS, ONSET_RESERVE, VISUAL
 use crate::get_loop_buffer_size::get_loop_buffer_size;
 use crate::io_channels::{list_devices, ActiveDevices, AudioDeviceInfo};
 use crate::prefs::{load as load_prefs, save as save_prefs, AudioPrefs};
+use crate::presets;
 use crate::read_audio_file::{decode_audio_file, get_samples_from_filename, to_device_stereo};
 use crate::stretch::{desired_ratio, request as request_stretch};
 use crate::structs::{
@@ -236,6 +237,39 @@ pub fn get_audio_prefs(app_handle: tauri::AppHandle) -> AudioPrefs {
 #[tauri::command]
 pub fn set_audio_prefs(app_handle: tauri::AppHandle, prefs: AudioPrefs) -> Result<(), String> {
     save_prefs(&prefs_dir(&app_handle), &prefs)
+}
+
+/// The preset store. Text in, text out: the format lives on the frontend, next
+/// to the config types it describes, and Rust has no business parsing it.
+#[tauri::command]
+pub fn get_presets(app_handle: tauri::AppHandle) -> Result<String, String> {
+    presets::load(&prefs_dir(&app_handle))
+}
+
+#[tauri::command]
+pub fn set_presets(app_handle: tauri::AppHandle, text: String) -> Result<(), String> {
+    presets::save(&prefs_dir(&app_handle), &text)
+}
+
+/// Called when the frontend cannot parse the store. Renames it rather than
+/// letting the next save write an empty one over it, and answers with the name
+/// it was given so the panel can say where to look.
+#[tauri::command]
+pub fn quarantine_presets(app_handle: tauri::AppHandle) -> Result<String, String> {
+    presets::quarantine(&prefs_dir(&app_handle))
+}
+
+/// Both halves of import/export. The path comes from a native dialog, which is
+/// the same trust `load_drum_sample` runs on -- and the `fs` allowlist is
+/// scoped to `$RESOURCE/*`, so the JS API could not reach it anyway.
+#[tauri::command]
+pub fn import_presets(path: String) -> Result<String, String> {
+    presets::read_file(&path)
+}
+
+#[tauri::command]
+pub fn export_presets(path: String, text: String) -> Result<(), String> {
+    presets::write_file(&path, &text)
 }
 
 /// Device changes only take effect at startup: the render closure owns every

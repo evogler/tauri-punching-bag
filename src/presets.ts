@@ -18,6 +18,7 @@ import {
   usableRhythmVal,
 } from "./config";
 import { formatNumberList } from "./expression";
+import { invoke } from "@tauri-apps/api";
 
 const STORAGE_KEY = "tpb.presets.v1";
 const SESSION_KEY = "tpb.session.v1";
@@ -58,7 +59,39 @@ export type Preset = {
   js: Partial<JsConfig>;
 };
 
-export type Presets = Record<string, Preset>;
+/// A preset as it is stored: the settings, plus the metadata the list needs.
+///
+/// An array with the name as a property rather than a map keyed by name,
+/// because a map had nowhere to put the metadata -- and the metadata is what
+/// the sort orders and the duplicate detection are built on.
+export type StoredPreset = Preset & {
+  /** Stable across edits: "this is the same preset, changed". */
+  id: string;
+  name: string;
+  /** ISO. */
+  created: string;
+  /** ISO. Stamped on load, so "recently used" means something. */
+  lastUsed?: string;
+};
+
+/// One format for the store and for an exported file, so import has a single
+/// parser and "export everything" and "export this one" differ only in how
+/// many entries they carry. `app` and `exported` are for whoever opens the
+/// file a year from now; nothing reads them.
+export type PresetFile = {
+  format: string;
+  version: number;
+  app?: string;
+  exported?: string;
+  presets: StoredPreset[];
+};
+
+export const PRESET_FORMAT = "tauri-punching-bag presets";
+export const PRESET_VERSION = 1;
+
+// Written into the first file this ever produces. A format with no version has
+// nothing for a migration to key off, and redefining a shape in place is the
+// mistake this codebase has already made twice (`loopFeedback`, `beatsPerRow`).
 
 // The settings that are now per-view used to sit at the top level of the js
 // config, back when there was only one pane. `pickKnownKeys` drops keys it
@@ -323,31 +356,242 @@ const sanitizePreset = (preset: unknown): Preset | null => {
   };
 };
 
-export const readPresets = (): Presets => {
+// `crypto.randomUUID` needs a secure context and the webview is served from
+// `tauri://localhost`, so this does not reach for it. An id here only has to be
+// unique among one person's presets.
+export const newPresetId = () =>
+  Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+
+// Keys in a *sorted* order before hashing. A config built fresh and one
+// restored from JSON hold the same values in different key orders, so without
+// this every round trip would look like a different preset.
+const canonical = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (typeof value === "object" && value !== null)
+    return Object.keys(value as object)
+      .sort()
+      .reduce<Record<string, unknown>>((out, k) => {
+        out[k] = canonical((value as Record<string, unknown>)[k]);
+        return out;
+      }, {});
+  return value;
+};
+
+// cyrb53. Not a cryptographic hash and does not need to be -- it answers "are
+// these the same settings" over a list of dozens.
+const cyrb53 = (text: string) => {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+};
+
+/// "Are these the same settings, under whatever name?" -- the question an `id`
+/// cannot answer, since a preset someone re-saved under a new name has a new
+/// id and identical contents.
+///
+/// **Computed, never stored.** A stored hash is wrong the moment a preset is
+/// edited, and a derived value that can go stale is exactly the trap the
+/// expression fields' `val` rules exist to avoid.
+export const presetHash = (preset: Preset) =>
+  cyrb53(JSON.stringify(canonical({ rust: preset.rust, js: preset.js })));
+
+export const makeStored = (name: string, preset: Preset): StoredPreset => ({
+  ...preset,
+  id: newPresetId(),
+  name,
+  created: new Date().toISOString(),
+});
+
+/// `"groove"` -> `"groove (1)"` -> `"groove (2)"`, incrementing past whatever
+/// is taken rather than stopping at the first suffix.
+export const uniqueName = (name: string, taken: Iterable<string>) => {
+  const used = new Set(taken);
+  if (!used.has(name)) return name;
+  let i = 1;
+  while (used.has(`${name} (${i})`)) i++;
+  return `${name} (${i})`;
+};
+
+export type ParsedPresetFile = {
+  presets: StoredPreset[];
+  /** Entries that were there and could not be read. */
+  skipped: number;
+  /** Set when the *file* is unusable, in which case nothing is offered. */
+  error?: string;
+};
+
+/// A corrupt file is refused; a corrupt *entry* inside a good file is skipped
+/// and counted. Nine readable presets out of ten are worth having, and
+/// refusing the lot over one hand-edited entry is the worse outcome.
+export const parsePresetFile = (text: string): ParsedPresetFile => {
+  let parsed: unknown;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null) return {};
-    const presets: Presets = {};
-    for (const [name, preset] of Object.entries(parsed)) {
-      const sanitized = sanitizePreset(preset);
-      if (sanitized) presets[name] = sanitized;
-    }
-    return presets;
+    parsed = JSON.parse(text);
   } catch (e) {
-    console.error("failed to read presets", e);
-    return {};
+    return { presets: [], skipped: 0, error: "not valid JSON" };
+  }
+  if (typeof parsed !== "object" || parsed === null)
+    return { presets: [], skipped: 0, error: "not a preset file" };
+  const file = parsed as Partial<PresetFile>;
+  if (!Array.isArray(file.presets))
+    return { presets: [], skipped: 0, error: "no presets in it" };
+  if (typeof file.version === "number" && file.version > PRESET_VERSION)
+    return {
+      presets: [],
+      skipped: 0,
+      error: `saved by a newer version of the app (format ${file.version})`,
+    };
+
+  const presets: StoredPreset[] = [];
+  let skipped = 0;
+  for (const entry of file.presets) {
+    const raw = entry as Partial<StoredPreset> | null;
+    const sanitized = raw ? sanitizePreset(raw) : null;
+    if (!sanitized || typeof raw?.name !== "string" || !raw.name.trim()) {
+      skipped++;
+      continue;
+    }
+    presets.push({
+      ...sanitized,
+      id: typeof raw.id === "string" && raw.id ? raw.id : newPresetId(),
+      name: raw.name,
+      created:
+        typeof raw.created === "string" ? raw.created : new Date().toISOString(),
+      lastUsed: typeof raw.lastUsed === "string" ? raw.lastUsed : undefined,
+    });
+  }
+  return { presets, skipped };
+};
+
+export const formatPresetFile = (presets: StoredPreset[], app?: string) =>
+  JSON.stringify(
+    {
+      format: PRESET_FORMAT,
+      version: PRESET_VERSION,
+      ...(app ? { app } : {}),
+      exported: new Date().toISOString(),
+      presets,
+    },
+    null,
+    2
+  );
+
+// `yarn start` runs the frontend with no Rust behind it, so the store falls
+// back to localStorage there. Deliberately a presence check rather than a
+// try/catch around the command: a *failing* command in the real app must not
+// silently split the store in two.
+const HAS_TAURI = "__TAURI_IPC__" in window;
+const FALLBACK_KEY = "tpb.presets.v2";
+
+const readFallback = (): StoredPreset[] => {
+  try {
+    return parsePresetFile(window.localStorage.getItem(FALLBACK_KEY) ?? "")
+      .presets;
+  } catch (e) {
+    return [];
   }
 };
 
-export const writePresets = (presets: Presets) => {
+/// The presets the *old* store holds, migrated to the new shape. Read only
+/// when `presets.json` does not exist yet, and **the original is left in
+/// place**: the cost of the stale copy is nothing, and the cost of the
+/// alternative is somebody's presets if anything about the move goes wrong --
+/// including running an older build afterwards.
+const readLegacyPresets = (): StoredPreset[] => {
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(presets));
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return [];
+    const out: StoredPreset[] = [];
+    const created = new Date().toISOString();
+    for (const [name, preset] of Object.entries(parsed)) {
+      const sanitized = sanitizePreset(preset);
+      if (sanitized)
+        out.push({ ...sanitized, id: newPresetId(), name, created });
+    }
+    return out;
   } catch (e) {
-    console.error("failed to write presets", e);
+    console.error("failed to read the old presets", e);
+    return [];
   }
 };
+
+export type StoreLoad = {
+  presets: StoredPreset[];
+  /** Shown in the panel. Set when something needed saying, never on success. */
+  note?: string;
+};
+
+export const loadStore = async (): Promise<StoreLoad> => {
+  if (!HAS_TAURI) return { presets: readFallback() };
+  let text: string;
+  try {
+    text = await invoke<string>("get_presets");
+  } catch (e) {
+    return { presets: [], note: `could not read presets.json: ${e}` };
+  }
+  if (!text.trim()) {
+    const migrated = readLegacyPresets();
+    if (migrated.length) await saveStore(migrated);
+    return { presets: migrated };
+  }
+  const parsed = parsePresetFile(text);
+  if (parsed.error) {
+    // Moved aside rather than replaced: the next ordinary save would otherwise
+    // write an empty store straight over everything someone had.
+    let moved = "";
+    try {
+      moved = await invoke<string>("quarantine_presets");
+    } catch (e) {
+      return {
+        presets: [],
+        note: `presets.json could not be read (${parsed.error}) and could not be moved aside -- nothing has been saved over it`,
+      };
+    }
+    return {
+      presets: [],
+      note: `presets.json could not be read (${parsed.error}); the old one is kept as ${moved}`,
+    };
+  }
+  return {
+    presets: parsed.presets,
+    note: parsed.skipped
+      ? `${parsed.skipped} preset${parsed.skipped > 1 ? "s" : ""} in presets.json could not be read and were left out`
+      : undefined,
+  };
+};
+
+export const saveStore = async (presets: StoredPreset[]): Promise<string> => {
+  const text = formatPresetFile(presets);
+  if (!HAS_TAURI) {
+    try {
+      window.localStorage.setItem(FALLBACK_KEY, text);
+    } catch (e) {
+      return `could not save presets: ${e}`;
+    }
+    return "";
+  }
+  try {
+    await invoke("set_presets", { text });
+  } catch (e) {
+    return `could not save presets: ${e}`;
+  }
+  return "";
+};
+
+export const readPresetFileAt = (path: string) =>
+  invoke<string>("import_presets", { path });
+
+export const writePresetFileAt = (path: string, text: string) =>
+  invoke("export_presets", { path, text });
 
 export const defaultPreset = (): Preset =>
   makePreset(defaultRustConfig, defaultJsConfig);

@@ -11,6 +11,7 @@ mod calibration;
 mod filter;
 mod get_loop_buffer_size;
 mod prefs;
+mod presets;
 mod io_channels;
 mod loop_guard;
 mod read_audio_file;
@@ -30,8 +31,9 @@ use crate::commands::{
     cancel_bleed_training, get_bleed_status, get_loop_guard, start_bleed_training,
     cancel_calibration, get_active_devices, get_analysis, get_audio_prefs,
     get_calibration_status, get_input_channel_count, get_sample_rate, get_samples,
-    list_audio_devices, load_drum_sample, reset_beat, restart_app, set_audio_prefs, set_config,
-    set_mp3_buffer, start_calibration,
+    export_presets, get_presets, import_presets, list_audio_devices, load_drum_sample,
+    quarantine_presets, reset_beat, restart_app, set_audio_prefs, set_config, set_mp3_buffer,
+    set_presets, start_calibration,
 };
 use crate::calibration::Calibration;
 use crate::constants::{default_config, max_input_backlog, max_visual_backlog, sample_rate};
@@ -1132,6 +1134,11 @@ fn main() -> Result<(), coreaudio::Error> {
             cancel_bleed_training,
             cancel_calibration,
             load_drum_sample,
+            get_presets,
+            set_presets,
+            quarantine_presets,
+            import_presets,
+            export_presets,
         ])
         .run(context)
         .expect("error while running tauri application");

@@ -332,6 +332,68 @@ keeping the last good value. Deliberately not a scripting language.
   as typed where there is one, so `1, g x k` survives a render instead of being
   reformatted into its current numbers.
 
+### Presets, and the second file store
+
+`presets.json` in the app config dir, beside `audio-prefs.json`.
+**`docs/presets.md` is the long version** -- the format, the three-case import
+rule, and what a preset cannot carry.
+
+- **They moved out of localStorage**, which is a WebKit database inside the app
+  container: readable by nothing and reachable by nobody. The config dir is the
+  directory the app already asks people to be able to look at, and
+  `audio-prefs.json` is the precedent for putting a legible file there.
+- **The session did not move, and must not.** It is written on every config
+  change -- every keystroke in a text field -- and has no business being a
+  file. localStorage is exactly right for it.
+- **Migration leaves the old store in place.** `tpb.presets.v1` is read once,
+  when `presets.json` does not exist yet, and never cleared. The cost is a
+  stale copy nobody reads; the cost of the alternative is somebody's presets if
+  anything about the move goes wrong, including running an older build
+  afterwards.
+- **Rust moves text and nothing else.** `presets.rs` has no idea what a preset
+  is: the format, the migrations and every judgement about validity stay on the
+  frontend next to the config types. Writes go through a temp file and a
+  rename, because this is now the only copy -- `audio-prefs.json` can afford a
+  half-written file and this cannot.
+- **A corrupt store is moved aside, never replaced.** Refusing it would leave
+  the app with no presets, and the next ordinary save then writes an empty one
+  straight over everything. `quarantine_presets` renames it to
+  `presets.corrupt-<stamp>.json` and the panel says where it went. This is a
+  deliberate *break* from `audio-prefs.json`, where unreadable means defaults
+  and the worst case is re-choosing a microphone.
+- **A corrupt entry inside a good import file is skipped, not fatal.** Nine
+  readable presets out of ten are worth having.
+- **An array with the name as a property, not a map keyed by name.** The map
+  had nowhere to put metadata, and `created` / `lastUsed` are what the sort
+  orders and the duplicate detection are built on. It also makes duplicate
+  names *within* one file representable, which import handles as an ordinary
+  collision.
+- **`version` exists in the first file ever written.** A format with no version
+  has nothing for a migration to key off, which is the `loopFeedback` lesson
+  one level out.
+- **An `id` and a content hash answer different questions.** The id is stable
+  across edits ("the same preset, changed"); the hash is stable across renames
+  ("the same settings, another name"). Import tests id, then hash, then name,
+  which is what keeps re-importing your own edited preset from growing a pile
+  of `groove (1)` … `groove (7)`.
+- **The hash is computed, never stored.** A stored hash is wrong the moment a
+  preset is edited -- a derived value that can go stale is the trap the
+  expression fields' `val` rules exist to avoid. It canonicalises key order
+  first, or a config built fresh and one restored from JSON would never match.
+- **File IO goes through Rust commands rather than the `fs` API**, whose
+  allowlist scope is `$RESOURCE/*`. The paths come from a native dialog, which
+  is the same trust `load_drum_sample` and `set_mp3_buffer` already run on.
+- **`yarn start` falls back to localStorage**, under its own key, on an
+  explicit `__TAURI_IPC__` presence check. Deliberately not a try/catch around
+  the command: a command *failing* in the real app must not silently split the
+  store in two.
+- **A missing file names its full path**, where `drumLabel` shows the basename
+  everywhere else. A preset from another machine points into somebody else's
+  home directory, and the question a missing sample raises is *where it
+  looked*. `decode_audio_file` names the path in its error for the same reason.
+  Neither breaks the config push: both commands return `Result`, so this is a
+  failed command rather than a rejected `set_config`.
+
 ## Rhythm syntax
 
 Only ever documented in a comment at the top of the generated `parser2.js`, so
@@ -2361,6 +2423,19 @@ and several of them have since been confirmed. What is genuinely open is here:
   look at hardest -- its half-way markers are written as literals and stop
   following a parameter change, which is invisible until `n` moves.
 
+- **Presets moving to a file has not been through a real launch.** The pure
+  logic is temp-tested -- the hash ignores key order and metadata and notices a
+  nested change, `uniqueName` fills gaps rather than skipping past them, a
+  corrupt file is refused while a corrupt entry is skipped, and `planImport`
+  tests id before hash before name and sequences two colliding names inside one
+  file. What no test covers is the part that matters most: **the one-time
+  migration out of `tpb.presets.v1`**, which runs once and then never again on
+  that machine. It is written to leave the old store untouched, so the way back
+  is to delete `presets.json` and relaunch -- worth knowing before the first
+  launch rather than after. Also unexercised: both native dialogs, the
+  quarantine path, and whether a preset exported from one Mac imports cleanly
+  on another.
+
 - **The unmanaged second Mac has not been retried since the ad-hoc era.** The
   notarized build is expected to install with a plain drag, and the managed work
   Mac now does, but that particular machine has not been asked again.
@@ -2751,39 +2826,33 @@ See *Updates*.
     through a filter measured for a different volume is a quieter kind of wrong
     than drawing one.
   - Headphones remain the answer for the sound.
-- **Presets as files, and presets you can take apart.** Two halves of one
-  thing, both wanted.
-  - **The format is already JSON** -- `Preset` is `{rust, js}`, written by
-    `JSON.stringify` under `tpb.presets.v1` in localStorage -- so nothing has
-    to change to make it readable. What is wrong is only *where* it lives:
-    WebKit's local storage database, inside the app's own container, which is
-    not a place anyone opens. Expression-backed fields store
-    `{inputText, val}`, so it is verbose but perfectly legible, and the
-    `inputText` half is the interesting one.
-  - **`audio-prefs.json` is the precedent for where the file goes.**
-    `~/Library/Application Support/com.vogler.dev/` is reachable (Finder's
-    *Go to Folder*, or `open` from a terminal), is not sandboxed today, and
-    already holds a hand-editable file. A `presets.json` beside it would be
-    both readable and agent-reachable, and import/export to anywhere else is
-    then `dialog.save` plus `fs.writeTextFile`. The one thing to keep is that
-    localStorage stays the source of truth for the *session*, which is written
-    on every config change and has no business being a file.
-  - **Taking one apart is the bigger idea.** A preset today is the whole
-    config, merged over the defaults, so it cannot say "make this pane an
-    alignment pane" without bringing a tempo and a drum part with it -- which
-    is exactly why *One row per note* is a button rather than a shipped preset.
-    The owner's shape for it: one stored config holding several named parts,
-    with checkboxes choosing which parts to load. That generalises the button
-    above (a pane shape becomes an ordinary saved part) and it is also the
-    honest home for "just the drums from this one".
-  - **The merge-over-defaults rule is what makes it delicate.** A partial load
-    has to decide, per part, between merging over the defaults and merging over
-    what is in use -- and the second is the behaviour that was deliberately
-    removed, because it made a preset mean "these settings, plus whatever you
-    happen to have". Per-part it is defensible where the whole-config version
-    was not, since the parts left out are being left out on purpose. Worth
-    getting right before any of it ships.
-
+- **Interchangeable drum kits.** A voice would name a *role* (`kick`) and a
+  machine-local kit would map roles to files -- the same split the config,
+  `audio-prefs.json` and `LOCAL_RUST_KEYS` already make three times over. It
+  removes the drum half of the shared-preset path problem entirely rather than
+  reporting on it (see *Presets, and the second file store*), and it is the
+  missing half of something already half-built: parser2 parses sound letters
+  per note and nothing reads them, so roles are what would let one rhythm drive
+  several voices. `sound?` goes *alongside* `path`, never replacing it -- the
+  `#[serde(default)]` treatment `shift` and `gains` already have. The part that
+  would actually hold this up is shipping a default kit, which is an asset and
+  licensing question rather than a code one; `BUILT_IN_DRUMS` is one sound
+  today.
+- **Bundling the referenced audio with an exported preset.** Deliberately
+  waiting for kits, because kits change what it means: once drums resolve
+  through a kit there are no drum references left in a preset, and the only
+  thing left to bundle is the backing track -- the one file that is big,
+  personal, often not yours to pass on, and least appropriate to put in
+  something you hand to someone. If it is built anyway it needs a container
+  rather than one JSON, relative references inside it, and imported media
+  copied into an app-managed folder, since a bundle opened from Downloads may
+  not be there tomorrow. That is a fourth store.
+- **Loading only part of a preset** -- the drums, or the visuals. Wanted soon.
+  **Parts are a load-time filter, never a storage shape**: if "export just the
+  drums" became saveable there would be two kinds of preset file and import
+  would have to handle both. The file stays whole and `PresetDialog` gains a
+  second column, which is why it takes its rows and actions rather than knowing
+  what it is listing.
 - **Decimated sample transport.** Send per-block peaks from Rust instead of raw
   samples. The frontend already reduces to per-pixel peaks, so the picture is
   identical for ~8× less JSON. Worth doing before going past a few channels.

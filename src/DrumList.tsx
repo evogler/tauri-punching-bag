@@ -201,6 +201,19 @@ export const DrumList = ({
         onRemove={() => setDrums(drums.filter((_, j) => j !== i))}
       />
     ))}
+    {drums.some((v) => status[v.path] === "error") && (
+      <div style={{ color: "#f88", fontSize: "0.8em" }}>
+        {/* The full path, deliberately, where `drumLabel` shows the basename
+            everywhere else. A preset from another machine points at somebody
+            else's home directory, and the question a missing sample raises is
+            *where it looked* -- which is the half the basename throws away. */}
+        not found:{" "}
+        {drums
+          .filter((v) => status[v.path] === "error")
+          .map((v) => v.path)
+          .join(", ")}
+      </div>
+    )}
     <div style={rowStyle}>
       <button onClick={onAdd} title="Pick an audio file to use as a drum sound">
         + ADD SAMPLE
