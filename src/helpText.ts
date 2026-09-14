@@ -240,6 +240,14 @@ export const HELP: Record<string, HelpEntry> = {
     title: "Echo volume",
     body: "The volume of each echo relative to the one before. 1 keeps every echo full volume; 0.5 halves each time; 0 silences everything after the first.",
   },
+  loopRecordCycleOn: {
+    title: "Record in cycles",
+    body: "Stops the looper recording for part of every cycle, so a phrase comes back while you play over it instead of being recorded over. On speakers it is also what stops the loop feeding on itself, since the microphone is shut while the speaker is playing the loop back.",
+  },
+  loopRecordCycle: {
+    title: "Off / on (beats)",
+    body: "How long it is off and on for, alternating, starting off: `4` is 4 beats not recording then 4 recording, and `32,16,16,16` is 32 off, 16 on, 16 off, 16 on. Takes the same lists, repeats and parameters as the section order -- `12,4` records one bar in four. Beats it did not record play back silent.",
+  },
   audioMonitorOn: {
     title: "Hear live input",
     body: "Plays what the microphone hears through the output as you play. Useful on headphones; on speakers it can feed back.",

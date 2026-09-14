@@ -1503,6 +1503,54 @@ so overlapping phrases just work.
   live`) gives infinite decaying repeats that never quite stop, and can run away.
   Neither is "a fixed number of full-volume echoes, then gone".
 
+#### Recording in cycles
+
+`loopRecordCycleOn` plus `loopRecordCycle`, in the Rust config, and
+`record_cycle_bounds` / `recording_at` in `util.rs`. Record for so many beats,
+then don't, repeating -- so a phrase comes back while you play over it instead
+of being recorded over. It is also the alternating record/playback named under
+*Out of the looper* as the real fix for feedback on speakers: it breaks the
+microphone -> speaker -> microphone path by construction rather than
+suppressing it, and gives up continuous recording to do it.
+
+- **It gates the *write*, never the read.** The buffer is a plain history and
+  the echoes are taps on it; stopping the write is the only thing that means
+  "keep what I played". Gating the read would mute the echoes, which is the
+  `looping_on` switch and not this.
+- **A gap is written as silence, not skipped.** A position comes round again
+  every `loop_len` frames, so leaving it means the taps replay whatever was
+  there a whole buffer ago -- a phrase that never stops coming back, which is
+  the recursive-feedback looper this one was deliberately not built as. Zeroing
+  costs the same store and is exactly what the looper-off branch already does.
+- **`loop_written` needs nothing.** Every position is still written every frame,
+  so "this far back is post-restart" still holds, and a beat restart still voids
+  everything before it whatever phase the cycle was in.
+- **Asked of the *visual* beat, not `beat`.** What is about to be written is
+  what was played `buffer_compensation` frames ago, so gating on the output
+  clock would record a window ~98 ms off from the beats the field names -- most
+  of a 16th. It also means the negative visual beats just after a restart land
+  in the cycle's tail, which is honest: that audio *was* played there.
+- **One field, and it is a list, because `parseNumberList` already is one.**
+  A bare `4` and `[32,16]x2` are the same mechanism, so a bare number is a
+  one-element list rather than a second key. Expression-backed by the documented
+  two-step -- in `resolveRustConfig`'s walk first, then given the syntax.
+- **The list alternates and starts *silent*.** `32,16,16,16` is 32 beats off,
+  16 recording, 16 off, 16 recording -- the owner's own reading, and the useful
+  one: the first thing a record cycle does is leave room for the phrase you are
+  about to play to come back in. An **odd** number of usable lengths is walked
+  twice, so it returns in the opposite phase; without that a bare `4` would be
+  silence for ever and the switch would look broken.
+- **Nothing usable means record.** An empty or nonsense list must not quietly
+  stop the looper taking anything in -- the failure you can hear is the safer
+  one. Like `sectionOrder`, the field cannot be typed back to empty.
+- **Whether this belongs on `Section` is still open**, and is deliberately left
+  that way. A section is already "for this many beats, these sound" and already
+  takes a list, and two independent cycle mechanisms both gating the looper is
+  the tangle `clickToggle` was retired to avoid. But a section wrap also
+  restarts the beat, rerolls the parameters and voids the loop buffer, and a
+  record cycle that has to run *across* those cannot be a section. Standalone
+  keys for now, so the decision is still available.
+
 #### Stopping the loop running away
 
 `loopFeedbackGuardOn`, off by default, and `loop_guard.rs`. Only matters on

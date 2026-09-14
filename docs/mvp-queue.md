@@ -198,3 +198,24 @@ overrun-without-realloc, double stop, refused start. Built clean, 3 expected
 warnings. Open: paused is not recorded (arguable), the switches reset on relaunch,
 and the drop path has never met a real disk stall.
 
+
+**4. Loop recording cycles — landed 2026-09-14.** `loopRecordCycleOn` plus
+`loopRecordCycle`, gating the *write* into the loop buffer; `record_cycle_bounds`
+/ `recording_at` in `util.rs`, walked once per callback into a reused vector next
+to the tap gains. **The calls made:** one field, a list, since `parseNumberList`
+already does bare numbers -- an odd number of lengths is walked twice so `4`
+means "4 off, 4 on"; the list starts *silent*, per the owner's own example; a gap
+is written as **silence** rather than skipped, because a skipped position replays
+whatever was there a whole buffer ago, which is the recursive-feedback looper
+this one was deliberately not built as; and the phase is asked of the **visual**
+beat, so the window recorded is the beats you played rather than 98 ms off them.
+Standalone keys, not a field on `Section` -- said plainly in CLAUDE.md, decision
+left open. Temp-tested both sides (Rust: the phase table, the owner's example,
+bare-vs-list agreement, odd-list parity, degenerate and empty lists, negative
+beats, no regrowth, and a replay of the looper's own index arithmetic showing the
+phrase returning in the off half, no stale audio surviving, a restart still
+voiding, and the switch off bit-identical to the old behaviour; TS: the walk,
+re-resolution, groups, a bare array, a vanished parameter) and deleted. Built
+clean, 3 expected warnings. Open: it has not been heard, and how it reads against
+the practice cycle -- whose wrap voids the buffer under it -- is exactly the
+question the `Section` decision turns on.

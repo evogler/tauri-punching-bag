@@ -91,6 +91,11 @@ pub fn default_config() -> Config {
         bleed_cancel_audio_on: false,
         loop_feedback_guard_on: false,
         looping_on: false,
+        loop_record_cycle_on: false,
+        // One entry, so the plain case is "4 beats off, 4 beats on" -- matching
+        // the default loop length, which is what makes a phrase come back
+        // exactly during the stretch that isn't recording it.
+        loop_record_cycle: vec![4.0],
         click_on: true,
         sections_on: false,
         sections: vec![],

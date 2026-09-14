@@ -52,7 +52,10 @@ use crate::structs::{
     RecorderState, SampleOutputBuffer, SoundingSample,
 };
 use crate::types::{Args, S};
-use crate::util::{beat_bisect, display_start, mod_add, section_at, section_bounds};
+use crate::util::{
+    beat_bisect, display_start, mod_add, record_cycle_bounds, recording_at, section_at,
+    section_bounds,
+};
 use rand::Rng;
 use std::{
     collections::HashMap,
@@ -201,6 +204,8 @@ fn main() -> Result<(), coreaudio::Error> {
     // Reused across callbacks so the section walk never allocates; it only
     // grows when a section is added.
     let mut bounds: Vec<(f64, usize)> = Vec::new();
+    // The same, for the looper's record cycle, and reused for the same reason.
+    let mut record_bounds: Vec<(f64, bool)> = Vec::new();
     // How many frames have been written to the loop buffer since the cycle last
     // restarted, saturating at its length. Clearing the buffer on a restart
     // would be a multi-megabyte memset on the audio thread; suppressing the
@@ -609,6 +614,10 @@ fn main() -> Result<(), coreaudio::Error> {
         };
 
         let loop_spacing = get_loop_spacing(&config);
+        // Once per callback, next to the tap gains: the cycle only moves when
+        // the config does, and the frame loop just asks which phase it is in.
+        let record_cycle_on = config.loop_record_cycle_on;
+        let record_cycle = record_cycle_bounds(&config.loop_record_cycle, &mut record_bounds);
         tap_gains.resize(loop_echo_count(&config), 0.0);
         {
             let feedback = config.loop_echo_gain.clamp(0.0, 1.0) as f32;
@@ -849,6 +858,13 @@ fn main() -> Result<(), coreaudio::Error> {
                 // `loop_out` is the panned stereo feed; `loop_visual` is kept
                 // per channel so each one shows only its own take.
                 let mut loop_out: [S; 2] = [0.0, 0.0];
+                // Which phase of the record cycle this frame falls in. Asked of
+                // the *visual* beat and not of `beat`, because what is about to
+                // be written is what was played `buffer_compensation` frames
+                // ago: gating on the output clock would record a window ~98 ms
+                // off from the beats it names, which is most of a 16th.
+                let loop_recording = !record_cycle_on
+                    || recording_at(&record_bounds, visual_beat, record_cycle);
                 let loop_len = loop_buffer.channels.first().map_or(0, |c| c.len());
                 if loop_len > 0 {
                     let p = loop_buffer.pos;
@@ -902,8 +918,25 @@ fn main() -> Result<(), coreaudio::Error> {
                             loop_out[1] += audio_sum * right;
                             // A plain history -- every repeat comes from a tap,
                             // so nothing is mixed back in here.
-                            loop_buffer.channels[ch][p] =
-                                input_audio.get(ch).copied().unwrap_or(0.0);
+                            //
+                            // A record cycle gates the *write*, never the read:
+                            // stopping the write is what lets a phrase come
+                            // back while you play over it instead of recording
+                            // over it. The gap is written as silence rather
+                            // than skipped, because the position is reused
+                            // every `loop_len` frames -- leaving it means the
+                            // taps replay whatever was there a whole buffer
+                            // ago, a phrase that never stops coming back, which
+                            // is exactly the recursive-feedback looper this one
+                            // was deliberately not built as. `loop_written`
+                            // needs nothing: every position is still written
+                            // every frame, so "this far back is post-restart"
+                            // still holds.
+                            loop_buffer.channels[ch][p] = if loop_recording {
+                                input_audio.get(ch).copied().unwrap_or(0.0)
+                            } else {
+                                0.0
+                            };
                         } else {
                             loop_visual[ch] = 0.0;
                             loop_buffer.channels[ch][p] = 0.0;

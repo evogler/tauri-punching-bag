@@ -145,3 +145,66 @@ pub fn section_at(bounds: &[(f64, usize)], beat: f64, cycle: f64) -> Option<usiz
     let b = beat.rem_euclid(cycle);
     bounds.iter().find(|(end, _)| b < *end).map(|(_, i)| *i)
 }
+
+/// Where each phase of the looper's record cycle ends, as a running total in
+/// beats, paired with whether the buffer is being written during it.
+///
+/// The list alternates and **starts silent**: `32,16,16,16` is 32 beats not
+/// recording, 16 recording, 16 not, 16 recording. Starting silent is the
+/// owner's own reading of the field, and it is the useful one -- the first
+/// thing a record cycle does is leave room for the phrase you are about to
+/// play to come back in.
+///
+/// A list with an *odd* number of usable lengths is walked twice, so it comes
+/// back round in the opposite phase. Without that a bare `4` would be four
+/// beats of silence for ever and the switch would look broken; with it, one
+/// number is exactly the fixed even-length on/off, and a list is the same
+/// mechanism written out.
+///
+/// Written into a caller-owned vector for the same reason `section_bounds` is:
+/// this runs once per callback and the audio thread never reaches for the
+/// allocator. It only grows when the cycle gets longer.
+pub fn record_cycle_bounds(lengths: &[f64], out: &mut Vec<(f64, bool)>) -> f64 {
+    out.clear();
+    let usable = lengths.iter().filter(|n| n.is_finite() && **n > 0.0).count();
+    if usable == 0 {
+        return 0.0;
+    }
+    let passes = if usable % 2 == 0 { 1 } else { 2 };
+    let mut total = 0.0;
+    let mut recording = false;
+    for _ in 0..passes {
+        for n in lengths {
+            // Skipped rather than clamped, the rule `section_bounds` follows: a
+            // zero-length phase is a boundary the beat can never cross, and the
+            // cycle would stop advancing with nothing saying why.
+            if !n.is_finite() || !(*n > 0.0) {
+                continue;
+            }
+            total += *n;
+            out.push((total, recording));
+            recording = !recording;
+        }
+    }
+    total
+}
+
+/// Whether the looper writes at this beat.
+///
+/// Reduced into the cycle first, so a *negative* beat lands in the cycle's tail
+/// rather than nowhere -- which it is for `buffer_compensation` frames after a
+/// restart, since this is asked of the visual clock.
+///
+/// No usable cycle means record, not silence. A half-typed or nonsense list
+/// must not quietly stop the looper taking anything in; the failure people can
+/// hear is the safer one.
+pub fn recording_at(bounds: &[(f64, bool)], beat: f64, cycle: f64) -> bool {
+    if !(cycle > 0.0) || !beat.is_finite() {
+        return true;
+    }
+    let b = beat.rem_euclid(cycle);
+    bounds
+        .iter()
+        .find(|(end, _)| b < *end)
+        .map_or(true, |(_, r)| *r)
+}

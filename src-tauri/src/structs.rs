@@ -259,6 +259,29 @@ pub struct Config {
     /// unity, which grows over minutes while everything else decays.
     pub loop_feedback_guard_on: bool,
     pub looping_on: bool,
+    /// Alternate between recording and not, so a phrase comes back while you
+    /// play over it instead of being recorded over. It is also the
+    /// alternating record/playback named in CLAUDE.md as the real fix for
+    /// looper feedback on speakers -- the one thing that breaks the
+    /// microphone -> speaker -> microphone path by construction rather than
+    /// suppressing it.
+    ///
+    /// Standalone rather than a field on `Section` for the MVP. A section is
+    /// already "for this many beats, these sound" and would be the obvious
+    /// home, but a section wrap also restarts the beat, rerolls the
+    /// parameters and voids the loop buffer, and a record cycle that has to
+    /// run *across* those cannot be one. Left open deliberately.
+    pub loop_record_cycle_on: bool,
+    /// The cycle written out, in beats, alternating and **starting silent**:
+    /// `32,16,16,16` is 32 beats not recording, 16 recording, 16 not, 16
+    /// recording. Expanded on the frontend by the same `parseNumberList` that
+    /// reads `section_order`, so groups, repeats and parameters all work and
+    /// the audio thread only ever walks a list of numbers.
+    ///
+    /// An odd number of usable lengths is walked twice -- see
+    /// `record_cycle_bounds` -- which is what makes a bare `4` the plain
+    /// "4 off, 4 on" the MVP asked for rather than a cycle that never records.
+    pub loop_record_cycle: Vec<f64>,
     pub click_on: bool,
     /// Run the practice cycle. Off, everything sounds continuously, which is
     /// what the app did before sections existed.

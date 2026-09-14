@@ -28,6 +28,18 @@ export const LoopTab = (p: PanelProps) => {
           get={get}
           validate={(n: number) => n >= 0 && n <= 1}
         />
+        {/* Below the length and the echoes because it is a schedule over them:
+            you set what comes back first, then when it is allowed to record. */}
+        <Input label="Record in cycles" _key="loopRecordCycleOn" set={set} get={get} />
+        {get("loopRecordCycleOn") && (
+          <Input
+            label="Off / on (beats)"
+            _key="loopRecordCycle"
+            params={params}
+            set={set}
+            get={get}
+          />
+        )}
       </Section>
       {/* Together these answer one question: are you hearing and seeing
           yourself, or only the echoes? */}

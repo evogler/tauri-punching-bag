@@ -323,6 +323,18 @@ export const defaultRustConfig = {
   // run fades out. 0 silences everything after the first echo, so it is a gain,
   // not a "feedback amount" -- see the note in structs.rs on the rename.
   loopEchoGain: numExpr(1),
+  // Alternate between recording and not, so a phrase comes back while you play
+  // over it rather than being recorded over -- and, on speakers, the one thing
+  // that breaks the microphone -> speaker -> microphone path by construction
+  // instead of suppressing it. Standalone keys rather than a field on Section:
+  // a section wrap restarts the beat and voids the loop buffer, and a record
+  // cycle that has to run across those cannot be a section. Still open.
+  loopRecordCycleOn: false,
+  // The cycle in beats, alternating and starting *silent*: `32,16,16,16` is 32
+  // off, 16 recording, 16 off, 16 recording. Same list syntax as sectionOrder,
+  // so groups, repeats and parameters all work. An odd number of lengths is
+  // walked twice, which is what makes a bare `4` the plain "4 off, 4 on".
+  loopRecordCycle: { inputText: "4", val: [4] } as NumberListExpr,
   bpm: numExpr(91),
   bufferCompensation: numExpr(4330),
   // Whether Rust runs the spectrogram FFTs at all. Off costs nothing on the
@@ -1069,6 +1081,13 @@ export const resolveRustConfig = (
   }));
   out.sectionOrder = resolveList(
     asListExpr(rust.sectionOrder ?? { inputText: "", val: [] }),
+    params
+  );
+  // In the walk for the same reason: nothing on this side reads the record
+  // cycle, so without it a parameter change would leave the old lengths gating
+  // the audio thread indefinitely.
+  out.loopRecordCycle = resolveList(
+    asListExpr(rust.loopRecordCycle ?? defaultRustConfig.loopRecordCycle),
     params
   );
   out.drums = rust.drums.map((d) => ({

@@ -175,6 +175,13 @@ const migrateRust = (rust: Record<string, unknown>): Record<string, unknown> => 
   }
   if ("sectionOrder" in out)
     out.sectionOrder = wrapList(out.sectionOrder, { inputText: "", val: [] });
+  // A hand-written preset can put a bare array here; restore merges it *over*
+  // the default object, which is the loopFeedback trap in its list form.
+  if ("loopRecordCycle" in out)
+    out.loopRecordCycle = wrapList(
+      out.loopRecordCycle,
+      defaultRustConfig.loopRecordCycle
+    );
   // A hand-written preset, or one saved before the length took expressions.
   if (Array.isArray(out.sections))
     out.sections = (out.sections as unknown[]).map((sec) =>
