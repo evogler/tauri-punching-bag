@@ -385,6 +385,10 @@ export const HELP: Record<string, HelpEntry> = {
     title: "Keep adapting",
     body: "Follows the room as it changes -- your hands over the keyboard are part of it. Only learns from moments it can already explain, so it holds still while you play.",
   },
+  "setup.run": {
+    title: "Run setup again",
+    body: "Walks through choosing devices, checking the microphone, speakers or headphones, and measuring latency -- the same controls as this tab, in order, with an explanation for each.",
+  },
   updates: {
     title: "Updates",
     body: "The version running, and a check for a newer one. Installing restarts the app.",

@@ -62,6 +62,7 @@ import { SampleStatus, makeDrumVoice } from "./DrumList";
 import { open as openFileDialog } from "@tauri-apps/api/dialog";
 import { BROWSER_DEBUG_MODE } from "./env";
 import { Panel } from "./panel/Panel";
+import { SetupWizard, shouldOpenSetup } from "./SetupWizard";
 import { PanelTab } from "./panel/chrome";
 import { FileInfo, PanelProps } from "./panel/types";
 
@@ -314,6 +315,10 @@ const App = () => {
 
   // Read once, on the first render only.
   const [restoredSession] = useState(readSession);
+  // A fresh install, or setup part way through a device-change restart.
+  const [setupOpen, setSetupOpen] = useState(() =>
+    shouldOpenSetup(restoredSession !== null)
+  );
   const [rustConfig, setRustConfig] = useState<RustConfig>(() =>
     resolveRustConfig(
       { ...defaultRustConfig, ...restoredSession?.rust },
@@ -1808,6 +1813,7 @@ const App = () => {
       patchView={patchView}
       paneCount={viewCtxs.length}
       activeCfg={viewCtxs[activeView]?.cfg}
+      openSetup={() => setSetupOpen(true)}
     />
   );
 
@@ -1895,6 +1901,21 @@ const App = () => {
       >
         {config}
         {waveform}
+        {setupOpen && (
+          <SetupWizard
+            devices={audioDevices}
+            active={activeDevices}
+            prefs={audioPrefs}
+            setPrefs={writeAudioPrefs}
+            refreshDevices={refreshDevices}
+            inputCount={inputChannelCount}
+            channelLabels={channelLabels}
+            get={get}
+            set={set}
+            sampleRate={sampleRate}
+            onClose={() => setSetupOpen(false)}
+          />
+        )}
 
         {/* <SlidingDivision panel={config} rest={waveform} /> */}
       </div>

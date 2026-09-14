@@ -1155,6 +1155,36 @@ reasons they fail are not visible until you measure.
   `MAX_INPUT_BACKLOG` (11,025 = 0.25 s) caps it. The pause path drains and
   discards rather than returning early.
 
+### First-launch setup
+
+`src/SetupWizard.tsx`: welcome, devices, microphone, headphones or speakers,
+latency, done. A front for controls that already exist in the Setup tab --
+order and explanation, never a second place anything is stored.
+
+- **Shown on a fresh install only** (no saved session), or when setup is part
+  way through; *Run setup again* is at the top of the Setup tab. An install that
+  already has a session was set up by hand and is not interrupted.
+- **Its progress survives a restart, on purpose.** A device change needs a
+  relaunch, so the current step is written to `punching-bag.setup-step` on
+  *every* move -- not only on the wizard's own "Restart and continue", because
+  the device picker's Restart button relaunches too. Finishing or skipping
+  removes it and sets `punching-bag.setup-done`. Install state, so localStorage
+  and not config.
+- **The microphone step checks that sound arrives, not that permission was
+  granted.** The device is opened before any window exists, so macOS has
+  already asked by the time setup shows; and the failure worth catching is an
+  input of exact zeroes, which a missing grant and a sample-rate mismatch both
+  produce. `get_input_levels` returns each input's peak since the last call.
+  The callback accumulates peaks in a local per frame and publishes them to
+  `InputLevelState`'s atomics once per callback, at the top, before any early
+  return -- so the audio thread never takes a lock for a meter. The paused path
+  measures what it drains, so the check works paused.
+- **Speakers switches `bleedCancelOn` on only when a measurement passes**
+  (`BleedMeter`'s `onPassed`, fired on the running -> done transition).
+  Headphones switches it off.
+- **The latency step warns when paused**, since the calibration sits after the
+  pause check and would otherwise silently do nothing.
+
 ### Device selection, and the third store
 
 The input and output devices are chosen in the panel (signal tab → *device*) and

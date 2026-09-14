@@ -47,6 +47,13 @@ question, and what they expected to happen.
 The biggest win for the least work. It gets a newcomer to a correct, working
 state before they touch the panel.
 
+**Setup built 2026-09-14** (`src/SetupWizard.tsx`; CLAUDE.md has the details).
+The relaunch question resolved itself: progress is saved on every step, so any
+restart -- the wizard's or the device picker's -- comes back to the step it
+left. The "pick a starting point" step waits for the examples, which wait for a
+built-in drum kit. Setup shows only on a fresh install; an existing install
+gets it from the Setup tab.
+
 ### First-launch setup
 
 A short sequence shown once, and again from a "run setup again" button in the

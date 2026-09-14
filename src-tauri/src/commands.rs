@@ -290,6 +290,17 @@ pub fn get_loop_guard(state: State<LoopGuardState>) -> (f32, f32) {
     *state.0.lock().unwrap()
 }
 
+/// Peak input level per channel since the last call, then zeroed. What the
+/// setup's microphone check polls; the callback only ever raises the slots.
+#[tauri::command]
+pub fn get_input_levels(state: State<crate::structs::InputLevelState>) -> Vec<f32> {
+    state
+        .0
+        .iter()
+        .map(|slot| f32::from_bits(slot.swap(0, Ordering::Relaxed)))
+        .collect()
+}
+
 /// Starts a bleed measurement: a couple of seconds of noise through the
 /// speaker with everything else muted, fitting the filter against what comes
 /// back. Everything it needs already exists on the audio thread; this only

@@ -488,6 +488,22 @@ impl BusDelay {
 /// once per callback and polled by the panel.
 pub struct LoopGuardState(pub Arc<Mutex<(f32, f32)>>);
 
+/// The loudest input sample per channel since the panel last asked, stored as
+/// f32 bits. Atomics rather than a mutex, so a meter being polled can never make
+/// the callback wait: the callback only ever raises a slot, and the command
+/// reads and zeroes it. A raise racing a read loses at most one callback of
+/// peak, which a meter cannot show anyway.
+pub struct InputLevelState(pub Arc<Vec<std::sync::atomic::AtomicU32>>);
+
+pub fn raise_level(levels: &[std::sync::atomic::AtomicU32], ch: usize, peak: f32) {
+    use std::sync::atomic::Ordering;
+    if let Some(slot) = levels.get(ch) {
+        if peak > f32::from_bits(slot.load(Ordering::Relaxed)) {
+            slot.store(peak.to_bits(), Ordering::Relaxed);
+        }
+    }
+}
+
 /// A bleed-measuring run and its verdict, split the way `CalibrationState` is:
 /// the callback touches the counters every callback and the result only when a
 /// run ends.

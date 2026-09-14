@@ -61,4 +61,6 @@ export type PanelProps = {
   activeCfg: ViewConfig | undefined;
   viewIO: { get: (k: string) => any; set: (k: string, val: any) => void };
   patchView: (index: number, patch: Partial<ViewConfig>) => void;
+
+  openSetup: () => void;
 };

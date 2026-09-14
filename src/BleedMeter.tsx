@@ -28,10 +28,24 @@ type BleedResult = {
   liveDuty: number;
 };
 
-export const BleedMeter = ({ enabled }: { enabled: boolean }) => {
+export const BleedMeter = ({
+  enabled,
+  onPassed,
+}: {
+  enabled: boolean;
+  // Called once when a run started here finishes and passes -- setup uses it
+  // to switch the canceller on, which a failed run must not do.
+  onPassed?: () => void;
+}) => {
   const [result, setResult] = useState<BleedResult | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const running = result?.phase === "running";
+
+  const lastPhase = useRef<Phase | undefined>(undefined);
+  useEffect(() => {
+    if (lastPhase.current === "running" && result?.phase === "done") onPassed?.();
+    lastPhase.current = result?.phase;
+  }, [result?.phase, onPassed]);
 
   useEffect(() => {
     invoke<BleedResult>("get_bleed_status").then(setResult).catch(() => {});

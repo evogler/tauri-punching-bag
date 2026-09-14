@@ -28,7 +28,7 @@ use crate::bleed::{
     TAPS as BLEED_TAPS, TRAIN_LEVEL,
 };
 use crate::commands::{
-    cancel_bleed_training, get_bleed_status, get_loop_guard, start_bleed_training,
+    cancel_bleed_training, get_bleed_status, get_input_levels, get_loop_guard, start_bleed_training,
     cancel_calibration, get_active_devices, get_analysis, get_audio_prefs,
     get_calibration_status, get_input_channel_count, get_sample_rate, get_samples,
     export_presets, get_presets, import_presets, list_audio_devices, load_drum_sample,
@@ -46,7 +46,7 @@ use crate::io_channels::{
 use crate::read_audio_file::get_samples_from_filename;
 use crate::structs::{
     AnalysisOutputBuffer, BeatResetState, BleedState, BusDelay, CalibrationState, ConfigState, DrumSamples,
-    LoopGuardState,
+    LoopGuardState, InputLevelState, raise_level,
     InputChannelCount, LogState, LoopBuffer, LoopBufferState, Mp3Buffer, Mp3BufferState,
     SampleOutputBuffer, SoundingSample,
 };
@@ -220,6 +220,17 @@ fn main() -> Result<(), coreaudio::Error> {
     let loop_guard_arc = Arc::new(Mutex::new((0.0f32, 0.0f32)));
     let loop_guard_state = LoopGuardState(loop_guard_arc.clone());
     let loop_guard_live = loop_guard_arc.clone();
+    // Peak input per channel, for the setup's microphone check. Accumulated in
+    // a local per frame and published to the atomics once per callback, so the
+    // frame loop never touches shared state for it.
+    let input_level_arc: Arc<Vec<std::sync::atomic::AtomicU32>> = Arc::new(
+        (0..input_channels)
+            .map(|_| std::sync::atomic::AtomicU32::new(0))
+            .collect(),
+    );
+    let input_level_state = InputLevelState(input_level_arc.clone());
+    let input_level = input_level_arc.clone();
+    let mut input_peaks = vec![0f32; input_channels];
     let bleed_live_arc = Arc::new(Mutex::new((0.0f32, 0.0f32)));
     let bleed_state = BleedState(
         bleed_training_arc.clone(),
@@ -377,6 +388,15 @@ fn main() -> Result<(), coreaudio::Error> {
             }
         }
 
+        // The previous callback's input peaks, published here rather than at
+        // the end of the frame loop so every path below -- including the early
+        // returns -- goes through it once. A callback late, which a meter
+        // polled ten times a second cannot see.
+        for (ch, peak) in input_peaks.iter_mut().enumerate() {
+            raise_level(&input_level, ch, *peak);
+            *peak = 0.0;
+        }
+
         // Paused freezes everything that moves -- the beat, the file position, the
         // loop buffer -- so resuming picks up exactly where it stopped, and no
         // visual samples are produced so the display holds still.
@@ -389,9 +409,15 @@ fn main() -> Result<(), coreaudio::Error> {
             // Same reason as the beat reset: the frames either side of a pause
             // aren't adjacent, so the history can't carry across it.
             analyzer.reset();
-            for buffer in buffers.iter_mut() {
+            // Measured on the way out, so the setup's microphone check works
+            // whether or not the transport is running.
+            for (ch, buffer) in buffers.iter_mut().enumerate() {
                 let drop_count = num_frames.min(buffer.len());
-                buffer.drain(..drop_count);
+                let mut peak = 0f32;
+                for sample in buffer.drain(..drop_count) {
+                    peak = peak.max((sample * config.audio_in_gain).abs());
+                }
+                raise_level(&input_level, ch, peak);
             }
             for i in 0..num_frames {
                 for channel in data.channels_mut() {
@@ -664,6 +690,7 @@ fn main() -> Result<(), coreaudio::Error> {
                     // the picture and, if the audio is following, the sound.
                     let filtered = input_high_pass[ch].process(raw);
                     input_raw[ch] = raw;
+                    input_peaks[ch] = input_peaks[ch].max(raw.abs());
 
                     // Subtract the speaker's own output back out, sample by
                     // sample and phase-accurate, leaving whatever was played
@@ -1112,6 +1139,7 @@ fn main() -> Result<(), coreaudio::Error> {
         .manage(calibration_state)
         .manage(bleed_state)
         .manage(loop_guard_state)
+        .manage(input_level_state)
         .manage(drum_samples_state)
         .invoke_handler(tauri::generate_handler![
             get_samples,
@@ -1130,6 +1158,7 @@ fn main() -> Result<(), coreaudio::Error> {
             get_calibration_status,
             get_bleed_status,
             get_loop_guard,
+            get_input_levels,
             start_bleed_training,
             cancel_bleed_training,
             cancel_calibration,

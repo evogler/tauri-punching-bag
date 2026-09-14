@@ -15,9 +15,15 @@ import { PanelProps } from "./types";
 // latency between them, the inputs, the room on speakers, and updates. Mostly
 // set once, which is why it is not the first tab.
 export const SetupTab = (p: PanelProps) => {
-  const { get, set, params, audioDevices, activeDevices, audioPrefs, writeAudioPrefs, refreshDevices, inputChannelCount, channelLabels, sampleRate } = p;
+  const { get, set, params, audioDevices, activeDevices, audioPrefs, writeAudioPrefs, refreshDevices, inputChannelCount, channelLabels, sampleRate, openSetup } = p;
   return (
     <>
+      {/* First, so someone who skipped setup and is now stuck finds it. */}
+      <Section>
+        <Help id="setup.run">
+          <button onClick={openSetup}>Run setup again</button>
+        </Help>
+      </Section>
       <Section label="Audio devices">
         <DevicePicker
           devices={audioDevices}
