@@ -1,4 +1,6 @@
 import { DrumList } from "../DrumList";
+import { DrumGridList } from "../DrumGridList";
+import { gridOwners } from "../config";
 import { Input } from "../Input";
 import { SectionList } from "../SectionList";
 import { Section } from "./chrome";
@@ -8,7 +10,19 @@ import { PanelProps } from "./types";
 // Tempo is pinned above the tabs, since everything here and in every other tab
 // follows it; the file to play along with has a tab of its own.
 export const PlayTab = (p: PanelProps) => {
-  const { get, set, params, rustConfig, addDrumSample, sampleStatus } = p;
+  const {
+    get,
+    set,
+    params,
+    rustConfig,
+    addDrumSample,
+    removeDrumVoice,
+    sampleStatus,
+  } = p;
+  const grids = get("drumGrids");
+  // One answer about who owns what, shared by the read-only fields here and by
+  // the compile itself.
+  const owners = gridOwners(grids);
   return (
     <>
       <Section label="Click">
@@ -40,7 +54,21 @@ export const PlayTab = (p: PanelProps) => {
           drums={get("drums")}
           setDrums={(next) => set("drums", next)}
           onAdd={addDrumSample}
+          onRemove={removeDrumVoice}
+          owners={owners}
           status={sampleStatus}
+        />
+      </Section>
+      {/* A grid owns several parts, so it wants a home of its own rather than a
+          button on a drum row. What it writes is the rhythm and the chances of
+          the parts it names, which show read-only above. */}
+      <Section label="Grids" help="drumGrids">
+        <DrumGridList
+          grids={grids}
+          setGrids={(next) => set("drumGrids", next)}
+          drums={rustConfig.drums}
+          params={params}
+          addVoice={addDrumSample}
         />
       </Section>
       <Section label="Practice cycle">

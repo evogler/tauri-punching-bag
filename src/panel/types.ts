@@ -32,7 +32,11 @@ export type PanelProps = {
   loadPreset: (preset: Preset) => void;
 
   rustConfig: RustConfig;
-  addDrumSample: (builtIn?: string) => void;
+  /** Answers with the new voice's index, so a grid row can point at it. */
+  addDrumSample: (builtIn?: string) => Promise<number | null>;
+  // One operation rather than a plain `set("drums", …)`: a grid row names its
+  // voice by index, so deleting one has to fix those up in the same breath.
+  removeDrumVoice: (index: number) => void;
   sampleStatus: Record<string, SampleStatus>;
   chooseFile: () => void;
   fileInfo: FileInfo | null;

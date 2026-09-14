@@ -32,8 +32,9 @@ import {
   exprNumber,
   parameterValues,
   rollParameters,
-  resolveJsConfig,
-  resolveRustConfig,
+  resolveConfigs,
+  applyDrumGrids,
+  removeGridVoice,
   viewRowBeats,
   numExpr,
   setSampleRateHz,
@@ -353,17 +354,18 @@ const App = () => {
   const [setupOpen, setSetupOpen] = useState(() =>
     shouldOpenSetup(restoredSession !== null)
   );
-  const [rustConfig, setRustConfig] = useState<RustConfig>(() =>
-    resolveRustConfig(
+  // Resolved on the way in: a session restored from an older build can carry
+  // texts whose `val` predates the parameters saved alongside them. Both halves
+  // together, because a drum grid lives in the js config and compiles into the
+  // rust one -- resolving either alone would restore a stale rhythm.
+  const [restored] = useState(() =>
+    resolveConfigs(
       { ...defaultRustConfig, ...restoredSession?.rust },
-      parameterValues(restoredSession?.js?.parameters ?? [])
+      { ...defaultJsConfig, ...restoredSession?.js }
     )
   );
-  // Resolved on the way in: a session restored from an older build can carry
-  // texts whose `val` predates the parameters saved alongside them.
-  const [jsConfig, setJsConfig] = useState<JsConfig>(() =>
-    resolveJsConfig({ ...defaultJsConfig, ...restoredSession?.js })
-  );
+  const [rustConfig, setRustConfig] = useState<RustConfig>(restored.rust);
+  const [jsConfig, setJsConfig] = useState<JsConfig>(restored.js);
   const get = <T extends ConfigKey>(k: T) => {
     if (isRustConfigKey(k)) return rustConfig[k] as RustConfig[typeof k];
     else if (isJsConfigKey(k)) return jsConfig[k] as JsConfig[typeof k];
@@ -373,13 +375,14 @@ const App = () => {
   // can never lag a parameter change. An effect doing it afterwards would risk
   // a render loop, and would leave one frame drawn from stale numbers.
   const setParameters = (parameters: Parameter[]) => {
-    setJsConfig((js) => resolveJsConfig({ ...js, parameters }));
     // The rust side has to be re-resolved *and* pushed -- unlike the js config
     // nothing here re-reads it on render, so a stale `val` would sit in the
-    // audio thread until the next unrelated setting change.
-    updateRustConfig(
-      resolveRustConfig(rustConfig, parameterValues(parameters))
-    );
+    // audio thread until the next unrelated setting change. The drum grids are
+    // the same hazard one level down: their pulse is expression-backed and what
+    // they compile to is a rust-side rhythm.
+    const next = resolveConfigs(rustConfig, { ...jsConfig, parameters });
+    setJsConfig(next.js);
+    updateRustConfig(next.rust);
   };
 
   // A reroll is an ordinary parameter change -- the new draws are written back
@@ -819,11 +822,14 @@ const App = () => {
       .catch(() => setSampleStatus((s) => ({ ...s, [path]: "error" })));
   };
 
-  const addDrumSample = async (builtIn?: string) => {
+  // Answers with the new voice's index, so a grid row can be pointed at what it
+  // just added. Null means the pick was cancelled.
+  const addDrumSample = async (builtIn?: string): Promise<number | null> => {
     // A kit sound is already loaded under its name, so there is nothing to pick.
     if (builtIn) {
-      set("drums", [...get("drums"), makeDrumVoice(builtIn)]);
-      return;
+      const drums = get("drums");
+      set("drums", [...drums, makeDrumVoice(builtIn)]);
+      return drums.length;
     }
     let path: string | null = null;
     if (BROWSER_DEBUG_MODE) {
@@ -840,8 +846,25 @@ const App = () => {
       });
       path = typeof picked === "string" ? picked : null;
     }
-    if (!path) return;
-    set("drums", [...get("drums"), makeDrumVoice(path)]);
+    if (!path) return null;
+    const drums = get("drums");
+    set("drums", [...drums, makeDrumVoice(path)]);
+    return drums.length;
+  };
+
+  // Deleting a voice shifts every index after it, and a grid row names its
+  // voice by index -- so the two edits are one operation. `sections[].drums`
+  // has exactly the same problem and does *not* fix it up; left alone here
+  // rather than changed on the way past.
+  const removeDrumVoice = (index: number) => {
+    set(
+      "drums",
+      rustConfig.drums.filter((_, i) => i !== index)
+    );
+    setJsConfig((js) => ({
+      ...js,
+      drumGrids: removeGridVoice(js.drumGrids, index),
+    }));
   };
 
   // How many channels the capture device gave us, which is what the channel
@@ -1023,6 +1046,22 @@ const App = () => {
     });
   }, [wantedKey, packedKey]);
 
+  // A drum grid is edited in the js config and sounds out of the rust one, so
+  // the compile has to be re-run whenever either half moves. An effect rather
+  // than a call at each of the sites -- a grid edit, a voice added or removed,
+  // the arrangement of rows, a preset, the restored session -- because a missed
+  // one leaves a rhythm playing that nothing on screen agrees with. It cannot
+  // loop: `applyDrumGrids` is a pure function of the grids and the voices and
+  // hands back the *same array* when nothing changed, so pushing its own output
+  // is a fixed point. Same shape, and the same argument, as the channel union
+  // above. The three resolve paths still compile explicitly, so this is the
+  // backstop rather than the mechanism, and normally does nothing.
+  const griddedDrums = applyDrumGrids(rustConfig.drums, jsConfig.drumGrids);
+  useEffect(() => {
+    if (griddedDrums === rustConfig.drums) return;
+    updateRustConfig({ drums: griddedDrums });
+  }, [griddedDrums, rustConfig.drums]);
+
   // Covers both adding a sample and coming back to one a restored session
   // referred to.
   useEffect(() => {
@@ -1043,20 +1082,18 @@ const App = () => {
   // default rather than keeping the current value. That is the honest answer
   // and the one restore already gives.
   const loadPreset = (preset: Preset) => {
-    const next = resolveJsConfig({ ...defaultJsConfig, ...preset.js });
-    setJsConfig(next);
     // Last, so they win even over an older preset that still carries them:
     // whether you are paused is not something a preset gets to decide, and the
     // latency of the interface in front of you is not something it can know.
     const kept = Object.fromEntries(
       KEPT_RUST_KEYS.map((k) => [k, rustConfig[k]])
     );
-    updateRustConfig(
-      resolveRustConfig(
-        { ...defaultRustConfig, ...preset.rust, ...kept },
-        parameterValues(next.parameters)
-      )
+    const next = resolveConfigs(
+      { ...defaultRustConfig, ...preset.rust, ...kept },
+      { ...defaultJsConfig, ...preset.js }
     );
+    setJsConfig(next.js);
+    updateRustConfig(next.rust);
   };
 
   const resetBeat = () => {
@@ -1869,6 +1906,7 @@ const App = () => {
       loadPreset={loadPreset}
       rustConfig={rustConfig}
       addDrumSample={addDrumSample}
+      removeDrumVoice={removeDrumVoice}
       sampleStatus={sampleStatus}
       chooseFile={chooseFile}
       fileInfo={fileInfo}

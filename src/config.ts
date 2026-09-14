@@ -8,6 +8,7 @@ import {
   resolveRhythmText,
   parseNumberList,
   isRandomText,
+  MAX_LIST_LENGTH,
   Rng,
 } from "./expression";
 
@@ -95,6 +96,269 @@ export type Section = {
 };
 
 export const sectionShown = (section: Section) => section.show !== false;
+
+// One cell of a drum grid: how likely that column is to sound, and how loud.
+//
+// **Unchecked is a chance of 0**, not a separate flag. That is what the
+// compilation forces rather than a tidiness choice: parser2 has notes and spans
+// and no rests, so a column with no hit still has to emit a note, and a note
+// that never sounds is exactly a chance of 0. Keeping "off" and "chance 0"
+// apart would be a distinction the compiler could not express -- and the hits
+// view is then the chance view rounded to {0, 1}, which is one state rather
+// than two that have to agree.
+//
+// `gain` is absent until somebody sets one, which is the whole of what lets a
+// grid leave a hand-typed `gains` list alone. The second pass's gains and
+// chances lenses write these two fields and need no migration.
+export type GridCell = {
+  /** 0..1. Anything above 0 draws as checked. */
+  chance: number;
+  gain?: number;
+};
+
+export type DrumGridRow = {
+  // Index into the Rust config's `drums`, the way `sections[].drums` names its
+  // voices. The weakest part of the design -- deleting a voice shifts every
+  // index after it, so the deletion has to fix these up -- but a stable voice
+  // id is a wider change than this feature.
+  voice: number;
+  // One per column of the grid as drawn, not per emitted column: the pattern
+  // tiles across the passes, so the extra copies are the compiler's business.
+  cells: GridCell[];
+};
+
+// An editing surface for a drum part, in the js config because nothing in it
+// reaches the audio thread. What it compiles *to* is the Rust config's `drums`
+// -- an ordinary rhythm, gains and chances, exactly as if they had been typed.
+export type DrumGrid = {
+  // A length in columns, not in beats. The beats follow from the pulse.
+  columns: number;
+  // A number or a list, in `parseNumberList` syntax like `beatsPerRow` -- so
+  // `bar/n` follows a parameter and `[.6,.4]x2` is a group. Deliberately *not*
+  // the rhythm grammar: those are two different `x` operators and a grid wants
+  // the number-list one. Expression-backed, which it may only be because
+  // `resolveJsConfig` walks it.
+  pulse: NumberListExpr | number[];
+  // Reset the pulse at the grid boundary, so every pass is identical. Off, the
+  // pulse keeps running across the boundary and the pattern only comes back
+  // round after `pulse.length / gcd(columns, pulse.length)` passes. Optional so
+  // a hand-written preset that omits it gets the default rather than its
+  // opposite -- the treatment `Section.show` already has.
+  restart?: boolean;
+  rows: DrumGridRow[];
+};
+
+export const gridRestart = (grid: DrumGrid) => grid.restart !== false;
+
+// What the pulse field shows: the text as typed where there is one, so `bar/n`
+// survives a render instead of being reformatted into its current numbers. The
+// array branch is a hand-written preset, as it is for the drum gains.
+export const gridPulseText = (grid: DrumGrid): string =>
+  Array.isArray(grid.pulse)
+    ? formatNumberList(grid.pulse)
+    : grid.pulse.inputText;
+
+export const cellOn = (cell?: GridCell) => (cell?.chance ?? 0) > 0;
+
+// Which voice each grid row writes, and whether the grid owns that voice's
+// gains. One place decides both, so the compile and the read-only fields in the
+// drums tab can never disagree about who owns what.
+//
+// The *first* grid to name a voice owns it: the same sound in two grids is
+// meant to be two voices, and silently compiling one voice twice would make the
+// later grid look broken instead of the arrangement.
+export type GridOwner = { grid: number; row: number; gains: boolean };
+
+export const gridOwners = (grids: DrumGrid[]): Map<number, GridOwner> => {
+  const out = new Map<number, GridOwner>();
+  grids.forEach((grid, g) =>
+    grid.rows.forEach((row, r) => {
+      if (out.has(row.voice)) return;
+      out.set(row.voice, {
+        grid: g,
+        row: r,
+        gains: row.cells.some((c) => typeof c?.gain === "number"),
+      });
+    })
+  );
+  return out;
+};
+
+const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+
+// The grammars have no exponent form and no formatter for one, so a span is
+// kept inside the range plain decimal covers. Anything outside it is a nonsense
+// pulse anyway, and refusing is what leaves the last good rhythm in place.
+const MIN_PULSE = 1e-6;
+const MAX_PULSE = 1e6;
+
+const rhythmNumber = (n: number) => String(Number(n.toPrecision(12)));
+
+export type CompiledGrid = {
+  /** How many times the pattern runs before the pulse comes back round. */
+  passes: number;
+  /** Columns as drawn -- one pass's worth. */
+  columns: number;
+  /** Columns emitted: `columns * passes`. */
+  emitted: number;
+  /** The span of every emitted column, in beats. */
+  spans: number[];
+  beats: number;
+  rhythm: Rhythm;
+};
+
+/**
+ * Every column becomes a note, and the whole phasing period is written out.
+ *
+ * There is no way to say "the pulse keeps running" in a rhythm that repeats on
+ * one pass, and nothing in the audio thread is going to learn about grids -- so
+ * the emitted rhythm covers `columns * passes` columns and the checkboxes tile
+ * across it.
+ *
+ * Throws rather than returning something partial, the same contract
+ * `parseNumberList` has: a grid that cannot be compiled leaves the voices it
+ * owns exactly as they were, which is the last good rhythm.
+ */
+export const compileGrid = (grid: DrumGrid): CompiledGrid => {
+  const columns = Math.round(grid.columns);
+  if (!(columns >= 1)) throw new Error("a grid needs at least one column");
+  const pulse = exprList(grid.pulse);
+  if (!pulse.length) throw new Error("the pulse is empty");
+  for (const n of pulse)
+    if (!Number.isFinite(n) || n < MIN_PULSE || n > MAX_PULSE)
+      throw new Error("every pulse length has to be a positive number of beats");
+  // Restart only changes the pass count: column `i` takes `pulse[i % length]`
+  // either way, and with one pass that is the pulse resetting at the boundary.
+  const passes = gridRestart(grid) ? 1 : pulse.length / gcd(columns, pulse.length);
+  const emitted = columns * passes;
+  if (emitted > MAX_LIST_LENGTH)
+    throw new Error(
+      `${columns} columns against a ${pulse.length}-long pulse is ${emitted} columns, past the limit of ${MAX_LIST_LENGTH}`
+    );
+  const spans = Array.from({ length: emitted }, (_, i) => pulse[i % pulse.length]);
+  // A run of identical spans is written as a repeated group rather than as
+  // `0.25,0.25,...` a hundred times over, because this text is what the
+  // read-only rhythm field shows. Both forms parse to the same notes.
+  const allSame = spans.every((s) => s === spans[0]);
+  const inputText =
+    allSame && spans.length > 1
+      ? `[${rhythmNumber(spans[0])}]x${spans.length}`
+      : spans.map(rhythmNumber).join(",");
+  const rhythm: Rhythm = {
+    inputText,
+    val: parser2.parse(inputText),
+    type: "parser2",
+  };
+  return {
+    passes,
+    columns,
+    emitted,
+    spans,
+    beats: spans.reduce((a, b) => a + b, 0),
+    rhythm,
+  };
+};
+
+// The lists are one *pass* long, not one period: a hit index is reduced modulo
+// the list's length, and the column count divides the emitted note count by
+// construction, so a list of `columns` entries lands on exactly the column it
+// was drawn in. That is the property the compilation was chosen for -- the hit
+// count *is* the column count -- and writing the period out would only repeat
+// itself.
+const gridVoice = (
+  voice: DrumVoice,
+  compiled: CompiledGrid,
+  row: DrumGridRow,
+  owner: GridOwner
+): DrumVoice => {
+  const cells = row.cells;
+  // A missing cell reads as unchecked. Only a hand-edited config can have one
+  // -- the panel keeps the list the length of the column count -- and no hit is
+  // the safer reading of "no state saved for this column".
+  const chances = Array.from({ length: compiled.columns }, (_, i) =>
+    Math.min(1, Math.max(0, cells[i]?.chance ?? 0))
+  );
+  const gains = owner.gains
+    ? Array.from({ length: compiled.columns }, (_, i) => cells[i]?.gain ?? 1)
+    : null;
+  const chancesText = formatNumberList(chances);
+  const gainsText = gains ? formatNumberList(gains) : "";
+  // Compared by text because every part of this is derived from it: the same
+  // text parses to the same notes, so an unchanged text is an unchanged voice.
+  // Identity is what the caller's fixed point is built on.
+  if (
+    voice.rhythm.type === "parser2" &&
+    voice.rhythm.inputText === compiled.rhythm.inputText &&
+    voice.chances !== undefined &&
+    drumChancesText(voice) === chancesText &&
+    (!gains || drumGainsText(voice) === gainsText)
+  )
+    return voice;
+  return {
+    ...voice,
+    rhythm: compiled.rhythm,
+    chances: { inputText: chancesText, val: chances },
+    ...(gains ? { gains: { inputText: gainsText, val: gains } } : {}),
+  };
+};
+
+/**
+ * Rewrites every gridded voice's rhythm and chances from its grid.
+ *
+ * Returns the *same array* when nothing changed, which is what lets the caller
+ * push its own output back without looping: the compile is a pure function of
+ * the grids and the voices, so re-applying it is a fixed point.
+ */
+export const applyDrumGrids = (
+  drums: DrumVoice[],
+  grids: DrumGrid[]
+): DrumVoice[] => {
+  if (!grids.length) return drums;
+  const owners = gridOwners(grids);
+  const compiled = new Map<number, CompiledGrid>();
+  let out: DrumVoice[] | null = null;
+  // `forEach` rather than `for...of` over the map: the build targets es5, where
+  // iterating one needs downlevelIteration.
+  owners.forEach((owner, voice) => {
+    const current = drums[voice];
+    if (!current) return;
+    if (!compiled.has(owner.grid)) {
+      try {
+        compiled.set(owner.grid, compileGrid(grids[owner.grid]));
+      } catch (e) {
+        // A grid that cannot be compiled leaves its voices exactly as they
+        // were, which is the last good rhythm -- the same answer a syntax
+        // error in a field gives.
+        return;
+      }
+    }
+    const plan = compiled.get(owner.grid);
+    if (!plan) return;
+    const next = gridVoice(
+      current,
+      plan,
+      grids[owner.grid].rows[owner.row],
+      owner
+    );
+    if (next === current) return;
+    out = out ?? drums.slice();
+    out[voice] = next;
+  });
+  return out ?? drums;
+};
+
+// Deleting a voice shifts every index after it, and a grid row naming a voice
+// by index is exactly the `sections[].drums` problem. Rows pointing at the
+// deleted voice go; rows after it come down one.
+export const removeGridVoice = (grids: DrumGrid[], voice: number): DrumGrid[] =>
+  grids.map((grid) => ({
+    ...grid,
+    rows: grid.rows
+      .filter((r) => r.voice !== voice)
+      .map((r) => (r.voice > voice ? { ...r, voice: r.voice - 1 } : r)),
+  }));
+
+
 
 export const sectionBeats = (section: Section) =>
   exprNumber(section.beats);
@@ -701,6 +965,10 @@ export const defaultJsConfig = {
   // Global rather than per-view: one set of names every pane's expressions can
   // reach, so `n` means the same thing wherever it's written.
   parameters: [] as Parameter[],
+  // Drum grids: the editing surface for a drum part. Here rather than in the
+  // rust config because nothing in a grid reaches the audio thread -- what it
+  // compiles to is `drums`, an ordinary rhythm and an ordinary chances list.
+  drumGrids: [] as DrumGrid[],
   views: [defaultViewConfig()] as ViewConfig[],
   // The pane arrangement. `views.length` is held equal to viewCols * viewRows,
   // so changing either resizes the list rather than letting the two disagree.
@@ -1117,6 +1385,36 @@ export const resolveJsConfig = (js: JsConfig): JsConfig => {
   return {
     ...js,
     parameters,
+    // In the walk, which is the prerequisite for the pulse taking an expression
+    // at all: the compile reads `val` and nothing re-parses the text on its
+    // own, so without this a parameter change would leave every gridded voice
+    // sounding the old division.
+    drumGrids: js.drumGrids.map((g) => ({
+      ...g,
+      pulse: resolveList(asListExpr(g.pulse), values),
+    })),
     views: js.views.map((v) => resolveView(v, values)),
+  };
+};
+
+/**
+ * The two halves, resolved together.
+ *
+ * A grid lives in the js config and what it compiles to lands in the rust one,
+ * so re-resolving either alone leaves a rhythm nobody on this side re-reads
+ * stale -- the trap the expression fields' `val` rules exist for. Every path
+ * that resolves config goes through here: startup, `setParameters`,
+ * `loadPreset`, the restored session.
+ */
+export const resolveConfigs = (
+  rust: RustConfig,
+  js: JsConfig
+): { rust: RustConfig; js: JsConfig } => {
+  const nextJs = resolveJsConfig(js);
+  const params = parameterValues(nextJs.parameters);
+  const nextRust = resolveRustConfig(rust, params);
+  return {
+    js: nextJs,
+    rust: { ...nextRust, drums: applyDrumGrids(nextRust.drums, nextJs.drumGrids) },
   };
 };

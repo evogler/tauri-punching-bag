@@ -2246,6 +2246,53 @@ preset's drums work on someone else's machine, where a file path would not.
   kit the *Interchangeable drum kits* entry below said was missing; roles
   (`sound?` beside `path`) are still not built.
 
+### The drum grid
+
+`drumGrids` in `defaultJsConfig`, compiled into the Rust config's `drums`.
+**`docs/drum-grid.md` is the long version.** An editing surface, never a second
+format: what it produces is an ordinary rhythm, gains and chances list, exactly
+as if they had been typed.
+
+- **Every column becomes a note, and an unchecked column is a chance of 0.**
+  parser2 has notes and spans and no rests, so a pattern with gaps would
+  otherwise be written as the gaps *between* hits -- and the first hit would
+  then land at time 0 whether or not it was in column 0, needing a rotation or
+  a shift from somewhere. It also puts `gains` and `chances` permanently in
+  phase, because the hit count now *is* the column count; and a chance of 0
+  costs nothing on the audio thread, where a gain of 0 pushes a silent sample
+  per column per voice and mixes it for its whole length. So `GridCell` is
+  `{chance, gain?}` and the hits view is the chance view rounded to {0, 1}:
+  one state, not two that have to be kept agreeing.
+- **The lists are one *pass* long, not one period.** A hit index is reduced
+  modulo the list's length and the column count divides the emitted note count
+  by construction, so `columns` entries land on exactly the column they were
+  drawn in. Writing the period out would only repeat itself.
+- **`gains` is written only once some cell carries one.** Left alone, a
+  hand-typed `1, 0.6x3` survives -- and that list deliberately drifts against a
+  bar it doesn't divide, which a grid-owned list can never do.
+- **The emitted rhythm covers the whole phasing period.** With `restart` off
+  the pulse keeps running across the grid boundary, and there is no way to say
+  that in a rhythm that repeats on one pass, so
+  `pulse.length / gcd(columns, pulse.length)` passes are written out and the
+  checkboxes tile across them. `MAX_LIST_LENGTH` bounds `columns * passes`, and
+  going over is **refused**, not truncated -- the last good rhythm stays, like
+  any other syntax error.
+- **`applyDrumGrids` hands back the same array when nothing changed**, and that
+  identity is load-bearing. A grid lives in the js config and sounds out of the
+  rust one, so the compile runs from a guarded effect as well as from
+  `resolveConfigs`; a pure function whose output is its own fixed point cannot
+  loop. Same shape and the same argument as the `visibleChannels` union.
+- **`resolveConfigs` is now the only way to resolve config.** Both halves
+  together, because resolving either alone leaves a rhythm stale in the one
+  config nothing on this side re-reads. Startup, `setParameters` and
+  `loadPreset` all go through it.
+- **A row names its voice by index**, like `sections[].drums`, so deleting a
+  voice has to fix the indices up -- `removeDrumVoice` does both edits as one
+  operation. **`sections[].drums` has exactly the same bug and still does
+  not**: nothing re-indexes a section's drum list when a voice is deleted, so
+  deleting voice 0 silently shifts what every section mutes. A stable voice id
+  would fix both, and is a wider change than either feature.
+
 ### The file player
 
 One file, played along with, looping. `playFile` switches it, `fileVolume` is

@@ -137,6 +137,39 @@ export const HELP: Record<string, HelpEntry> = {
     body: "Adds a drum part: a sound from the built-in kit, or any audio file. Kit sounds travel with a preset to someone else's machine; a file only does if they have the same file in the same place.",
   },
 
+  drumGrids: {
+    title: "Grids",
+    body: "Drum parts written as a grid of columns instead of as a rhythm. A grid drives the parts it lists; their rhythm and chance fields above then show what it produced and cannot be typed in.",
+  },
+  "drumGrids.add": {
+    title: "New grid",
+    body: "Adds a drum grid: a pulse, a number of columns, and a row for each part that plays on it. Every column becomes a note, and a column you untick is a note with no chance of sounding -- so a grid only ever writes an ordinary rhythm.",
+  },
+  "drumGrids.columns": {
+    title: "Columns",
+    body: "How long the pattern is, counted in columns rather than in beats -- the beats follow from the pulse. Up to 128, counting the passes a carried-over pulse needs.",
+  },
+  "drumGrids.pulse": {
+    title: "Pulse",
+    body: "How long each column is, in beats. One number spaces them evenly; a list cycles -- `.3,.2` swings, `.3,.3,.2,.2` is a Dilla feel. Same notation as a pane's rows, so `bar/n` follows a parameter and `[.6,.4]x2` is a group.",
+  },
+  "drumGrids.restart": {
+    title: "Restart",
+    body: "Starts the pulse again at the end of the pattern, so every pass is identical. Off, the pulse keeps running across the boundary and the pattern phases against it -- five columns against `.3,.2` then takes two passes to come back round, and the app writes all of them out.",
+  },
+  "drumGrids.row": {
+    title: "Part",
+    body: "One drum part this grid drives. It keeps its own sample, volume, offset and shift; the grid writes only its rhythm and its chances. The same sound in two grids is two parts, which is honest -- they are two things to play.",
+  },
+  "drumGrids.addRow": {
+    title: "Add part…",
+    body: "Puts a part on this grid: a sound from the built-in kit, a file, or a part that already exists. A part only ever belongs to one grid.",
+  },
+  "drumGrids.cycle": {
+    title: "What it comes to",
+    body: "The columns the grid actually plays and how long that is in beats. With the pulse carried over this is more columns than you drew, since the pattern has to be written out until it comes back round.",
+  },
+
   sectionsOn: {
     title: "Run the cycle",
     body: "Plays the sections below in order, then starts over: every random parameter rerolled, the beat back to 1, the looper cleared. Off, everything sounds continuously.",
