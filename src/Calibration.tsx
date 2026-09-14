@@ -140,7 +140,7 @@ export const Calibration = ({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
       <div style={rowStyle}>
-        <label>calibrate</label>
+        <label>Channel</label>
         <select
           value={channel}
           disabled={running}
@@ -155,12 +155,12 @@ export const Calibration = ({
         {running ? (
           <>
             <span style={noteStyle}>
-              measuring… {Math.round((result?.progress ?? 0) * 100)}%
+              Measuring… {Math.round((result?.progress ?? 0) * 100)}%
             </span>
-            <button onClick={cancel}>stop</button>
+            <button onClick={cancel}>Stop</button>
           </>
         ) : (
-          <button onClick={start}>measure latency</button>
+          <button onClick={start}>Measure latency</button>
         )}
       </div>
 
@@ -184,21 +184,21 @@ export const Calibration = ({
           {/* Shown for a failure as well as a success: the numbers are how you
               work out what to change. */}
           <Meter
-            label="input level"
+            label="Input level"
             value={result.inputPeakDb}
             threshold={result.minInputPeakDb}
             suffix=" dB"
             fraction={(result.inputPeakDb + 90) / 90}
           />
           <Meter
-            label="match"
+            label="Match"
             value={result.peakRatio}
             threshold={result.minPeakRatio}
             suffix="x"
             fraction={result.peakRatio / (result.minPeakRatio * 3)}
           />
           <Meter
-            label="agreement"
+            label="Agreement"
             value={result.spreadMs}
             threshold={result.maxSpreadMs}
             suffix=" ms"
@@ -206,16 +206,16 @@ export const Calibration = ({
             fraction={1 - result.spreadMs / (result.maxSpreadMs * 3)}
           />
           <div style={noteStyle}>
-            probes found: {result.probesDetected} / {result.probesTotal}
+            Probes found: {result.probesDetected} / {result.probesTotal}
           </div>
 
           {result.phase === "done" && (
             <div style={rowStyle}>
               <button onClick={() => onApply(Math.round(result.frames))}>
-                apply {Math.round(result.frames)} frames ({result.ms.toFixed(1)}{" "}
+                Apply {Math.round(result.frames)} frames ({result.ms.toFixed(1)}{" "}
                 ms)
               </button>
-              <button onClick={() => setResult(null)}>discard</button>
+              <button onClick={() => setResult(null)}>Discard</button>
             </div>
           )}
         </div>

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Config, ConfigKey, NumberExpr, NumberListExpr } from "./config";
+import { useHelp } from "./help";
 import {
   Params,
   evaluate,
@@ -57,9 +58,8 @@ interface InputProps<T extends ConfigKey> {
   _key: T;
   get: (key: ConfigKey) => Config[T];
   set: (key: ConfigKey, val: Config[T]) => void;
-  // Hover text for the row. Only the checkbox reads it -- the typed fields
-  // carry a hint about their own syntax instead.
-  title?: string;
+  // Which help entry pointing at the row shows. Defaults to the key.
+  help?: string;
 }
 
 interface II<T> {
@@ -67,7 +67,6 @@ interface II<T> {
   _key: ConfigKey;
   get: (key: ConfigKey) => T;
   set: (key: ConfigKey, val: T) => void;
-  title?: string;
   validate?: (val: T) => boolean;
 }
 
@@ -76,9 +75,6 @@ const rowStyle: React.CSSProperties = {
   flexDirection: "row",
   gap: "4px",
 };
-
-const LIST_HINT =
-  'comma separated; "1x2, 2, 3x2" means 1 1 2 3 3. Parameters and arithmetic allowed: "bar/n x n"';
 
 const NumberArrayInput = ({ label, _key, get, set }: II<number[]>) => {
   const [props, setFocusedVal] = useFocusedValue(get(_key), {
@@ -97,7 +93,6 @@ const NumberArrayInput = ({ label, _key, get, set }: II<number[]>) => {
             set(_key, parseNumberList(v));
           } catch (e) {}
         }}
-        title={'comma separated; "1x2, 2, 3x2" means 1 1 2 3 3'}
         style={{ width: "8em", ...invalidBorder(invalid) }}
       ></input>
     </div>
@@ -134,7 +129,6 @@ const ExprListInput = ({
             set(_key, { inputText: v, val: parseNumberList(v, params) });
           } catch (e) {}
         }}
-        title={LIST_HINT}
         style={{ width: "8em", ...invalidBorder(invalid) }}
       ></input>
     </div>
@@ -178,7 +172,6 @@ const ExprNumberInput = ({
             set(_key, { inputText: v, val: parse(v) });
           } catch (e) {}
         }}
-        title={'a number, or arithmetic over the parameters: "bar/n"'}
         style={{ width: "6em", ...invalidBorder(invalid) }}
       />
     </div>
@@ -222,15 +215,14 @@ const ParserArrayInput = ({
             set(_key, { ...val, val: parse(v), inputText: v });
           } catch (e) {}
         }}
-        title={'a rhythm; parameters work bare: "div:1", "1/div"'}
         style={{ width: "8em", ...invalidBorder(invalid) }}
       ></input>
     </div>
   );
 };
 
-const BooleanInput = ({ label, _key, get, set, title }: II<boolean>) => (
-  <div style={rowStyle} title={title}>
+const BooleanInput = ({ label, _key, get, set }: II<boolean>) => (
+  <div style={rowStyle}>
     <label>{label}</label>
     <input
       onChange={(e) => set(_key, !get(_key))}
@@ -269,39 +261,50 @@ export const ColorInput = ({
   label,
   value,
   onChange,
-  title,
+  help,
 }: {
   label: string;
   value: string;
   onChange: (color: string) => void;
-  title: string;
-}) => (
-  <div style={{ ...rowStyle, alignItems: "center" }}>
-    <label>{label}</label>
-    <input
-      type="color"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      title={title}
-      style={{
-        width: "2em",
-        height: "1.6em",
-        padding: 0,
-        border: "none",
-        background: "none",
-      }}
-    />
-    <span style={{ color: "#aaa", fontSize: "0.8em" }}>{value}</span>
-  </div>
-);
+  help: string;
+}) => {
+  const showHelp = useHelp();
+  return (
+    <div style={{ ...rowStyle, alignItems: "center" }} {...showHelp(help)}>
+      <label>{label}</label>
+      <input
+        type="color"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          width: "2em",
+          height: "1.6em",
+          padding: 0,
+          border: "none",
+          background: "none",
+        }}
+      />
+      <span style={{ color: "#aaa", fontSize: "0.8em" }}>{value}</span>
+    </div>
+  );
+};
 
 // Expression-backed fields carry no `type`, which is what tells them apart from
 // a rhythm; whether the resolved value is an array picks the widget.
 const isExprField = (val: any) =>
   typeof val?.inputText === "string" && val.val !== undefined;
 
+// Every row names its help entry -- its key, unless told otherwise -- so a
+// field gains a description just by one existing in helpText.ts.
 // @ts-ignore
 export const Input = (props: InputProps) => {
+  const help = useHelp();
+  return (
+    <div {...help((props as any).help ?? props._key)}>{renderInput(props)}</div>
+  );
+};
+
+const renderInput = (props: any) => {
   const { _key, get } = props;
   const val = get(_key);
   const valueType = Array.isArray(val) ? "array" : typeof val;

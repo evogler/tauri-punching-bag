@@ -1,4 +1,5 @@
 import React from "react";
+import { useHelp } from "./help";
 
 /** Matches DEVICES_CHANGED_EVENT in src-tauri/src/io_channels.rs. */
 export const DEVICES_CHANGED_EVENT = "devices-changed";
@@ -109,13 +110,15 @@ export const DevicePicker = ({
     ((prefs.inputUid !== "" && prefs.inputUid !== active.inputUid) ||
       (prefs.outputUid !== "" && prefs.outputUid !== active.outputUid));
 
+  const help = useHelp();
   const select = (
     label: string,
+    helpId: string,
     value: string,
     options: AudioDeviceInfo[],
     onPick: (uid: string) => void
   ) => (
-    <div style={rowStyle}>
+    <div style={rowStyle} {...help(helpId)}>
       <label>{label}</label>
       {/* mousedown fires before the popup opens, so a device plugged in while
           the app was frontmost is picked up on the click that goes looking for
@@ -125,7 +128,7 @@ export const DevicePicker = ({
         onMouseDown={onOpen}
         onChange={(e) => onPick(e.target.value)}
       >
-        <option value="">system default</option>
+        <option value="">System default</option>
         {options.map((d) => (
           <option key={d.uid} value={d.uid}>
             {d.name}
@@ -138,16 +141,16 @@ export const DevicePicker = ({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-      {select("input", prefs.inputUid, inputs, (uid) =>
+      {select("Input", "device.input", prefs.inputUid, inputs, (uid) =>
         setPrefs({ ...prefs, inputUid: uid })
       )}
-      {select("output", prefs.outputUid, devices, (uid) =>
+      {select("Output", "device.output", prefs.outputUid, devices, (uid) =>
         setPrefs({ ...prefs, outputUid: uid })
       )}
 
       {active && (
         <div style={noteStyle}>
-          running: in {active.inputName} · out {active.outputName}
+          Now using: {active.inputName} → {active.outputName}
         </div>
       )}
 
@@ -156,19 +159,19 @@ export const DevicePicker = ({
           app until you notice which device is lit. */}
       {active?.inputFellBack && (
         <div style={{ ...noteStyle, color: "#e08" }}>
-          saved input device not found — using the system default
+          Saved input device not found — using the system default
         </div>
       )}
       {active?.outputFellBack && (
         <div style={{ ...noteStyle, color: "#e08" }}>
-          saved output device not found — using the system default
+          Saved output device not found — using the system default
         </div>
       )}
 
       {pending && (
         <div style={rowStyle}>
-          <button onClick={onRestart}>restart to apply</button>
-          <span style={noteStyle}>device changes need a relaunch</span>
+          <button onClick={onRestart}>Restart to apply</button>
+          <span style={noteStyle}>Device changes take effect after a restart</span>
         </div>
       )}
     </div>

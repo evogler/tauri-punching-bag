@@ -24,7 +24,7 @@ export const RowColorList = ({
   setColors: (colors: string[]) => void;
 }) => (
   <div style={rowStyle}>
-    <label>row colors</label>
+    <label>Row colors</label>
     {colors.map((color, i) => (
       <span key={i} style={{ ...rowStyle, gap: "1px" }}>
         <span style={{ color: "#aaa", fontSize: "0.8em" }}>{i + 1}</span>
@@ -56,7 +56,7 @@ export const RowColorList = ({
       onClick={() => setColors([...colors, nextColor(colors)])}
       title="Add a row color"
     >
-      + COLOR
+      Add color
     </button>
     {!colors.length && (
       <span style={{ color: "#aaa", fontSize: "0.8em" }}>

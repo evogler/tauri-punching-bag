@@ -19,6 +19,7 @@ import {
   writePresetFileAt,
 } from "./presets";
 import { DialogRow, PresetDialog } from "./PresetDialog";
+import { useHelp } from "./help";
 
 const rowStyle: React.CSSProperties = {
   display: "flex",
@@ -116,6 +117,7 @@ export const PresetBar = ({
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [checked, setChecked] = useState<string[]>([]);
   const [appVersion, setAppVersion] = useState("");
+  const help = useHelp();
 
   // The store is a file now, so reading it is async -- unlike localStorage,
   // which could be a useState initialiser.
@@ -147,8 +149,8 @@ export const PresetBar = ({
   const nextDefaultName = () => {
     let i = 1;
     const taken = new Set(presets.map((p) => p.name));
-    while (taken.has(`config ${i}`)) i++;
-    return `config ${i}`;
+    while (taken.has(`preset ${i}`)) i++;
+    return `preset ${i}`;
   };
 
   const save = () => {
@@ -294,9 +296,10 @@ export const PresetBar = ({
             setName(presets.find((p) => p.id === e.target.value)?.name ?? "");
           }}
           style={{ flex: 1, minWidth: 0 }}
+          {...help("presets.list")}
         >
           <option value="">
-            {presets.length ? "-- pick a config --" : "-- no saved configs --"}
+            {presets.length ? "Choose a preset…" : "No saved presets"}
           </option>
           {sorted.map((p) => (
             <option key={p.id} value={p.id}>
@@ -307,7 +310,7 @@ export const PresetBar = ({
         <select
           value={sort}
           onChange={(e) => setSort(e.target.value as Sort)}
-          title="Order the list by name, when it was saved, or when it was last used"
+          {...help("presets.sort")}
         >
           {Object.entries(SORTS).map(([key, label]) => (
             <option key={key} value={key}>
@@ -318,16 +321,18 @@ export const PresetBar = ({
         <button
           onClick={() => selected && load(selected)}
           disabled={!selected}
-          title={selected ? `Load "${selected.name}"` : "Pick a config first"}
+          title={selected ? `Load "${selected.name}"` : "Choose a preset first"}
+          {...help("presets.load")}
         >
-          LOAD
+          Load
         </button>
         <button
           onClick={remove}
           disabled={!selected}
-          title={selected ? `Delete "${selected.name}"` : "Pick a config first"}
+          title={selected ? `Delete "${selected.name}"` : "Choose a preset first"}
+          {...help("presets.delete")}
         >
-          DELETE
+          Delete
         </button>
       </div>
       <div style={rowStyle}>
@@ -339,34 +344,35 @@ export const PresetBar = ({
           }}
           placeholder={nextDefaultName()}
           style={{ flex: 1, minWidth: 0 }}
+          {...help("presets.name")}
         />
-        <button onClick={save} title="Save the current settings">
-          SAVE
+        <button onClick={save} {...help("presets.save")}>
+          Save
         </button>
         <button
           onClick={() => onLoad(defaultPreset())}
-          title="Reset every setting to its default"
+          {...help("presets.defaults")}
         >
-          DEFAULTS
+          Reset to defaults
         </button>
       </div>
       <div style={rowStyle}>
-        <button onClick={beginImport} title="Add presets from a file">
-          import…
+        <button onClick={beginImport} {...help("presets.import")}>
+          Import…
         </button>
         <button
           onClick={() =>
             openDialog({ kind: "manage" }, selected ? [selected.id] : [])
           }
           disabled={!presets.length}
-          title="Export or delete several at once"
+          {...help("presets.manage")}
         >
-          manage…
+          Manage…
         </button>
       </div>
       {!presets.length && (
         <div style={{ color: "#aaa", fontSize: "0.8em" }}>
-          Name the current settings and hit SAVE.
+          Name your current settings and click Save.
         </div>
       )}
       {note && (

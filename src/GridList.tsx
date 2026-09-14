@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { GRID_COLORS, Rhythm, VisualGrid, gridAlpha, gridShift } from "./config";
+import { useHelp } from "./help";
 import { accepts, invalidBorder, useFocusedValue } from "./Input";
 import { Params, evaluate, resolveRhythmText } from "./expression";
 import parser1 from "./parser1";
@@ -71,6 +72,7 @@ const GridRow = ({
     { toString: (x) => x as string }
   );
   const shiftInvalid = !accepts(() => evaluate(shiftProps.value, params));
+  const help = useHelp();
 
   return (
     <div style={{ ...rowStyle, opacity: dragging ? 0.4 : 1 }}>
@@ -80,6 +82,7 @@ const GridRow = ({
         onPointerUp={onDragEnd}
         onPointerCancel={onDragEnd}
         title="Drag to reorder -- the top of the list draws on top"
+        {...help("grids.drag")}
         style={{
           cursor: "grab",
           color: "#aaa",
@@ -94,7 +97,7 @@ const GridRow = ({
         type="color"
         value={grid.color}
         onChange={(e) => onChange({ ...grid, color: e.target.value })}
-        title="Grid color"
+        {...help("grids.color")}
         style={{
           width: "2em",
           height: "1.6em",
@@ -119,7 +122,7 @@ const GridRow = ({
             });
           } catch (e) {}
         }}
-        title={`Grid ${index + 1} rhythm. Parameters work bare: "div:1", "1/div"`}
+        {...help("grids.rhythm")}
         style={{ flex: 1, minWidth: 0, ...invalidBorder(invalid) }}
       />
       <input
@@ -131,7 +134,7 @@ const GridRow = ({
             onChange({ ...grid, shift: { inputText: v, val: evaluate(v, params) } });
           } catch (e) {}
         }}
-        title={`Grid ${index + 1} offset in beats -- positive moves it later. Arithmetic and parameters work: "1/3", "bar/n"`}
+        {...help("grids.shift")}
         style={{ width: "4em", ...invalidBorder(shiftInvalid) }}
       />
       <input
@@ -144,6 +147,7 @@ const GridRow = ({
           onChange({ ...grid, alpha: parseFloat(e.target.value) })
         }
         title={`Opacity ${Math.round(alpha * 100)}%`}
+        {...help("grids.opacity")}
         style={{ width: "5em" }}
       />
       <button onClick={onRemove} title={`Remove grid ${index + 1}`}>
@@ -165,6 +169,7 @@ export const GridList = ({
   const rowsRef = useRef<HTMLDivElement>(null);
   // `to` is where the dragged grid lands in the reordered list.
   const [drag, setDrag] = useState<{ from: number; to: number } | null>(null);
+  const help = useHelp();
 
   // Rows hold still during a drag, so the landing spot is just a count of how
   // many of the *other* rows sit above the pointer.
@@ -242,9 +247,9 @@ export const GridList = ({
       <div style={rowStyle}>
         <button
           onClick={() => setGrids([...grids, makeGrid(grids)])}
-          title="Add another grid"
+          {...help("grids.add")}
         >
-          + ADD GRID
+          Add grid
         </button>
         {!grids.length && (
           <span style={{ color: "#aaa", fontSize: "0.8em" }}>

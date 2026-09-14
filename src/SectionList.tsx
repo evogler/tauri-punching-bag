@@ -9,6 +9,7 @@ import {
   sectionShown,
 } from "./config";
 import { Params, evaluate, parseNumberList } from "./expression";
+import { useHelp } from "./help";
 import { accepts, invalidBorder, useFocusedValue } from "./Input";
 
 const rowStyle: React.CSSProperties = {
@@ -54,6 +55,7 @@ const SectionRow = ({
     return n;
   };
   const invalid = !accepts(() => parse(beatsProps.value));
+  const help = useHelp();
   const toggleDrum = (i: number) =>
     onChange({
       ...section,
@@ -69,10 +71,11 @@ const SectionRow = ({
         checked={section.on}
         onChange={() => onChange({ ...section, on: !section.on })}
         title={section.on ? "Skip this section" : "Use this section"}
+        {...help("sections.on")}
       />
       <span
         style={{ width: "2em", color: "#aaa", fontSize: "0.8em" }}
-        title="Refer to this section by this number in the order field"
+        {...help("sections.number")}
       >
         {number}
       </span>
@@ -85,20 +88,23 @@ const SectionRow = ({
             onChange({ ...section, beats: { inputText: text, val: parse(text) } });
           } catch (e) {}
         }}
-        title={'How long, in beats. Arithmetic and parameters allowed: "bar*16"'}
+        {...help("sections.beats")}
         style={{ width: "5em", ...invalidBorder(invalid) }}
       />
-      <label style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+      <label
+        style={{ display: "flex", alignItems: "center", gap: "2px" }}
+        {...help("sections.click")}
+      >
         <input
           type="checkbox"
           checked={section.click}
           onChange={() => onChange({ ...section, click: !section.click })}
         />
-        <span style={{ fontSize: "0.85em" }}>click</span>
+        <span style={{ fontSize: "0.85em" }}>Click</span>
       </label>
       <label
         style={{ display: "flex", alignItems: "center", gap: "2px" }}
-        title="Draw this stretch. Off, the cursor holds still through it and the pane starts where the next drawn section does"
+        {...help("sections.show")}
       >
         <input
           type="checkbox"
@@ -107,9 +113,12 @@ const SectionRow = ({
             onChange({ ...section, show: !sectionShown(section) })
           }
         />
-        <span style={{ fontSize: "0.85em" }}>draw</span>
+        <span style={{ fontSize: "0.85em" }}>Show</span>
       </label>
-      <div style={{ display: "flex", gap: "2px", flex: 1, flexWrap: "wrap" }}>
+      <div
+        style={{ display: "flex", gap: "2px", flex: 1, flexWrap: "wrap" }}
+        {...help("sections.drums")}
+      >
         {drums.map((voice, i) => (
           <button
             key={i}
@@ -167,14 +176,15 @@ export const SectionList = ({
     !accepts(() => parseNumberList(orderProps.value, params));
   const steps = cycleSteps(sections, order);
   const cycle = cycleBeatsOf(sections, order);
+  const help = useHelp();
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
       {sections.length > 0 && (
         <div style={{ ...rowStyle, color: "#aaa", fontSize: "0.8em" }}>
           <span style={{ width: "1.2em" }} />
-          <span style={{ width: "2em" }}>#</span>
-          <span style={{ width: "5em" }}>beats</span>
-          <span style={{ flex: 1 }}>what sounds</span>
+          <span style={{ width: "2em" }} {...help("sections.number")}>#</span>
+          <span style={{ width: "5em" }} {...help("sections.beats")}>Beats</span>
+          <span style={{ flex: 1 }} {...help("sections.drums")}>What sounds</span>
         </div>
       )}
       {sections.map((section, i) => (
@@ -191,8 +201,8 @@ export const SectionList = ({
         />
       ))}
       {sections.length > 1 && (
-        <div style={{ ...rowStyle, marginTop: "2px" }}>
-          <label>order</label>
+        <div style={{ ...rowStyle, marginTop: "2px" }} {...help("sectionOrder")}>
+          <label>Order</label>
           <input
             {...orderProps}
             onChange={(e) => {
@@ -202,10 +212,6 @@ export const SectionList = ({
                 setOrder({ inputText: text, val: parseNumberList(text, params) });
               } catch (e) {}
             }}
-            title={
-              'Which sections play, and how often, by number. Groups repeat: ' +
-              '"1, [2,3]x8" is section 1 then eight passes of 2 and 3. Empty plays them in order'
-            }
             style={{ flex: 1, minWidth: 0, ...invalidBorder(orderInvalid) }}
           />
         </div>
@@ -213,9 +219,9 @@ export const SectionList = ({
       <div style={rowStyle}>
         <button
           onClick={() => setSections([...sections, makeSection(drums)])}
-          title="Add a stretch to the practice cycle"
+          {...help("sections.add")}
         >
-          + ADD SECTION
+          Add section
         </button>
         {sections.length ? (
           <span style={{ color: "#aaa", fontSize: "0.8em" }}>
@@ -226,7 +232,7 @@ export const SectionList = ({
         ) : (
           <span style={{ color: "#aaa", fontSize: "0.8em" }}>
             None -- everything sounds continuously. A count-off is a section with
-            only a count-off voice on and "draw" unticked; a pause is a section
+            only a count-off voice on and "Show" unticked; a pause is a section
             with nothing on.
           </span>
         )}

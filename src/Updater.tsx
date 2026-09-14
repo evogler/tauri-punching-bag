@@ -104,19 +104,19 @@ export const Updater = () => {
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ opacity: 0.8 }}>{version && `v${version}`}</span>
         <button onClick={check} disabled={busy}>
-          check for updates
+          Check for updates
         </button>
-        {state.kind === "checking" && <span>checking…</span>}
-        {state.kind === "current" && <span>up to date</span>}
-        {state.kind === "installing" && <span>installing…</span>}
-        {state.kind === "installed" && <span>installed — restarting…</span>}
+        {state.kind === "checking" && <span>Checking…</span>}
+        {state.kind === "current" && <span>Up to date</span>}
+        {state.kind === "installing" && <span>Installing…</span>}
+        {state.kind === "installed" && <span>Installed — restarting…</span>}
       </div>
 
       {state.kind === "available" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span>{state.version} available</span>
-            <button onClick={install}>install and restart</button>
+            <button onClick={install}>Install and restart</button>
           </div>
           {state.notes && (
             <div style={{ opacity: 0.8, fontSize: "0.85em" }}>
@@ -128,7 +128,7 @@ export const Updater = () => {
 
       {state.kind === "error" && (
         <div style={{ color: "#fbb", fontSize: "0.85em" }}>
-          update check failed: {state.message}
+          Update check failed: {state.message}
         </div>
       )}
     </div>

@@ -61,6 +61,7 @@ position, looper) derives from it.
 | File | Role |
 |---|---|
 | `App.tsx` | State, config plumbing, the whole canvas draw path. Large. |
+| `panel/` | The settings panel: `Panel.tsx` composes `PanelHeader` and one file per tab; `chrome.tsx` has `Section` / `Divider` / `TabBar` / `TabPanel`; `types.ts` is the one props bundle every tab gets from `App`. |
 | `config.ts` | `defaultRustConfig` / `defaultJsConfig` — the split below matters. |
 | `layout.ts` | `getCanvasPositions` — pure geometry, where a beat lands on screen. |
 | `Input.tsx` | Generic config inputs, dispatched on value type. |
@@ -134,10 +135,36 @@ Rules that will bite you:
 
 ## The panel, the shortcuts and the menu
 
-- **The panel is four tabs** -- sound, signal, visual, views -- with the
-  transport, `parameters` and the preset bar pinned above them. Parameters are
-  pinned rather than tabbed because you edit `n` while looking at a field that
-  reads `bar/n x n`.
+- **The panel is seven tabs, grouped by task** -- play, file, loop, display,
+  layout, setup, analysis -- with the transport, tempo, the looper switch, the
+  preset bar and `parameters` pinned above them; presets and parameters both
+  start collapsed. `docs/approachability.md` has the exact
+  arrangement and why each control sits where it does. Parameters are pinned
+  rather than tabbed because you edit `n` while looking at a field that reads
+  `bar/n x n`; they start **collapsed** (`Section`'s `startCollapsed`, which
+  hides rather than unmounts, like `TabPanel`).
+- **The help area** is the fixed strip under the panel that describes whatever
+  is pointed at. `src/help.tsx` is the mechanism (`useHelp`, `<Help id>`,
+  `HelpArea`), `src/helpText.ts` is every description in one place, keyed by
+  config key or a dotted id like `drums.accents`. `Input` looks up its own key,
+  so a field gains help just by an entry existing.
+  - **Attach with `onFocusCapture`, never `onFocus`.** `useFocusedValue`
+    already puts `onFocus` on the text fields to keep half-typed text; a second
+    one spread over it silently breaks editing. `useHelp()` returns the capture
+    form for exactly this reason.
+  - **Which entry is showing lives inside `HelpArea`**, reached through a
+    stable function `Panel` provides, so pointing at things never re-renders
+    the tabs.
+  - **Tooltips (`title=`) were replaced by help** wherever they explained
+    something. The ones left name a value or a glyph ("Volume 70%", "Remove
+    kick", the ✕ and ⠿ buttons) and the ? toggle, which has to explain itself
+    once the help area is hidden.
+  - Shown or hidden is `punching-bag.help-visible` in localStorage -- a
+    per-machine convenience, not config.
+- **Every tab gets the whole `PanelProps` bundle**, not per-tab props, so moving
+  a control between tabs never means rewiring what it can reach. `get` is
+  handed over with one cast in `App` -- the same function, but TS cannot prove
+  its inferred return equals `Config[K]`.
 - **Inactive tabs are hidden, not unmounted** (`TabPanel` sets
   `display: none`). `Input` holds the text you are typing in local state and an
   expression is invalid for most of the time it takes to type, so unmounting

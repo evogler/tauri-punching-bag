@@ -174,8 +174,10 @@ Anything marked **moved** comes from a different tab than today.
 | Parameters | section, collapsed by default, shows count | parameters | Parameters (3) | `parameters` |
 | | reroll all | 🎲 | Reroll all (⌘R) | — |
 
-The tab bar reads **Play · Loop · See · Setup · Analysis** (was sound · signal ·
-visual · views).
+The tab bar reads **Play · File · Loop · Display · Layout · Setup · Analysis**
+(was sound · signal · visual · views). Revised 2026-09-13 after seeing the
+first rearrangement: the file and the layout chrome got tabs of their own,
+"See" became "Display", and presets collapse like parameters.
 
 #### Play
 
@@ -193,6 +195,11 @@ visual · views).
 | | per-section toggles: click · draw | Click · Show | `sections[].click`, `.show` |
 | | order | Order | `sectionOrder` |
 | | add button | Add section | — |
+
+#### File
+
+| Section | Now | New label | Key |
+|---|---|---|---|
 | **Song file** (was file) | choose file… / none | Choose file… / No file | `filePath` |
 | | play file | Play | `playFile` |
 | | file volume | Volume | `fileVolume` |
@@ -225,7 +232,7 @@ visual · views).
 "Draw live input" goes next to "Hear live input" because together they answer
 one question: are you seeing and hearing yourself, or only the echoes?
 
-#### See
+#### Display
 
 | Section | Now | New label | Key |
 |---|---|---|---|
@@ -254,13 +261,22 @@ one question: are you seeing and hearing yourself, or only the echoes?
 | | *(new divider)* | Grids | — |
 | | grid list; offset tooltip | Grid list; "shift" in its help text | `grids` |
 | | add grid | Add grid | — |
-| **Look** (was visual › layout, **moved** below the panes) | background | Background | `waveformBackground` |
+
+
+#### Layout
+
+A tab of its own rather than a section under the panes: it is short, but it
+distracted from the busiest tab in the panel.
+
+| Section | Now | New label | Key |
+|---|---|---|---|
+| **Look** (was visual › layout) | background | Background | `waveformBackground` |
 | | grid width | Grid line width | `gridWidth` |
 | | divider: between panes | Between panes | — |
 | | pane gap / gap color | Gap / Gap color | `paneGap` / `paneGapColor` |
 
-Look goes last because it's the section people touch least, and the per-pane
-settings are what the tab is really for.
+Layout is last among the drawing tabs because it's touched least; the per-pane
+settings are what Display is really for.
 
 #### Setup
 
@@ -451,6 +467,15 @@ What remains:
 - **Pattern builder: yes**, writing the existing rhythm text (see Phase 3).
 - **Random tempo drill is an advanced example.**
 - **Phase 2 comes first**, before the setup and examples.
+- **Relabel before the help panel**, so descriptions are written once in the
+  final vocabulary. **The help area can be hidden** (? in the transport row,
+  remembered per machine), and **explanatory tooltips are replaced** by it.
+  Built 2026-09-14: the mechanism is `src/help.tsx` and the strings are
+  `src/helpText.ts` (not `src/help.ts` as first written, which would collide
+  with the component file).
+- Not built yet from this phase: showing an expression field's resolved value
+  in the help area, and the "measure speaker bleed first" hint on the Loop tab
+  (the bleed status lives inside `BleedMeter`; the help text says it instead).
 
 ## Open questions
 

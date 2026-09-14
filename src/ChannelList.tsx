@@ -1,4 +1,5 @@
 import { ChannelStyle, channelGain, channelPan, channelStyle } from "./config";
+import { useHelp } from "./help";
 
 const rowStyle: React.CSSProperties = {
   display: "flex",
@@ -63,14 +64,17 @@ const ChannelRow = ({
   onStyle: (next: ChannelStyle) => void;
   onPan: (next: number) => void;
   onGain: (next: number) => void;
-}) => (
+}) => {
+  const help = useHelp();
+  return (
   <div style={rowStyle}>
     <label style={{ width: "3.5em" }}>{label}</label>
     <input
       type="color"
       value={style.color}
       onChange={(e) => onStyle({ ...style, color: e.target.value })}
-      title={`Colour for ${label}`}
+      title={`Color for ${label}`}
+      {...help("channels.color")}
       style={{
         width: "2em",
         height: "1.6em",
@@ -87,6 +91,7 @@ const ChannelRow = ({
       value={style.alpha}
       onChange={(e) => onStyle({ ...style, alpha: parseFloat(e.target.value) })}
       title={`${label} opacity ${Math.round(style.alpha * 100)}%`}
+      {...help("channels.opacity")}
       style={{ flex: 1, minWidth: 0 }}
     />
     <input
@@ -97,7 +102,8 @@ const ChannelRow = ({
       value={gain}
       onChange={(e) => onGain(parseFloat(e.target.value))}
       onDoubleClick={() => onGain(1)}
-      title={`${label} display gain: x${gain} (double-click to reset)`}
+      title={`${label} display level: x${gain} (double-click to reset)`}
+      {...help("channels.level")}
       style={{ width: "5em" }}
     />
     {pan === undefined ? (
@@ -112,11 +118,13 @@ const ChannelRow = ({
         onChange={(e) => onPan(parseFloat(e.target.value))}
         onDoubleClick={() => onPan(0)}
         title={`${label} pan: ${panLabel(pan)} (double-click to centre)`}
+        {...help("channels.pan")}
         style={{ width: "5em" }}
       />
     )}
   </div>
-);
+  );
+};
 
 // A channel's identity rather than its visibility: the colour it draws in
 // everywhere and, for a real input, where it sits in the stereo field. Which
@@ -143,6 +151,7 @@ export const ChannelList = ({
   styles: ChannelStyle[];
   setStyles: (next: ChannelStyle[]) => void;
 }) => {
+  const help = useHelp();
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
       <div
@@ -155,10 +164,10 @@ export const ChannelList = ({
         }}
       >
         <span style={{ width: "3.5em" }} />
-        <span style={{ width: "2em" }}>col</span>
-        <span style={{ flex: 1, minWidth: 0 }}>opacity</span>
-        <span style={{ width: "5em" }}>gain</span>
-        <span style={{ width: "5em" }}>pan</span>
+        <span style={{ width: "2em" }} {...help("channels.color")}>color</span>
+        <span style={{ flex: 1, minWidth: 0 }} {...help("channels.opacity")}>opacity</span>
+        <span style={{ width: "5em" }} {...help("channels.level")}>level</span>
+        <span style={{ width: "5em" }} {...help("channels.pan")}>pan</span>
       </div>
       {labels.map((label, index) => (
         <ChannelRow

@@ -1,3 +1,5 @@
+import { useHelp } from "./help";
+
 // A labelled range input, with the current value beside it. Shared by the
 // per-view controls that are plain numbers rather than expressions -- a slider
 // has nowhere to type one, which is the whole reason those keys aren't
@@ -16,7 +18,7 @@ export const Slider = ({
   max,
   step,
   onChange,
-  title,
+  help,
 }: {
   label: string;
   value: number;
@@ -24,22 +26,24 @@ export const Slider = ({
   max: number;
   step: number;
   onChange: (n: number) => void;
-  title: string;
-}) => (
-  <div style={sliderRowStyle}>
-    <label style={{ width: "9em" }}>{label}</label>
-    <input
-      type="range"
-      min={min}
-      max={max}
-      step={step}
-      value={value}
-      onChange={(e) => onChange(parseFloat(e.target.value))}
-      title={title}
-      style={{ flex: 1, minWidth: 0 }}
-    />
-    <span style={{ color: "#aaa", fontSize: "0.8em", width: "3em" }}>
-      {value}
-    </span>
-  </div>
-);
+  help: string;
+}) => {
+  const showHelp = useHelp();
+  return (
+    <div style={sliderRowStyle} {...showHelp(help)}>
+      <label style={{ width: "9em" }}>{label}</label>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        style={{ flex: 1, minWidth: 0 }}
+      />
+      <span style={{ color: "#aaa", fontSize: "0.8em", width: "3em" }}>
+        {value}
+      </span>
+    </div>
+  );
+};

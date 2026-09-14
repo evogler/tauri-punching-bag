@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { NumberExpr, Rhythm, ViewConfig, VisualGrid } from "./config";
+import { useHelp } from "./help";
 import { accepts, invalidBorder } from "./Input";
 import {
   MAX_LIST_LENGTH,
@@ -226,25 +227,27 @@ const Field = ({
   label,
   value,
   invalid,
-  title,
+  help,
   onChange,
 }: {
   label: string;
   value: string;
   invalid: boolean;
-  title: string;
+  help: string;
   onChange: (text: string) => void;
-}) => (
-  <div style={rowStyle}>
-    <label>{label}</label>
-    <input
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      title={title}
-      style={{ width: "8em", ...invalidBorder(invalid) }}
-    />
-  </div>
-);
+}) => {
+  const showHelp = useHelp();
+  return (
+    <div style={rowStyle} {...showHelp(help)}>
+      <label>{label}</label>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ width: "8em", ...invalidBorder(invalid) }}
+      />
+    </div>
+  );
+};
 
 export const RowPerNote = ({
   view,
@@ -257,6 +260,7 @@ export const RowPerNote = ({
 }) => {
   const [open, setOpen] = useState(false);
   const [shape, setShape] = useState(() => seed(view));
+  const help = useHelp();
 
   let patch: Partial<ViewConfig> | null = null;
   let error = "";
@@ -278,9 +282,9 @@ export const RowPerNote = ({
             setShape(seed(view));
             setOpen(true);
           }}
-          title="rows, grids and margins for watching one note per row"
+          {...help("rowPerNote")}
         >
-          one row per note…
+          One row per note…
         </button>
       </div>
     );
@@ -298,27 +302,24 @@ export const RowPerNote = ({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
       <Field
-        label="division"
+        label="Division"
         value={shape.divisionText}
         invalid={divisionBad}
-        title={
-          'how long one note is, in beats: "1/4" for 16ths, "bar/n", or a ' +
-          'swing pair like ".6,.4"'
-        }
+        help="rowPerNote.division"
         onChange={field("divisionText")}
       />
       <Field
-        label="how many"
+        label="How many"
         value={shape.countText}
         invalid={countBad}
-        title="how many of them to show, one per row"
+        help="rowPerNote.count"
         onChange={field("countText")}
       />
       <Field
-        label="lead-in"
+        label="Lead-in"
         value={shape.leadText}
         invalid={leadBad}
-        title="how far into the row the target sits, as a fraction of a pulse"
+        help="rowPerNote.lead"
         onChange={field("leadText")}
       />
       <div style={rowStyle}>
@@ -328,11 +329,11 @@ export const RowPerNote = ({
             if (patch) apply(patch);
             setOpen(false);
           }}
-          title="replaces this pane's rows, margins and grids"
+          {...help("rowPerNote")}
         >
-          apply
+          Apply
         </button>
-        <button onClick={() => setOpen(false)}>cancel</button>
+        <button onClick={() => setOpen(false)}>Cancel</button>
         <span style={{ color: error ? "#fbb" : "#aaa", fontSize: "0.8em" }}>
           {error || `${rows.length} rows, ${num(beats)} beats`}
         </span>

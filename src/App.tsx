@@ -6,9 +6,6 @@ import {
   useRef,
 } from "react";
 import { invoke } from "@tauri-apps/api";
-import { BleedMeter } from "./BleedMeter";
-import { LoopGuardMeter } from "./LoopGuardMeter";
-import { Updater } from "./Updater";
 import {
   defaultRustConfig,
   RustConfig,
@@ -37,23 +34,15 @@ import {
   resolveJsConfig,
   resolveRustConfig,
   viewRowBeats,
-  analysisNyquist,
   numExpr,
   setSampleRateHz,
   ANALYSIS_BINS,
-  ANALYSIS_WINDOWS,
-  MAX_ANALYSIS_CHANNELS,
-  VIEW_KINDS,
-  ViewKind,
 } from "./config";
-import { Calibration } from "./Calibration";
-import { ColorInput, Input } from "./Input";
 import {
   ActiveDevices,
   AudioDeviceInfo,
   AudioPrefs,
   DEVICES_CHANGED_EVENT,
-  DevicePicker,
   emptyPrefs,
   pairCompensation,
   withPairCompensation,
@@ -61,7 +50,6 @@ import {
 import { appWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { SlidingDivision } from "./SlidingDivision";
-import { PresetBar } from "./PresetBar";
 import {
   KEPT_RUST_KEYS,
   Preset,
@@ -69,75 +57,13 @@ import {
   readSession,
   writeSession,
 } from "./presets";
-import { GridList } from "./GridList";
-import { SectionList } from "./SectionList";
-import { RowColorList } from "./RowColorList";
-import { RowPerNote } from "./RowPerNote";
-import { SpectrogramControls } from "./SpectrogramControls";
-import { Slider } from "./Slider";
-import { ParameterList } from "./ParameterList";
 import { Layout, getCanvasPositions } from "./layout";
-import { ChannelList } from "./ChannelList";
-import { ChannelPicker } from "./ChannelPicker";
-import { DrumList, SampleStatus, makeDrumVoice } from "./DrumList";
+import { SampleStatus, makeDrumVoice } from "./DrumList";
 import { open as openFileDialog } from "@tauri-apps/api/dialog";
-
-// True only in a plain browser (`yarn start`), where there's no Rust backend to
-// call, so samples are faked. Inside the Tauri app -- dev or release -- the IPC
-// global is injected and we always use real samples.
-const BROWSER_DEBUG_MODE = !("__TAURI_IPC__" in window);
-
-// What `set_mp3_buffer` reports back about the file it just decoded. The
-// buffer Rust keeps has already been converted to the device rate and to
-// stereo, so `frames` and `seconds` are in the units the callback plays at;
-// `sourceRate` and `sourceChannels` are what the file itself was.
-type FileInfo = {
-  frames: number;
-  seconds: number;
-  sourceRate: number;
-  sourceChannels: number;
-  deviceRate: number;
-};
-
-// Rate and channel count are only mentioned when the loader actually had to do
-// something about them, so the usual case stays short. The beat figure is the
-// point of the line: it's what tells you to type 8 into `file beats`.
-const fileDescription = (info: FileInfo, bpm: number) => {
-  const parts = [`${info.seconds.toFixed(3)} s`];
-  if (info.sourceChannels !== 2) parts.push(`${info.sourceChannels} ch → 2`);
-  if (Math.abs(info.sourceRate - info.deviceRate) > 0.5)
-    parts.push(`${info.sourceRate} → ${info.deviceRate} Hz`);
-  if (bpm > 0)
-    parts.push(`${((info.seconds * bpm) / 60).toFixed(2)} beats at ${bpm} bpm`);
-  return parts.join(" · ");
-};
-
-// Says what the segment will actually do, including the two ways it quietly
-// won't: a length in beats is what makes a position in beats mean anything, and
-// a backwards segment falls back to the whole file rather than being refused
-// while you're still typing the other end.
-const repeatDescription = (a: number, b: number, fileBeats: number) => {
-  if (!(fileBeats > 0)) return "⚠ needs `file beats` — playing the whole file";
-  if (!(b > a)) return "⚠ b must be past a — playing the whole file";
-  const wraps = a < 0 || b > fileBeats;
-  return `${b - a} beats of the file, repeating every ${b - a}${
-    wraps ? ", wrapping past its end" : ""
-  }`;
-};
-
-// The ratio is a plain consequence of two numbers you have already given, so
-// it's derived here rather than reported back from Rust. Above 1 is slower.
-const stretchRatio = (info: FileInfo | null, fileBeats: number, bpm: number) => {
-  if (!info || !(info.seconds > 0) || !(fileBeats > 0) || !(bpm > 0)) return null;
-  const naturalBpm = (fileBeats * 60) / info.seconds;
-  return { ratio: naturalBpm / bpm, naturalBpm };
-};
-
-// WSOLA is honest up to about a third either way; past that a drum loop starts
-// to flam and sustained material warbles. Better to say so than to let it be
-// discovered as "the file sounds wrong".
-const STRETCH_CLEAN_LOW = 0.75;
-const STRETCH_CLEAN_HIGH = 1.33;
+import { BROWSER_DEBUG_MODE } from "./env";
+import { Panel } from "./panel/Panel";
+import { PanelTab } from "./panel/chrome";
+import { FileInfo, PanelProps } from "./panel/types";
 
 // A pane's backing store, in device pixels, and the ratio it was measured at --
 // the one number that converts a width in CSS pixels into surface pixels.
@@ -147,16 +73,6 @@ type PaneSize = { width: number; height: number; scale: number };
 // effect measures the real box before the first paint. Not a layout constant --
 // nothing is laid out to these numbers.
 const UNMEASURED_PANE: PaneSize = { width: 300, height: 150, scale: 1 };
-
-// The pane arrangements the panel offers, as [across, down].
-const ARRANGEMENTS: [number, number][] = [
-  [1, 1],
-  [2, 1],
-  [1, 2],
-  [3, 1],
-  [2, 2],
-  [4, 1],
-];
 
 // Per-pane mutable draw state. Every pane needs its own: the sweep flush
 // boundary falls where a pixel column ends, and panes disagree about that
@@ -253,112 +169,13 @@ const camelCaseToSnakeCase = (str: string) =>
 
 const snakeCaseKeys = <T,>(obj: Record<string, T>) =>
   mapFuncOnObjectKeys(obj, camelCaseToSnakeCase);
-const Section = ({
-  children,
-  label = undefined,
-}: {
-  children: React.ReactNode;
-  label?: string;
-}) => (
-  <div
-    style={{
-      border: "1px solid #777",
-      margin: "4px",
-      padding: "4px",
-      borderRadius: "8px",
-      backgroundColor: "#444",
-    }}
-  >
-    {label && <h4 style={{ color: "#ccc", margin: "1px " }}>{label}</h4>}
-    {children}
-  </div>
-);
-
-// The panel groups by what a setting acts on: the sound being made, the signal
-// coming back in, how it is drawn, and the panes drawing it. Transport, the
-// parameters every expression reads and the preset bar stay above the tabs --
-// parameters especially, since you edit `n` while looking at a field that
-// reads `bar/n x n`.
-const PANEL_TABS = ["sound", "signal", "visual", "views"] as const;
-type PanelTab = (typeof PANEL_TABS)[number];
-
-const TabBar = ({
-  active,
-  onSelect,
-}: {
-  active: PanelTab;
-  onSelect: (tab: PanelTab) => void;
-}) => (
-  <div style={{ display: "flex", flexDirection: "row", gap: "2px", margin: "4px 4px 0" }}>
-    {PANEL_TABS.map((tab) => (
-      <button
-        key={tab}
-        onClick={() => onSelect(tab)}
-        style={{
-          flex: 1,
-          padding: "4px",
-          border: "1px solid #777",
-          borderRadius: "8px 8px 0 0",
-          backgroundColor: tab === active ? "#444" : "#333",
-          color: tab === active ? "#fff" : "#aaa",
-          fontWeight: tab === active ? "bold" : undefined,
-          cursor: "pointer",
-        }}
-      >
-        {tab}
-      </button>
-    ))}
-  </div>
-);
-
-// Hidden rather than unmounted: `Input` holds the text you are typing in local
-// state, and an expression is invalid for most of the time it takes to type,
-// so unmounting would throw a half-written field away on every tab switch.
-// Every section rendered on every render before this existed, so nothing here
-// costs more than it used to.
-const TabPanel = ({
-  active,
-  children,
-}: {
-  active: boolean;
-  children: React.ReactNode;
-}) => <div style={{ display: active ? "block" : "none" }}>{children}</div>;
-
-// A labelled hairline between groups of settings inside one Section. The views
-// pane holds four unrelated kinds of setting -- which pane, how it is ruled,
-// how it draws, what is drawn over it -- and reads as a wall of inputs without
-// something separating them.
-const Divider = ({ label }: { label?: string }) => (
-  <div
-    style={{
-      display: "flex",
-      alignItems: "center",
-      gap: "6px",
-      margin: "8px 0 4px",
-    }}
-  >
-    {label && (
-      <span
-        style={{
-          color: "#999",
-          fontSize: "10px",
-          textTransform: "uppercase",
-          letterSpacing: "0.5px",
-        }}
-      >
-        {label}
-      </span>
-    )}
-    <div style={{ flex: 1, height: "1px", backgroundColor: "#777" }} />
-  </div>
-);
 
 const App = () => {
   const [log, setLog] = useState("log");
   const [hideConfig, setHideConfig] = useState(false);
   // Plain state rather than a config key: which tab is open is transient UI,
   // and keeping it out of config keeps it out of presets and the session.
-  const [panelTab, setPanelTab] = useState<PanelTab>("sound");
+  const [panelTab, setPanelTab] = useState<PanelTab>("play");
   useEffect(() => {
     const setListener = async () => {
       const unlisten = await listen("log", (msg) => {
@@ -1950,731 +1767,48 @@ const App = () => {
   const setGet = { set, get };
 
   const config = hideConfig ? null : (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        padding: "1px",
-        gap: "2px",
-        width: "600px",
-        // Fixed width against the canvas next to it, and its own scrollbar --
-        // the sections outgrew the window a while ago.
-        flexShrink: 0,
-        height: "100%",
-        boxSizing: "border-box",
-        overflowY: "auto",
-        overflowX: "hidden",
-      }}
-    >
-      <>
-        <div style={{ display: "flex", flexDirection: "row", gap: "2px" }}>
-          <button
-            onClick={() => set("paused", !get("paused"))}
-            title="Freeze the beat, the click, the file and the display (⌘P)"
-            style={{
-              flex: 1,
-              fontWeight: "bold",
-              backgroundColor: get("paused") ? "#c44" : undefined,
-              color: get("paused") ? "#fff" : undefined,
-            }}
-          >
-            {get("paused") ? "▶ RESUME" : "⏸ PAUSE"}
-          </button>
-          <button onClick={resetBeat} style={{ flex: 1 }}>
-            RESET TIME
-          </button>
-        </div>
-        {/* <button onClick={pickNewMp3("/Users/eric/Music/Logic/Logic_3.wav")}>
-				NEW MP3 1
-			</button>
-			<button onClick={pickNewMp3("/Users/eric/Music/Logic/Logic_4.wav")}>
-				NEW MP3 2
-			</button> */}
-
-        {configError && (
-          <div
-            style={{
-              border: "1px solid #e86",
-              borderRadius: 8,
-              margin: 4,
-              padding: 8,
-              backgroundColor: "#4a2a2a",
-              color: "#fbb",
-            }}
-          >
-            <b>the audio thread refused this config.</b> what you see here is not
-            what is playing. usually a rhythm field: fix the red one and it will
-            reconnect.
-            <div style={{ opacity: 0.8, fontSize: "0.85em", marginTop: 4 }}>
-              {configError}
-            </div>
-          </div>
-        )}
-
-        <Section label="parameters">
-          <ParameterList
-            parameters={get("parameters")}
-            setParameters={setParameters}
-            reroll={reroll}
-          />
-        </Section>
-
-        <Section label="configs">
-          <PresetBar getCurrent={getCurrentPreset} onLoad={loadPreset} />
-        </Section>
-
-        <TabBar active={panelTab} onSelect={setPanelTab} />
-
-        <TabPanel active={panelTab === "sound"}>
-          <Section label="bpm">
-            <Input
-              label="bpm"
-              _key="bpm"
-              params={params}
-              set={set}
-              get={get}
-              validate={(n: number) => n > 0}
-            />
-          </Section>
-          <Section label="click">
-            <Input label="click" _key="clickOn" set={set} get={get} />
-            <Input
-              label="click rhythm"
-              _key="audioSubdivisions"
-              params={params}
-              set={set}
-              get={get}
-            />
-            <Input label="click volume" _key="clickVolume" params={params} set={set} get={get} />
-            {/* Beats, not milliseconds: the click is synthesised in the
-                callback, so there is no file attack to align the way a drum
-                voice's `offset` does. This is the musical half only. */}
-            <Input
-              label="click offset (beats)"
-              _key="clickShift"
-              params={params}
-              set={set}
-              get={get}
-              validate={(n: number) => Number.isFinite(n) && Math.abs(n) < 100000}
-            />
-          </Section>
-          <Section label="drums">
-            <Input label="drums on" _key="drumOn" set={set} get={get} />
-            <DrumList
-              params={params}
-              drums={get("drums")}
-              setDrums={(next) => set("drums", next)}
-              onAdd={addDrumSample}
-              status={sampleStatus}
-            />
-          </Section>
-          <Section label="practice cycle">
-            <Input
-              label="run the cycle"
-              _key="sectionsOn"
-              set={set}
-              get={get}
-              title="Play the sections in order, then start again -- rerolling, resetting the beat and clearing the looper"
-            />
-            <SectionList
-              sections={get("sections")}
-              setSections={(next) => set("sections", next)}
-              order={get("sectionOrder")}
-              setOrder={(next) => set("sectionOrder", next)}
-              drums={rustConfig.drums}
-              params={params}
-            />
-          </Section>
-          <Section label="file">
-            <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-              <button onClick={chooseFile}>choose file…</button>
-              <span
-                style={{
-                  opacity: 0.7,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  direction: "rtl",
-                }}
-              >
-                {get("filePath") || "none"}
-              </span>
-            </div>
-            {fileError && <div style={{ color: "#e86" }}>{fileError}</div>}
-            {fileInfo && (
-              <div style={{ opacity: 0.7, fontSize: "0.9em" }}>
-                {fileDescription(fileInfo, exprNumber(get("bpm")))}
-              </div>
-            )}
-            <Input label="play file" _key="playFile" set={set} get={get} />
-            <Input
-              label="file volume"
-              _key="fileVolume"
-              params={params}
-              set={set}
-              get={get}
-            />
-            <Divider label="against the grid" />
-            <Input
-              label="file beats"
-              _key="fileBeats"
-              params={params}
-              set={set}
-              get={get}
-            />
-            <button
-              onClick={setTempoFromFile}
-              disabled={!fileInfo || exprNumber(get("fileBeats")) <= 0}
-            >
-              set tempo from file
-            </button>
-            <Input
-              label="file offset (ms)"
-              _key="fileOffsetMs"
-              params={params}
-              set={set}
-              get={get}
-            />
-            <Input
-              label="file shift (beats)"
-              _key="fileShift"
-              params={params}
-              set={set}
-              get={get}
-            />
-            <Divider label="follow tempo" />
-            <Input
-              label="time stretch"
-              _key="fileStretch"
-              set={set}
-              get={get}
-              title="fit the file to `file beats` at the current tempo without changing its pitch"
-            />
-            {get("fileStretch") &&
-              (() => {
-                const st = stretchRatio(
-                  fileInfo,
-                  exprNumber(get("fileBeats")),
-                  exprNumber(get("bpm"))
-                );
-                if (!st)
-                  return (
-                    <div style={{ color: "#e86", fontSize: "0.9em" }}>
-                      ⚠ needs `file beats` — playing at its own speed
-                    </div>
-                  );
-                const rough =
-                  st.ratio < STRETCH_CLEAN_LOW || st.ratio > STRETCH_CLEAN_HIGH;
-                return (
-                  <div
-                    style={{
-                      fontSize: "0.9em",
-                      opacity: 0.8,
-                      color: rough ? "#e86" : undefined,
-                    }}
-                  >
-                    {st.ratio.toFixed(3)}× — {st.naturalBpm.toFixed(2)} bpm
-                    material at {exprNumber(get("bpm"))}
-                    {rough && " · past where this stays clean"}
-                    {stretching && " · rendering…"}
-                  </div>
-                );
-              })()}
-            <Divider label="a–b repeat" />
-            <Input label="repeat a–b" _key="fileRepeatOn" set={set} get={get} />
-            <Input
-              label="a (beats)"
-              _key="fileRepeatStart"
-              params={params}
-              set={set}
-              get={get}
-            />
-            <Input
-              label="b (beats)"
-              _key="fileRepeatEnd"
-              params={params}
-              set={set}
-              get={get}
-            />
-            {get("fileRepeatOn") && (
-              <div style={{ opacity: 0.8, fontSize: "0.9em" }}>
-                {repeatDescription(
-                  exprNumber(get("fileRepeatStart")),
-                  exprNumber(get("fileRepeatEnd")),
-                  exprNumber(get("fileBeats"))
-                )}
-              </div>
-            )}
-          </Section>
-        </TabPanel>
-
-        <TabPanel active={panelTab === "signal"}>
-          <Section label="gain">
-            <Input label="input gain" _key="audioInGain" params={params} set={set} get={get} />
-          </Section>
-          <Section label="high pass">
-            <Input
-              label="high pass"
-              _key="highPassOn"
-              set={set}
-              get={get}
-              title="Tilt the picture toward the high end, so note starts stand out of the fundamental"
-            />
-            <Input
-              label="cutoff (Hz)"
-              _key="highPassHz"
-              params={params}
-              set={set}
-              get={get}
-            />
-            <Input
-              label="filter the sound too"
-              _key="highPassAudio"
-              set={set}
-              get={get}
-              title="Also filter the monitor and what the looper records, so you can hear what the picture is showing"
-            />
-            <div style={{ color: "#aaa", fontSize: "0.8em" }}>
-              {!get("highPassOn")
-                ? "Off -- the picture is drawn from the input as it arrives."
-                : get("highPassAudio")
-                ? "12 dB/octave, on the picture and on the sound."
-                : "12 dB/octave, on the picture only. The looper still records dry."}
-            </div>
-          </Section>
-          <Section label="speaker bleed">
-            <Input
-              label="hide own output"
-              _key="bleedCancelOn"
-              set={set}
-              get={get}
-              title="Take the click and the drums back out of the picture when you are playing on speakers rather than headphones"
-            />
-            <Input
-              label="keep tracking"
-              _key="bleedTrackOn"
-              set={set}
-              get={get}
-              title="Follow the response as it drifts -- your hands over the keyboard are part of it. Only learns from moments it can already explain, so it holds still while you play"
-            />
-            <Input
-              label="out of the looper"
-              _key="bleedCancelAudioOn"
-              set={set}
-              get={get}
-              title="Also take it out of what is recorded and monitored, which breaks the loop's feedback path. Changes what the looper records"
-            />
-            <BleedMeter enabled={get("bleedCancelOn")} />
-          </Section>
-          <Section label="looping">
-            <Input label="looping (⌘L)" _key="loopingOn" set={set} get={get} />
-            <Input label="beatsToLoop" _key="beatsToLoop" params={params} set={set} get={get} />
-            <Input
-              label="loop echoes"
-              _key="loopEchoes"
-              params={params}
-              set={set}
-              get={get}
-              validate={(n: number) => n >= 1 && n <= 16}
-            />
-            <Input
-              label="loop echo gain"
-              _key="loopEchoGain"
-              params={params}
-              set={set}
-              get={get}
-              validate={(n: number) => n >= 0 && n <= 1}
-            />
-            <Input
-              label="audio monitor"
-              _key="audioMonitorOn"
-              set={set}
-              get={get}
-            />
-            <Input
-              label="stop runaway"
-              _key="loopFeedbackGuardOn"
-              set={set}
-              get={get}
-              title="Require that no band of the loop gains energy. For speakers: what survives cancelling the bleed is one narrow range that grows over minutes. It will also fight a part you are deliberately building up"
-            />
-            <LoopGuardMeter active={get("loopFeedbackGuardOn")} />
-          </Section>
-          <Section label="device">
-            <DevicePicker
-              devices={audioDevices}
-              active={activeDevices}
-              prefs={audioPrefs}
-              setPrefs={writeAudioPrefs}
-              onOpen={refreshDevices}
-              onRestart={() => invoke("restart_app").catch(() => {})}
-            />
-            <Divider label="latency" />
-            <Calibration
-              inputCount={inputChannelCount}
-              onApply={(frames) => set("bufferCompensation", numExpr(frames))}
-            />
-          </Section>
-          <Section label="input channels">
-            <ChannelList
-              labels={channelLabels}
-              inputCount={inputChannelCount}
-              styles={get("channelStyles")}
-              pans={get("channelPans")}
-              gains={get("channelGains")}
-              setStyles={(next) => set("channelStyles", next)}
-              setPans={(next) => set("channelPans", next)}
-              setGains={(next) => set("channelGains", next)}
-            />
-          </Section>
-          <Section label="latency">
-            <Input
-              label="bufferCompensation"
-              _key="bufferCompensation"
-              params={params}
-              set={set}
-              get={get}
-            />
-          </Section>
-
-          {/* With the device picker and Restart, because this is the tab that
-              already holds what belongs to this install rather than to the
-              music -- and installing an update restarts the app. */}
-          {!BROWSER_DEBUG_MODE && (
-            <Section label="updates">
-              <Updater />
-            </Section>
-          )}
-        </TabPanel>
-
-        <TabPanel active={panelTab === "visual"}>
-          {/* The frame rather than the signal: what a pane sits on, and what
-              sits between the panes. Global on purpose -- a gutter belongs to no
-              one pane, and a background that differed pane by pane would read as
-              a difference in what is being drawn. The per-pane palette is `row
-              colors`, over in the views tab. */}
-          <Section label="layout">
-            <ColorInput
-              label="background"
-              value={get("waveformBackground")}
-              onChange={(c) => set("waveformBackground", c)}
-              title="What a pane is erased to, in both draw modes"
-            />
-            {/* CSS pixels rather than surface pixels, so a line is the same
-                weight on the laptop screen and an external monitor. The note
-                below resolves it against the ratio the panes were actually
-                measured at, because "one device pixel" is the interesting end
-                of this slider and it isn't a round number in CSS pixels. */}
-            <Slider
-              label="grid width"
-              value={gridWidth}
-              min={0.5}
-              max={4}
-              step={0.25}
-              onChange={(n) => set("gridWidth", n)}
-              title="Grid line thickness in CSS pixels, scaled by the display's pixel ratio"
-            />
-            <div style={{ color: "#aaa", fontSize: "0.8em" }}>
-              {Math.max(1, Math.round(gridWidth * paneScale)) === 1
-                ? "1 device pixel -- as thin as this display draws"
-                : `${Math.max(
-                    1,
-                    Math.round(gridWidth * paneScale)
-                  )} device pixels`}
-            </div>
-            <Divider label="between panes" />
-            <Slider
-              label="pane gap"
-              value={get("paneGap")}
-              min={0}
-              max={24}
-              step={1}
-              onChange={(n) => set("paneGap", n)}
-              title="Gutter between panes, in pixels. 0 butts them together"
-            />
-            <ColorInput
-              label="gap color"
-              value={get("paneGapColor")}
-              onChange={(c) => set("paneGapColor", c)}
-              title="What shows through the gutter between panes"
-            />
-            {(viewCtxs.length < 2 || get("paneGap") === 0) && (
-              <div style={{ color: "#aaa", fontSize: "0.8em" }}>
-                No gutter to see -- needs more than one pane and a gap above 0.
-              </div>
-            )}
-          </Section>
-          <Section label="visual">
-            <Input
-              label="visual monitor"
-              _key="visualMonitorOn"
-              set={set}
-              get={get}
-            />
-            <Input
-              label="frame time"
-              _key="showFrameTime"
-              title="Overlay the draw loop's cost: JS time per frame, and the gap between frames"
-              set={set}
-              get={get}
-            />
-            <Input
-              label="spectrum analysis"
-              _key="analysisOn"
-              set={set}
-              get={get}
-            />
-            {/* Frequency resolution against time resolution, and the one knob
-                for both: the hop is a quarter of the window, so a shorter one
-                narrows the spectrogram's columns and places an attack more
-                precisely at the cost of smearing the bass end further. Global
-                rather than per-pane -- one FFT feeds every pane and the flux. */}
-            <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
-              <label>fft window</label>
-              <select
-                value={get("analysisWindow")}
-                onChange={(e) => set("analysisWindow", Number(e.target.value))}
-                title="FFT window in frames. Shorter is sharper in time, coarser in frequency"
-              >
-                {ANALYSIS_WINDOWS.map((n) => (
-                  <option key={n} value={n}>
-                    {n} ({Math.round((n / sampleRate) * 10000) / 10} ms)
-                  </option>
-                ))}
-              </select>
-            </div>
-            {/* The band the flux is summed over. Global rather than per-pane:
-                it's an audio-thread setting, and narrowing it onto what you're
-                listening for is what stops a bass note reading as a snare hit. */}
-            <Input
-              label="flux band low (Hz)"
-              _key="analysisBandLow"
-              params={params}
-              set={set}
-              get={get}
-              validate={(n: number) => n > 0 && n < analysisNyquist()}
-            />
-            <Input
-              label="flux band high (Hz)"
-              _key="analysisBandHigh"
-              params={params}
-              set={set}
-              get={get}
-              validate={(n: number) => n > 0 && n < analysisNyquist()}
-            />
-            {/* Peak picking. Relative to the flux's local median, so the
-                threshold means the same thing loud or quiet; the gap is what
-                stops one broad attack reporting its own shoulders. */}
-            <Input
-              label="onset threshold"
-              _key="onsetThreshold"
-              params={params}
-              set={set}
-              get={get}
-              validate={(n: number) => Number.isFinite(n) && n >= 0}
-            />
-            <Input
-              label="onset min gap (ms)"
-              _key="onsetMinGap"
-              params={params}
-              set={set}
-              get={get}
-              validate={(n: number) => Number.isFinite(n) && n >= 0 && n < 10000}
-            />
-            <Input
-              label="onset offset (ms)"
-              _key="onsetOffset"
-              params={params}
-              set={set}
-              get={get}
-              validate={(n: number) => Number.isFinite(n) && Math.abs(n) < 10000}
-            />
-          </Section>
-        </TabPanel>
-
-        <TabPanel active={panelTab === "views"}>
-          <Section label="views">
-            <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
-              <label>arrangement</label>
-              <select
-                value={`${viewCols}x${viewRows}`}
-                onChange={(e) => {
-                  const [cols, rows] = e.target.value.split("x").map(Number);
-                  setArrangement(cols, rows);
-                }}
-              >
-                {ARRANGEMENTS.map(([cols, rows]) => (
-                  <option key={`${cols}x${rows}`} value={`${cols}x${rows}`}>
-                    {cols} across x {rows} down
-                  </option>
-                ))}
-              </select>
-            </div>
-            <Input
-              label="chain panes"
-              _key="viewsSequential"
-              set={set}
-              get={get}
-              title="Run the signal through each pane's rows in turn instead of drawing the same beats in all of them"
-            />
-            {viewCtxs.length > 1 && (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "row",
-                  flexWrap: "wrap",
-                  gap: "2px",
-                  margin: "4px 0",
-                }}
-              >
-                {viewCtxs.map((v) => (
-                  <button
-                    key={v.index}
-                    onClick={() => setSelectedView(v.index)}
-                    style={{
-                      flex: 1,
-                      fontWeight: v.index === activeView ? "bold" : "normal",
-                      backgroundColor: v.index === activeView ? "#666" : undefined,
-                    }}
-                  >
-                    view {v.index + 1}
-                  </button>
-                ))}
-              </div>
-            )}
-            <Divider label="content" />
-            <ChannelPicker
-              labels={channelLabels}
-              styles={get("channelStyles")}
-              channels={viewCtxs[activeView]?.cfg.channels ?? []}
-              setChannels={(next) => viewIO.set("channels", next)}
-            />
-            <div style={{ display: "flex", flexDirection: "row", gap: "4px" }}>
-              <label>kind</label>
-              <select
-                value={viewCtxs[activeView]?.cfg.kind ?? "waveform"}
-                onChange={(e) => viewIO.set("kind", e.target.value as ViewKind)}
-                title="What the pane's vertical axis means"
-              >
-                {VIEW_KINDS.map((kind) => (
-                  <option key={kind} value={kind}>
-                    {kind}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {viewCtxs[activeView]?.cfg.kind === "spectrogram" && (
-              <SpectrogramControls
-                cfg={viewCtxs[activeView].cfg}
-                labels={channelLabels}
-                // Only the real inputs are analysed, and only the first few of
-                // them -- the buses aren't captured and have no spectrum.
-                count={Math.min(inputChannelCount, MAX_ANALYSIS_CHANNELS)}
-                set={viewIO.set}
-              />
-            )}
-            <Divider label="layout" />
-            {viewCtxs[activeView] && (
-              <RowPerNote
-                // Remounted with the pane, so switching panes closes the form
-                // rather than leaving another pane's numbers in it.
-                key={activeView}
-                view={viewCtxs[activeView].cfg}
-                params={params}
-                apply={(patch) => patchView(activeView, patch)}
-              />
-            )}
-            <Input
-              label="beats per row"
-              _key="beatsPerRow"
-              params={params}
-              {...viewIO}
-            />
-            <Input
-              label="left margin"
-              _key="marginLeft"
-              params={params}
-              {...viewIO}
-            />
-            <Input
-              label="right margin"
-              _key="marginRight"
-              params={params}
-              {...viewIO}
-            />
-            <Divider label="drawing" />
-            <Input
-              label="visual gain"
-              _key="visualGain"
-              params={params}
-              {...viewIO}
-            />
-            <Input label="split up/down" _key="splitChannels" {...viewIO} />
-            <Input label="bar color mode" _key="barColorMode" {...viewIO} />
-            <Input
-              label="refresh at cycle end"
-              _key="refreshAtCycleEnd"
-              {...viewIO}
-            />
-            <Divider label="overlays" />
-            {viewCtxs[activeView]?.cfg.kind === "waveform" && (
-              <>
-                <Input label="show flux" _key="showFlux" {...viewIO} />
-                {viewCtxs[activeView]?.cfg.showFlux && (
-                  <Slider
-                    label="flux gain"
-                    value={viewCtxs[activeView].cfg.fluxGain}
-                    min={0.05}
-                    max={4}
-                    step={0.05}
-                    onChange={(n) => viewIO.set("fluxGain", n)}
-                    title="Multiplies the onset function before it is clamped to the row"
-                  />
-                )}
-                <Input label="show onsets" _key="showOnsets" {...viewIO} />
-              </>
-            )}
-            <Divider label="colors & grids" />
-            <RowColorList
-              colors={viewCtxs[activeView]?.cfg.rowColors ?? []}
-              setColors={(colors) => viewIO.set("rowColors", colors)}
-            />
-            {(viewCtxs[activeView]?.cfg.rowColors.length ?? 0) > 1 && (
-              <>
-                <Input
-                  label={
-                    viewCtxs[activeView]?.cfg.splitChannels
-                      ? "row color pattern (up)"
-                      : "row color pattern"
-                  }
-                  _key="rowColorPattern"
-                  params={params}
-                  {...viewIO}
-                />
-                {/* The halves are different channels, so one palette read
-                    through two patterns tells them apart without giving up the
-                    row marking. Empty means the lower half reads the pattern
-                    above it. */}
-                {viewCtxs[activeView]?.cfg.splitChannels && (
-                  <Input
-                    label="row color pattern (down)"
-                    _key="rowColorPatternDown"
-                    params={params}
-                    {...viewIO}
-                  />
-                )}
-              </>
-            )}
-            <GridList
-              grids={viewCtxs[activeView]?.cfg.grids ?? []}
-              setGrids={(grids) => viewIO.set("grids", grids)}
-              params={params}
-            />
-          </Section>
-        </TabPanel>
-      </>
-      {/* <div>{log}</div> */}
-    </div>
+    <Panel
+      panelTab={panelTab}
+      setPanelTab={setPanelTab}
+      // The same function; TS cannot prove its inferred generic return, which
+      // routes by which half a key lives in, equals Config[K].
+      get={get as unknown as PanelProps["get"]}
+      set={set}
+      params={params}
+      resetBeat={resetBeat}
+      configError={configError}
+      setParameters={setParameters}
+      reroll={reroll}
+      getCurrentPreset={getCurrentPreset}
+      loadPreset={loadPreset}
+      rustConfig={rustConfig}
+      addDrumSample={addDrumSample}
+      sampleStatus={sampleStatus}
+      chooseFile={chooseFile}
+      fileInfo={fileInfo}
+      fileError={fileError}
+      setTempoFromFile={setTempoFromFile}
+      stretching={stretching}
+      audioDevices={audioDevices}
+      activeDevices={activeDevices}
+      audioPrefs={audioPrefs}
+      writeAudioPrefs={writeAudioPrefs}
+      refreshDevices={refreshDevices}
+      inputChannelCount={inputChannelCount}
+      channelLabels={channelLabels}
+      sampleRate={sampleRate}
+      gridWidth={gridWidth}
+      paneScale={paneScale}
+      viewCols={viewCols}
+      viewRows={viewRows}
+      setArrangement={setArrangement}
+      activeView={activeView}
+      setSelectedView={setSelectedView}
+      viewIO={viewIO}
+      patchView={patchView}
+      paneCount={viewCtxs.length}
+      activeCfg={viewCtxs[activeView]?.cfg}
+    />
   );
 
   const waveform = (

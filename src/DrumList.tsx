@@ -9,6 +9,7 @@ import {
   parseNumberList,
   resolveRhythmText,
 } from "./expression";
+import { useHelp } from "./help";
 import { accepts, invalidBorder, useFocusedValue } from "./Input";
 import parser1 from "./parser1";
 import parser2 from "./parser2";
@@ -69,6 +70,7 @@ const DrumRow = ({
   const rhythmInvalid = !accepts(() => parseRhythm(rhythmProps.value));
   const gainsInvalid = !accepts(() => parseNumberList(gainsProps.value, params));
   const failed = status === "error";
+  const help = useHelp();
 
   return (
     <div style={{ ...rowStyle, opacity: voice.on ? 1 : 0.45 }}>
@@ -77,9 +79,11 @@ const DrumRow = ({
         checked={voice.on}
         onChange={() => onChange({ ...voice, on: !voice.on })}
         title={voice.on ? "Mute this sound" : "Unmute this sound"}
+        {...help("drums.on")}
       />
       <span
         title={failed ? `Could not load ${voice.path}` : voice.path}
+        {...help("drums.sound")}
         style={{
           width: "7em",
           overflow: "hidden",
@@ -107,7 +111,7 @@ const DrumRow = ({
             });
           } catch (e) {}
         }}
-        title='Rhythm for this sound; parameters work bare: "div:1"'
+        {...help("drums.rhythm")}
         style={{ flex: 1, minWidth: 0, ...invalidBorder(rhythmInvalid) }}
       />
       <input
@@ -125,7 +129,7 @@ const DrumRow = ({
             });
           } catch (e) {}
         }}
-        title="Gain per hit, cycled -- e.g. 1,0.5 or 1,0.6x3. Parameters and arithmetic allowed. Multiplies the volume slider"
+        {...help("drums.accents")}
         style={{ flex: 1, minWidth: 0, ...invalidBorder(gainsInvalid) }}
       />
       <input
@@ -136,7 +140,7 @@ const DrumRow = ({
           if (isNaN(beats)) return;
           onChange({ ...voice, shift: beats });
         }}
-        title="Push this part this many beats later in the cycle, so it doesn't start on one"
+        {...help("drums.shift")}
         style={{ width: "3.5em" }}
       />
       <input
@@ -147,7 +151,7 @@ const DrumRow = ({
           if (isNaN(ms)) return;
           onChange({ ...voice, offset: ms });
         }}
-        title="Start this many ms early, so the attack lands on the beat"
+        {...help("drums.offset")}
         style={{ width: "3.5em" }}
       />
       <input
@@ -160,6 +164,7 @@ const DrumRow = ({
           onChange({ ...voice, volume: parseFloat(e.target.value) })
         }
         title={`Volume ${Math.round(voice.volume * 100)}%`}
+        {...help("drums.volume")}
         style={{ width: "4em" }}
       />
       <button onClick={onRemove} title={`Remove ${drumLabel(voice.path)}`}>
@@ -181,15 +186,17 @@ export const DrumList = ({
   setDrums: (next: DrumVoice[]) => void;
   onAdd: () => void;
   status: Record<string, SampleStatus>;
-}) => (
+}) => {
+  const help = useHelp();
+  return (
   <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
     <div style={{ ...rowStyle, color: "#aaa", fontSize: "0.8em" }}>
-      <span style={{ width: "8.5em" }}>sound</span>
-      <span style={{ flex: 1, minWidth: 0 }}>rhythm</span>
-      <span style={{ flex: 1, minWidth: 0 }}>gain</span>
-      <span style={{ width: "3.5em" }}>beats</span>
-      <span style={{ width: "3.5em" }}>ms</span>
-      <span style={{ width: "4em" }}>vol</span>
+      <span style={{ width: "8.5em" }} {...help("drums.sound")}>Sound</span>
+      <span style={{ flex: 1, minWidth: 0 }} {...help("drums.rhythm")}>Rhythm</span>
+      <span style={{ flex: 1, minWidth: 0 }} {...help("drums.accents")}>Accents</span>
+      <span style={{ width: "3.5em" }} {...help("drums.shift")}>Shift</span>
+      <span style={{ width: "3.5em" }} {...help("drums.offset")}>Offset</span>
+      <span style={{ width: "4em" }} {...help("drums.volume")}>Volume</span>
     </div>
     {drums.map((voice, i) => (
       <DrumRow
@@ -215,8 +222,8 @@ export const DrumList = ({
       </div>
     )}
     <div style={rowStyle}>
-      <button onClick={onAdd} title="Pick an audio file to use as a drum sound">
-        + ADD SAMPLE
+      <button onClick={onAdd} {...help("drums.add")}>
+        Add sound…
       </button>
       {!drums.length && (
         <span style={{ color: "#aaa", fontSize: "0.8em" }}>
@@ -225,4 +232,5 @@ export const DrumList = ({
       )}
     </div>
   </div>
-);
+  );
+};

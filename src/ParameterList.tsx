@@ -6,6 +6,7 @@ import {
   rollParameters,
 } from "./config";
 import { formatNumberList, isValidParameterName } from "./expression";
+import { useHelp } from "./help";
 import { invalidBorder, useFocusedValue } from "./Input";
 
 const rowStyle: React.CSSProperties = {
@@ -77,6 +78,7 @@ const ParameterRow = ({
   // good value beside the error would claim something that isn't true. The
   // error takes the slot instead.
   const showsValue = !failure && resolved !== parameterText(parameter);
+  const help = useHelp();
 
   return (
     <div style={rowStyle}>
@@ -87,7 +89,7 @@ const ParameterRow = ({
           setNameText(name);
           if (nameOk(name)) onChange({ ...parameter, name });
         }}
-        title="Name to write in expressions. Letters, digits and underscore; x, min, max and round are taken"
+        {...help("parameters.name")}
         style={{ width: "5em", ...invalidBorder(!nameOk(nameProps.value)) }}
       />
       <span style={{ color: "#aaa" }}>=</span>
@@ -101,14 +103,18 @@ const ParameterRow = ({
           // reported. `value` is left alone so the last good one survives.
           if (accepts(inputText)) onChange({ ...parameter, inputText });
         }}
-        title={`Value of ${parameter.name}. A number, a list like ".6,.4", an expression over the other parameters, or a roll: "choose(1,2,3)", "range(1,3)", "range(1,3,0.25)"`}
+        {...help("parameters.value")}
         style={{
           width: "7em",
           ...invalidBorder(!accepts(valueProps.value)),
         }}
       />
       {random && (
-        <button onClick={onReroll} title={`Reroll ${parameter.name}`}>
+        <button
+          onClick={onReroll}
+          title={`Reroll ${parameter.name}`}
+          {...help("parameters.reroll")}
+        >
           🎲
         </button>
       )}
@@ -170,6 +176,7 @@ export const ParameterList = ({
       )
     );
   const anyRandom = parameters.some(isRandomParameter);
+  const help = useHelp();
   return (
   <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
     {parameters.map((parameter, i) => (
@@ -189,13 +196,13 @@ export const ParameterList = ({
         onClick={() =>
           setParameters([...parameters, { name: nextName(parameters), value: 1 }])
         }
-        title="Add a named number expressions can refer to"
+        {...help("parameters.add")}
       >
-        + ADD PARAMETER
+        Add parameter
       </button>
       {anyRandom && (
-        <button onClick={() => reroll()} title="Reroll every random parameter (⌘R)">
-          🎲 REROLL ALL
+        <button onClick={() => reroll()} {...help("parameters.rerollAll")}>
+          🎲 Reroll all (⌘R)
         </button>
       )}
       {!parameters.length && (

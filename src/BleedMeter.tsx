@@ -80,7 +80,7 @@ export const BleedMeter = ({ enabled }: { enabled: boolean }) => {
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <button onClick={start} disabled={running}>
-          {running ? "measuring…" : "measure bleed"}
+          {running ? "Measuring…" : "Measure speaker bleed"}
         </button>
         {running && <span>{Math.round((result?.progress ?? 0) * 100)}%</span>}
       </div>
@@ -103,7 +103,7 @@ export const BleedMeter = ({ enabled }: { enabled: boolean }) => {
 
       {enabled && result?.phase !== "done" &&
         note(
-          "Switched on, but nothing has been measured yet -- press measure bleed.",
+          "Switched on, but nothing has been measured yet -- press Measure speaker bleed.",
           "#cc8"
         )}
       {enabled && result?.phase === "done" && !running &&
