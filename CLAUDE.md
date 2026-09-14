@@ -1745,6 +1745,76 @@ drawn over it. Two draw modes:
   window, then `fillRect` + repaint everything when the beat wraps. No per-column
   erase here (the fill already cleared), so grids stay visible behind quiet parts.
 
+### One row per note
+
+`RowPerNote.tsx`, a button under *layout* in the views tab. The setting the
+owner reaches for most, and the one nobody else would arrive at: one row per
+note you are aiming at, so sixteen 16ths are sixteen rows and the target is a
+straight vertical line down the pane. "Am I hitting each note" and "am I
+drifting early" are then both readable at a glance.
+
+- **It is a generator, not a mode.** Everything it writes is an ordinary
+  per-view setting, so after `apply` there is nothing holding the pane in this
+  shape, nothing to un-press, and nothing that can fight a later hand edit.
+  Same idiom as `set tempo from file` and the calibration's `apply` -- compute
+  something worth having, write it into fields that already exist. A `kind` or
+  a `gridFollowsRows` flag was the alternative and is worse: it makes a second
+  source of truth for the grids and the margins, and has to decide what nudging
+  a margin means.
+- **It writes expressions, not the numbers they come to.** Typing `bar/n`
+  leaves a pane whose rows, margins and both grids all follow `n` afterwards --
+  the configuration staying *live* rather than being stamped, which is the one
+  thing a preset could not give even if presets were per-pane. It is also the
+  app demonstrating its own parameter system on the way past.
+- **Three fields, and they are the only choices in it**: the division (a
+  number-list expression, so `1/4`, `bar/n` and a swing pair `.6,.4` all work),
+  how many of them, and the lead.
+- **Equal and opposite margins rotate the row window without widening it.**
+  `pixelsPerBeat` divides by `max(row) + left + right`, so `+d/4, -d/4` leaves
+  the drawn width at exactly one pulse: every instant still appears exactly
+  once -- no duplication and no gap -- with the target a quarter of the way
+  across and the half-way marker three quarters. That symmetry is why a quarter
+  is the default, and the room before the note is for a sustain that ran over.
+- **Two grids: the target, and the point exactly out of phase with it.** Green
+  and red, target first in the list so it wins where they coincide. The second
+  is the first shifted by half a pulse, which is the whole reason a grid's
+  `shift` is expression-backed.
+- **The half-way marker is the one part that does not generalise for free.**
+  With an uneven division the midpoints are not a constant shift of the notes
+  (`.6,.4` puts them at 0.3 and 0.8), so it is written as the gaps *between*
+  the midpoints plus a shift onto the first -- the last gap closing the cycle
+  rather than stopping short of it: `[.5,.5]:1` shifted by 0.3. That degenerates
+  to the even case exactly, so there is one formula rather than two. What it
+  costs is that the swung version is literal numbers and stops following a
+  parameter change.
+- **One margin serves every row, so an uneven division takes the mean pulse**
+  and the rows come out different lengths. That is what a swung setting looks
+  like rather than a defect -- the owner's own observation, from doing it by
+  hand.
+- **Applied as one patch, in one update.** Four keys written one at a time
+  through `viewSetGet` would work, since each is a functional update over the
+  last, but a pane shape is one configuration rather than four independent
+  edits and a half-applied one draws something nobody asked for.
+- **Re-opening recovers the expressions rather than the numbers.**
+  `splitRepeat` takes `bar/n x 16` apart at the top-level `x` -- one at bracket
+  depth zero that does not *continue* a name. A digit run doesn't make a name,
+  so `0.25x16` splits, which matters because that is exactly how
+  `formatNumberList` writes a repeat, while `maxx` is left alone. Without that
+  distinction the form reopens showing `0.25` and `16` as one unparsed string.
+- It **replaces** the pane's grids rather than adding to them, which is what
+  makes the result predictable from the three fields alone.
+
+Checked by temp test (run, then deleted): the even case writes 16 rows of 0.25
+with margins that cancel; replaying `getCanvasPositions`, the target lands at
+25% of the row and the antipode at 75%, and sweeping 977 beats off the grid
+finds every instant drawn exactly once (in the swung case too); the grid lines
+tile at the pulses and the midpoints; `bar/n` survives into all four fields;
+the swung case alternates the row lengths and puts the markers at 0.3 and 0.8,
+from a literal list and from a list parameter alike; `splitRepeat` handles
+`bar/n x 16`, `0.25x16`, `[.6,.4] x 8`, a nested `[[.6,.4]x2, 1]x3` and refuses
+`maxx`; and a non-positive pulse, a count below one, a count past
+`MAX_LIST_LENGTH` and a lead outside 0..1 are all refused rather than written.
+
 ### The visual latency offset
 
 The sample stream is stamped with `visual_beat = beat - buffer_compensation *
@@ -2282,6 +2352,15 @@ and several of them have since been confirmed. What is genuinely open is here:
     and holds the guard shut. With the high pass on, that noise used to be
     excluded. This one would show as tracking quietly doing less, and it is the
     only change that could make the *picture* worse.
+- **The one-row-per-note button has not been pressed in the app.** The
+  arithmetic and the geometry are temp-tested (see *One row per note*), so what
+  is open is taste rather than correctness: whether three fields is the right
+  number, whether re-seeding on open reads as helpful or as the form forgetting
+  what you typed, and whether replacing the pane's grids outright is too blunt
+  when there was already a grid worth keeping. The swung case is the one to
+  look at hardest -- its half-way markers are written as literals and stop
+  following a parameter change, which is invisible until `n` moves.
+
 - **The unmanaged second Mac has not been retried since the ad-hoc era.** The
   notarized build is expected to install with a plain drag, and the managed work
   Mac now does, but that particular machine has not been asked again.
@@ -2672,6 +2751,39 @@ See *Updates*.
     through a filter measured for a different volume is a quieter kind of wrong
     than drawing one.
   - Headphones remain the answer for the sound.
+- **Presets as files, and presets you can take apart.** Two halves of one
+  thing, both wanted.
+  - **The format is already JSON** -- `Preset` is `{rust, js}`, written by
+    `JSON.stringify` under `tpb.presets.v1` in localStorage -- so nothing has
+    to change to make it readable. What is wrong is only *where* it lives:
+    WebKit's local storage database, inside the app's own container, which is
+    not a place anyone opens. Expression-backed fields store
+    `{inputText, val}`, so it is verbose but perfectly legible, and the
+    `inputText` half is the interesting one.
+  - **`audio-prefs.json` is the precedent for where the file goes.**
+    `~/Library/Application Support/com.vogler.dev/` is reachable (Finder's
+    *Go to Folder*, or `open` from a terminal), is not sandboxed today, and
+    already holds a hand-editable file. A `presets.json` beside it would be
+    both readable and agent-reachable, and import/export to anywhere else is
+    then `dialog.save` plus `fs.writeTextFile`. The one thing to keep is that
+    localStorage stays the source of truth for the *session*, which is written
+    on every config change and has no business being a file.
+  - **Taking one apart is the bigger idea.** A preset today is the whole
+    config, merged over the defaults, so it cannot say "make this pane an
+    alignment pane" without bringing a tempo and a drum part with it -- which
+    is exactly why *One row per note* is a button rather than a shipped preset.
+    The owner's shape for it: one stored config holding several named parts,
+    with checkboxes choosing which parts to load. That generalises the button
+    above (a pane shape becomes an ordinary saved part) and it is also the
+    honest home for "just the drums from this one".
+  - **The merge-over-defaults rule is what makes it delicate.** A partial load
+    has to decide, per part, between merging over the defaults and merging over
+    what is in use -- and the second is the behaviour that was deliberately
+    removed, because it made a preset mean "these settings, plus whatever you
+    happen to have". Per-part it is defensible where the whole-config version
+    was not, since the parts left out are being left out on purpose. Worth
+    getting right before any of it ships.
+
 - **Decimated sample transport.** Send per-block peaks from Rust instead of raw
   samples. The frontend already reduces to per-pixel peaks, so the picture is
   identical for ~8× less JSON. Worth doing before going past a few channels.

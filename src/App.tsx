@@ -72,6 +72,7 @@ import {
 import { GridList } from "./GridList";
 import { SectionList } from "./SectionList";
 import { RowColorList } from "./RowColorList";
+import { RowPerNote } from "./RowPerNote";
 import { SpectrogramControls } from "./SpectrogramControls";
 import { Slider } from "./Slider";
 import { ParameterList } from "./ParameterList";
@@ -768,6 +769,16 @@ const App = () => {
       }));
     },
   });
+
+  // Several view fields at once, in one update. One at a time through
+  // `viewSetGet` would work -- each is a functional update over the last -- but
+  // a generated pane shape is one configuration rather than four independent
+  // edits, and a half-applied one draws something nobody asked for.
+  const patchView = (index: number, patch: Partial<ViewConfig>) =>
+    setJsConfig((js) => ({
+      ...js,
+      views: js.views.map((v, i) => (i === index ? { ...v, ...patch } : v)),
+    }));
 
   // The arrangement is what decides how many panes there are, so it resizes the
   // list itself -- a separate add/remove control would only be one more thing
@@ -2563,6 +2574,16 @@ const App = () => {
               />
             )}
             <Divider label="layout" />
+            {viewCtxs[activeView] && (
+              <RowPerNote
+                // Remounted with the pane, so switching panes closes the form
+                // rather than leaving another pane's numbers in it.
+                key={activeView}
+                view={viewCtxs[activeView].cfg}
+                params={params}
+                apply={(patch) => patchView(activeView, patch)}
+              />
+            )}
             <Input
               label="beats per row"
               _key="beatsPerRow"
