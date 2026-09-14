@@ -2948,6 +2948,106 @@ See *Updates*.
   would have to handle both. The file stays whole and `PresetDialog` gains a
   second column, which is why it takes its rows and actions rather than knowing
   what it is listing.
+- **Recording a session to a file.** WAV only: a header is 44 bytes and
+  symphonia is already in the tree for the other direction, where MP3 means an
+  encoder dependency and a licensing conversation to save a file you would
+  convert anyway. The constraint that shapes it is the usual one -- **nothing
+  touches the disk on the audio thread.** The callback pushes into a ring and a
+  writer thread drains it, the same shape `stretch.rs` uses for the off-thread
+  render and `get_samples` uses for the pre-sized swap. Streaming rather than a
+  memory buffer, since a practice session is long. Worth deciding up front
+  *what* is recorded: the input alone, or the output mix -- both are already
+  sitting in the callback as `input_audio` and the summed channel, so it is a
+  choice rather than work.
+
+- **A reference loop: capture a phrase once, then play it back for ever.**
+  Armed with a count-in or starting at the next cycle, drawable like any bus,
+  cleared with a button.
+  - **This is the file player, not the looper.** The looper is a multi-tap
+    delay with a fixed number of echoes; what this wants is a buffer
+    phase-locked to the beat, which is exactly what `fileBeats` does -- the
+    position derived from `beat` and never accumulated. Building it on the file
+    player's arithmetic gets A-B repeat, `fileShift`, the varispeed and the
+    drawing bus for nothing, where building it on the looper gets none of them.
+  - Arming at the next cycle boundary is `section_bounds`, which already exists.
+
+- **Loop recording cycles**: record for 16 beats, play back for 16 and do not
+  record, configured as a list (`[32,16,16,16]` = silent 32, recording 16, …)
+  or a bare number that just toggles at that length.
+  - **This is the alternating record/playback that was already named as the
+    real fix for looper feedback** (see *Out of the looper*), so it closes that
+    thread rather than only adding a feature. It gives up continuous recording,
+    which is what makes overlapping phrases work -- the trade that entry
+    describes.
+  - **It should almost certainly be a field on `Section`, not a second cycle.**
+    Sections are already "for this many beats, these sound", they already take
+    a list, and `sectionOrder` already does groups and repeats through
+    `parseNumberList`. Two independent cycle mechanisms both gating the looper
+    is precisely the tangle `clickToggle` was retired to avoid.
+  - **The one real question is whether it wants to be independent of the
+    practice cycle**, since a section wrap also restarts the beat, rerolls the
+    parameters and clears the looper. If a record/play cycle has to run *across*
+    those, it cannot be a section -- and that is the thing to settle before
+    building either version.
+
+- **Tools for working with panes**: remove one, duplicate one, reorder them,
+  give them names shown in the pane, arbitrary layouts, and a drag UI.
+  - **The blocker is a documented invariant**: `views.length === viewCols *
+    viewRows`, with the arrangement as the *only* control over how many panes
+    exist. Remove, duplicate and reorder all break that model, so this is a move
+    to an explicit pane list plus a layout spec -- not a handful of buttons.
+    The drag UI is the easy part and comes last.
+  - **Names are cheap and independently useful**, and want none of the above.
+    Worth doing first and on their own.
+
+- **Keybindings, including global start/stop.** Tauri v1 ships
+  `globalShortcut`, so there is no new dependency. Two things to check rather
+  than assume: whether a global hotkey on macOS needs an Accessibility grant
+  (input monitoring does; Carbon's `RegisterEventHotKey` historically does not,
+  and which one the plugin uses decides whether this is pleasant), and what a
+  bound key does while a text field has focus.
+  - **Not a preset key.** Bindings are a property of the person and the
+    keyboard, not of the music, so a shared preset must not rebind someone
+    else's keys. Same argument that put the device choice in
+    `audio-prefs.json`.
+
+- **Rendering a drum part to a file offline**, non-realtime, for a set length.
+  - **The work is extracting the drum logic out of the render closure**, which
+    owns everything by value and cannot be called for a fake output. That is
+    the same extraction the AU and iPad ports need -- see those entries, where
+    the ~1500 pure lines are what makes them plausible -- so this is a down
+    payment rather than a detour. It also shares a WAV writer with recording a
+    session.
+
+- **A grid UI for drum parts**: sounds down the y axis, beats across, the beat
+  count anything you like, and the underlying pulse a number *or an array* --
+  `[.3,.2]` for swing, `[.3,.3,.2,.2]` for a Dilla feel -- with several running
+  at once against each other for polymeter.
+  - **The pulse-as-a-list is the same abstraction *One row per note* already
+    uses**, and the polymeter case is several drum voices with different
+    rhythms, which already works. The new part is the editing surface.
+  - **It needs named drum sounds first**: "sounds on the y axis" *is* roles, so
+    it sits behind the kit entry above.
+  - **The builder writes rhythm text and never becomes a second format** --
+    already the stated rule for the pattern builder in
+    `docs/approachability.md`, and the same rule applies here.
+
+- **Per-hit probability on a drum rhythm**, beyond the implicit 0 and 1.
+  - **Do not reach for `choose` / `range` here.** A roll is deliberately
+    *sticky* -- its stored value **is** its value, and the whole config is
+    re-resolved on every keystroke, so a live roll in a field would mean no
+    number in the app ever holds still (see *Parameters and expressions*).
+    Making them evaluate per hit would contradict that directly.
+  - **What it actually wants is `gains` with a coin flip.** A `chances` list
+    beside it, same `parseNumberList` "1,0.5x3" syntax, indexed by *hit count*
+    with `rem_euclid` so a length that does not divide the rhythm drifts rather
+    than resetting -- which is the point there and would be the point here.
+    `rng` is already on the audio thread for the click and the bleed probe, and
+    one comparison per trigger allocates nothing.
+  - The roll happens at the trigger, which is `offset_beats` early. That is
+    still exactly once per hit, so it is fine -- and a hit that does not sound
+    simply is not drawn, since the drums bus carries what actually played.
+
 - **Decimated sample transport.** Send per-block peaks from Rust instead of raw
   samples. The frontend already reduces to per-pixel peaks, so the picture is
   identical for ~8× less JSON. Worth doing before going past a few channels.
