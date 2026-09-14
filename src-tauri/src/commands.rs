@@ -8,7 +8,7 @@ use crate::read_audio_file::{decode_audio_file, get_samples_from_filename, to_de
 use crate::stretch::{desired_ratio, request as request_stretch};
 use crate::structs::{
     AnalysisFrames, AnalysisOutputBuffer, BeatResetState, BleedState, CalibrationState, Config,
-    ConfigState,
+    ConfigState, LoopGuardState,
     DrumSamples, InputChannelCount, LogState, LoopBufferState, Mp3BufferState, Payload,
     SampleOutputBuffer, VisualSamples,
 };
@@ -246,6 +246,14 @@ pub fn set_audio_prefs(app_handle: tauri::AppHandle, prefs: AudioPrefs) -> Resul
 #[tauri::command]
 pub fn restart_app(app_handle: tauri::AppHandle) {
     app_handle.restart();
+}
+
+/// The deepest band the loop guard is holding down, and by how much. Polled by
+/// the panel: a guard that cannot say what it is doing is one you cannot tell
+/// from a broken one.
+#[tauri::command]
+pub fn get_loop_guard(state: State<LoopGuardState>) -> (f32, f32) {
+    *state.0.lock().unwrap()
 }
 
 /// Starts a bleed measurement: a couple of seconds of noise through the

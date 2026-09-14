@@ -12,6 +12,7 @@ mod filter;
 mod get_loop_buffer_size;
 mod prefs;
 mod io_channels;
+mod loop_guard;
 mod read_audio_file;
 mod stretch;
 mod structs;
@@ -26,7 +27,7 @@ use crate::bleed::{
     TAPS as BLEED_TAPS, TRAIN_LEVEL,
 };
 use crate::commands::{
-    cancel_bleed_training, get_bleed_status, start_bleed_training,
+    cancel_bleed_training, get_bleed_status, get_loop_guard, start_bleed_training,
     cancel_calibration, get_active_devices, get_analysis, get_audio_prefs,
     get_calibration_status, get_input_channel_count, get_sample_rate, get_samples,
     list_audio_devices, load_drum_sample, reset_beat, restart_app, set_audio_prefs, set_config,
@@ -36,12 +37,14 @@ use crate::calibration::Calibration;
 use crate::constants::{default_config, max_input_backlog, max_visual_backlog, sample_rate};
 use crate::filter::HighPass;
 use crate::get_loop_buffer_size::{get_loop_buffer_size, get_loop_spacing, loop_echo_count};
+use crate::loop_guard::LoopGuard;
 use crate::io_channels::{
     get_input_output_channels, make_buffers, start_input_audio_unit, watch_device_changes,
 };
 use crate::read_audio_file::get_samples_from_filename;
 use crate::structs::{
     AnalysisOutputBuffer, BeatResetState, BleedState, BusDelay, CalibrationState, ConfigState, DrumSamples,
+    LoopGuardState,
     InputChannelCount, LogState, LoopBuffer, LoopBufferState, Mp3Buffer, Mp3BufferState,
     SampleOutputBuffer, SoundingSample,
 };
@@ -209,6 +212,12 @@ fn main() -> Result<(), coreaudio::Error> {
     // every callback and the result only when a run ends.
     let bleed_training_arc = Arc::new(Mutex::new(BleedTraining::default()));
     let bleed_result_arc = Arc::new(Mutex::new(BleedResult::default()));
+    // One per channel, like the high passes: each holds its own filter states.
+    let mut loop_guard: Vec<LoopGuard> =
+        (0..input_channels).map(|_| LoopGuard::new(sample_rate())).collect();
+    let loop_guard_arc = Arc::new(Mutex::new((0.0f32, 0.0f32)));
+    let loop_guard_state = LoopGuardState(loop_guard_arc.clone());
+    let loop_guard_live = loop_guard_arc.clone();
     let bleed_live_arc = Arc::new(Mutex::new((0.0f32, 0.0f32)));
     let bleed_state = BleedState(
         bleed_training_arc.clone(),
@@ -290,6 +299,9 @@ fn main() -> Result<(), coreaudio::Error> {
         if should_reset_beat.load(std::sync::atomic::Ordering::Relaxed) {
             beat = 0.0;
             mp3.pos = 0.0;
+            // The cuts describe a room at a volume; nothing recorded before the
+            // restart is going to play back, so they describe nothing.
+            loop_guard.iter_mut().for_each(|g| g.reset());
             // A window stitched across the jump is a spectral edge nobody
             // played, and it would read as a phantom transient.
             analyzer.reset();
@@ -480,6 +492,12 @@ fn main() -> Result<(), coreaudio::Error> {
         let bleed_track_on = bleed_any_on && config.bleed_track_on;
         // Once per callback, like everything else that leaves the audio thread.
         *bleed_live.lock().unwrap() = bleed_cancel.tracking_report();
+        let loop_guard_on = config.loop_feedback_guard_on;
+        *loop_guard_live.lock().unwrap() = if loop_guard_on {
+            loop_guard.first().map_or((0.0, 0.0), |g| g.worst())
+        } else {
+            (0.0, 0.0)
+        };
         for hp in input_high_pass
             .iter_mut()
             .chain(loop_high_pass.iter_mut())
@@ -799,6 +817,13 @@ fn main() -> Result<(), coreaudio::Error> {
                                 }
                             }
                             loop_visual[ch] = visual_sum;
+                            // Measured before the correction and corrected
+                            // after, which is what lets it settle -- see
+                            // `process`. Run whether or not it is switched on,
+                            // like the filters: a band comparison started cold
+                            // would take three seconds to say anything.
+                            let guarded = loop_guard[ch].process(audio_sum);
+                            let audio_sum = if loop_guard_on { guarded } else { audio_sum };
                             let (left, right) = pan_gains[ch];
                             loop_out[0] += audio_sum * left;
                             loop_out[1] += audio_sum * right;
@@ -1084,6 +1109,7 @@ fn main() -> Result<(), coreaudio::Error> {
         .manage(active_devices)
         .manage(calibration_state)
         .manage(bleed_state)
+        .manage(loop_guard_state)
         .manage(drum_samples_state)
         .invoke_handler(tauri::generate_handler![
             get_samples,
@@ -1101,6 +1127,7 @@ fn main() -> Result<(), coreaudio::Error> {
             start_calibration,
             get_calibration_status,
             get_bleed_status,
+            get_loop_guard,
             start_bleed_training,
             cancel_bleed_training,
             cancel_calibration,

@@ -7,6 +7,7 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api";
 import { BleedMeter } from "./BleedMeter";
+import { LoopGuardMeter } from "./LoopGuardMeter";
 import { Updater } from "./Updater";
 import {
   defaultRustConfig,
@@ -2279,6 +2280,14 @@ const App = () => {
               set={set}
               get={get}
             />
+            <Input
+              label="stop runaway"
+              _key="loopFeedbackGuardOn"
+              set={set}
+              get={get}
+              title="Require that no band of the loop gains energy. For speakers: what survives cancelling the bleed is one narrow range that grows over minutes. It will also fight a part you are deliberately building up"
+            />
+            <LoopGuardMeter active={get("loopFeedbackGuardOn")} />
           </Section>
           <Section label="device">
             <DevicePicker

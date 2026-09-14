@@ -274,6 +274,11 @@ export const defaultRustConfig = {
   // feedback and it builds. Separate switch, because it changes what the looper
   // records and that is not something to do unasked.
   bleedCancelAudioOn: false,
+  // Require that no band of the loop gains energy. What survives cancelling the
+  // bleed is one narrow range still at unity gain, which grows over minutes
+  // while everything else decays -- an ordinary howl with a long time constant.
+  // See src-tauri/src/loop_guard.rs.
+  loopFeedbackGuardOn: false,
   audioMonitorOn: false,
   beatsToLoop: numExpr(4),
   // How many times a phrase comes back, one `beatsToLoop` apart each time.

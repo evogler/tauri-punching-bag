@@ -972,6 +972,9 @@ bounded refinement around it, never a fresh search.
   away above a coupling of about 0.12 uncancelled and about 0.25 cancelled.
   Roughly double the coupling, or twice the loop volume, before it goes. The
   speaker's distortion is not cancelled and feeds back on its own account.
+- **What it leaves behind is a narrow band that still grows**, which is what
+  *Stopping the loop running away* is for -- the two are meant to be used
+  together on a laptop.
 - **Alternating record and playback kills it dead instead**, by construction,
   and is the owner's own plan. The two are complementary: alternating gives up
   continuous recording -- which is what makes overlapping phrases work -- and
@@ -1337,6 +1340,52 @@ so overlapping phrases just work.
   counter turns the looper on and off. Recursive feedback (`buf[p] = buf[p]*f +
   live`) gives infinite decaying repeats that never quite stop, and can run away.
   Neither is "a fixed number of full-volume echoes, then gone".
+
+#### Stopping the loop running away
+
+`loopFeedbackGuardOn`, off by default, and `loop_guard.rs`. Only matters on
+speakers, and only once the bleed is already cancelled.
+
+- **What is left after cancellation is one narrow band.** With the bleed out of
+  the loop it decays almost everywhere -- a clap is gone in about five passes --
+  but wherever the residual coupling is still at unity, that band grows while
+  the rest dies. An ordinary howl with a two-minute time constant, and the
+  reason it is slow is that the excess is tiny: twenty decibels over forty
+  passes is a quarter of a decibel a pass.
+- **The rule is "no band may gain energy", not "find the howl".** A PA hunts the
+  ringing frequency with a peak detector and has to tell a howl from a sustained
+  note. This app does not need to: the loop is its own signal, so it can watch
+  each band and require that it not grow. No heuristics, and nothing to chase.
+- **The cut goes to the peak band, not to every band that sees the growth**, and
+  that is the trap. A ringing tone is far louder than anything else in the loop,
+  so it appears through the skirts of *all* twenty-four analysis filters and
+  they all report growth together -- measured, every band came down by the same
+  2.9 dB, which is a broadband duck rather than a notch, and left the ring no
+  quieter relative to the music than before. One band is deepened per interval:
+  the loudest of those that have been growing. Everything else releases.
+- **Two floors, both found by test.** A band has to hold within 30 dB of the
+  loudest band, *and* the loop as a whole has to be audible. Without the first
+  it cut 60 Hz against a 1 kHz ring, because a band holding nothing but
+  arithmetic noise still has a ratio between one interval and the next and that
+  ratio is arbitrary. Without the second it went on comparing bands of silence
+  after the loop had finished.
+- **A band at 0 dB is an exact pass-through.** The correction is a peaking
+  biquad, whose numerator and denominator are identical at unity gain, so the
+  twenty-four filters in series cost the loop nothing at all while nothing is
+  wrong. Verified to 0.0 deviation.
+- **Measured before the correction, corrected after**, which is what lets it
+  settle rather than oscillate. The buffer records what the microphone hears,
+  which is the *corrected* output coming back through the air, so a working cut
+  shows up here as the growth stopping. Measuring after the cut would hide the
+  thing the cut was made for, and the band would be released and re-cut for ever.
+- **It fights a part you are deliberately building up.** Inherent -- a crescendo
+  and a runaway look identical from inside a band -- and accepted on the owner's
+  grounds that building a part up through a laptop microphone and speaker is too
+  much to ask for anyway. Three consecutive growing intervals are required, which
+  is what keeps an ordinary phrase from tripping it.
+- Simulated: a loop that grows 82x in a minute holds at 0.3x, one that overflows
+  to infinity holds at 0.5x, a steady loop is cut by 0.00 dB and silence by
+  nothing at all.
 
 If the echo count appears to do nothing, check `loop_echo_gain` before suspecting
 the taps — the tap arithmetic is simulation-checked, the gain is the part that
@@ -2191,6 +2240,11 @@ and several of them have since been confirmed. What is genuinely open is here:
   is exactly what it was built for. Not looked at at all: the looper path, and
   the live readout -- whose first version only showed a number while it was
   *learning*, which is almost never.
+- **The looper on speakers, 2026-09-13.** Cancelling the bleed out of what the
+  looper records works: previously it fed back and was loud after ten passes,
+  now the loop fades and a clap is gone in about five. What remains is a
+  high-mid band accumulating over a couple of minutes, which is what
+  `loopFeedbackGuardOn` was then built for -- simulated only, not yet heard.
 - **The unmanaged second Mac has not been retried since the ad-hoc era.** The
   notarized build is expected to install with a plain drag, and the managed work
   Mac now does, but that particular machine has not been asked again.

@@ -254,6 +254,10 @@ pub struct Config {
     /// that path. Separate from `bleed_cancel_on` because this changes what the
     /// looper *records*, which is not something to do without being asked.
     pub bleed_cancel_audio_on: bool,
+    /// Require that no band of the looper gains energy -- see `loop_guard.rs`.
+    /// What is left once the bleed is cancelled is one narrow range still at
+    /// unity, which grows over minutes while everything else decays.
+    pub loop_feedback_guard_on: bool,
     pub looping_on: bool,
     pub click_on: bool,
     /// Run the practice cycle. Off, everything sounds continuously, which is
@@ -479,6 +483,10 @@ impl BusDelay {
         out
     }
 }
+
+/// The deepest cut the loop guard is holding, and where: (Hz, dB). Written
+/// once per callback and polled by the panel.
+pub struct LoopGuardState(pub Arc<Mutex<(f32, f32)>>);
 
 /// A bleed-measuring run and its verdict, split the way `CalibrationState` is:
 /// the callback touches the counters every callback and the result only when a
