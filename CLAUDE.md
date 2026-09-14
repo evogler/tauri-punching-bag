@@ -1315,6 +1315,49 @@ probe, why not the onset detector, and what each gate means.
   path rather than producing a plausible constant. It also retroactively
   confirms the 4330 default.
 
+### Recording the session
+
+`recorder.rs`, a **record to a file** section at the foot of the file tab, and
+three commands. A WAV on disk, streamed rather than accumulated, because a
+practice session is long.
+
+- **Nothing touches the disk on the audio thread.** The callback appends frames
+  into a buffer whose capacity is fixed *before* the recording starts, and a
+  writer thread swaps that buffer for the one it drained last time and writes
+  outside the lock. The exchange is all either side does under it -- the same
+  contract `get_samples` has with the display buffers, and the same off-thread
+  shape as the stretch render. Two buffers, both allocated at `start`, swapped
+  for ever after.
+- **A full buffer drops the frame and counts it.** The alternatives are
+  reallocating and waiting for the disk, and the audio thread may do neither.
+  `droppedFrames` is reported, so a gap in a take is never silent about itself.
+- **The file is opened by the command, not the callback.** A bad path, a
+  read-only disk or a full one is a failed command with a message; a failure
+  later is left by the writer for the next poll, and disarms the flag with it.
+  The audio thread never learns about an error at all.
+- **32-bit float, not 16-bit PCM.** The output bus leaves the callback as
+  `audio_out * 12.0` with nothing clamping it, so 16-bit would mean choosing a
+  clip point and silently ruining a take that crossed it. Costs a `fact` chunk
+  and 14 bytes over the canonical 44-byte header.
+- **The whole header is rewritten on every flush**, rather than the three size
+  fields being patched at the end, so a file left behind by a crash is readable
+  up to the last drain instead of being a header of zeroes.
+- **Two switches -- the input and the output mix -- and both on gives one file**
+  `inputs + 2` channels wide: the inputs in device order, then the mix's two
+  sides. One dialog answers with one file, and nothing you might want apart is
+  summed together. The input recorded is `input_audio`, the domain the monitor
+  and the looper share, so the high pass and the bleed canceller are in it
+  exactly when their audio switches are on -- and with both off it is the raw
+  capture times `audioInGain`.
+- **None of it is config.** What is recorded and where is transport state like
+  `paused`: a preset that armed a recording over a path from another machine is
+  a surprise nobody asked for. It reaches Rust as arguments to
+  `start_recording`.
+- **Paused is not recorded**, and neither is a latency or bleed measurement --
+  the recorder sits below those early returns, so the file holds what was
+  sounded rather than a silence the transport was not running through. That is
+  a judgement call; the other answer is a file whose length matches the clock.
+
 ### The practice cycle
 
 `sections: Section[]` plus `sectionsOn`, in the Rust config. A section is *how

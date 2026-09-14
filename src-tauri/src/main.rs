@@ -15,6 +15,7 @@ mod presets;
 mod io_channels;
 mod loop_guard;
 mod read_audio_file;
+mod recorder;
 mod stretch;
 mod structs;
 mod types;
@@ -32,8 +33,8 @@ use crate::commands::{
     cancel_calibration, get_active_devices, get_analysis, get_audio_prefs,
     get_calibration_status, get_input_channel_count, get_sample_rate, get_samples,
     export_presets, get_presets, import_presets, list_audio_devices, load_drum_sample,
-    quarantine_presets, reset_beat, restart_app, set_audio_prefs, set_config, set_mp3_buffer,
-    set_presets, start_calibration,
+    get_recording_status, quarantine_presets, reset_beat, restart_app, set_audio_prefs, set_config,
+    set_mp3_buffer, set_presets, start_calibration, start_recording, stop_recording,
 };
 use crate::calibration::Calibration;
 use crate::constants::{default_config, max_input_backlog, max_visual_backlog, sample_rate};
@@ -48,7 +49,7 @@ use crate::structs::{
     AnalysisOutputBuffer, BeatResetState, BleedState, BusDelay, CalibrationState, ConfigState, DrumSamples,
     LoopGuardState, InputLevelState, raise_level, KitSound, KitState,
     InputChannelCount, LogState, LoopBuffer, LoopBufferState, Mp3Buffer, Mp3BufferState,
-    SampleOutputBuffer, SoundingSample,
+    RecorderState, SampleOutputBuffer, SoundingSample,
 };
 use crate::types::{Args, S};
 use crate::util::{beat_bisect, display_start, mod_add, section_at, section_bounds};
@@ -267,6 +268,12 @@ fn main() -> Result<(), coreaudio::Error> {
     let bleed_training = bleed_training_arc.clone();
     let bleed_live = bleed_live_arc.clone();
     let mut rng = rand::thread_rng();
+
+    // Writing the session to disk. Nothing about it reaches the audio thread
+    // except an atomic flag and a buffer to append to -- see `recorder.rs`.
+    let recorder = Arc::new(crate::recorder::Recorder::new(input_channels));
+    let recorder_state = RecorderState(recorder.clone());
+    let recorder_audio = recorder.clone();
 
     let log_state = LogState(Arc::new(Mutex::new(io_log)));
 
@@ -611,6 +618,16 @@ fn main() -> Result<(), coreaudio::Error> {
                 gain *= feedback;
             }
         }
+
+        // Locked once per callback, like the display buffers, and only while a
+        // recording is actually running: not recording costs one relaxed load.
+        // Below the pause and calibration returns on purpose -- neither sounds
+        // anything, so neither has anything to record.
+        let mut recording = if recorder_audio.armed() {
+            Some(recorder_audio.lock_buffer())
+        } else {
+            None
+        };
 
         // Locked once per callback alongside the sample buffer, so the frame
         // loop only ever pushes into it.
@@ -1046,6 +1063,10 @@ fn main() -> Result<(), coreaudio::Error> {
                 let mut drum_frame: S = 0.0;
                 let mut click_frame: S = 0.0;
 
+                // What the speaker is about to get, kept so the recorder can
+                // write it. Filled as each side is finished rather than summed
+                // again afterwards, so the file holds exactly what was played.
+                let mut out_frame: [S; 2] = [0.0, 0.0];
                 for (ch, channel) in data.channels_mut().enumerate() {
                     // Output is stereo; anything beyond that takes the right side.
                     let side = ch.min(1);
@@ -1096,6 +1117,14 @@ fn main() -> Result<(), coreaudio::Error> {
                             }
                         }
                     }
+
+                    // Everything that goes out is in `channel[i]` by here --
+                    // the monitor, the looper, the file, the drums and the
+                    // click. Only the two real sides: a device with more takes
+                    // a copy of the right one, which would say nothing extra.
+                    if ch < 2 {
+                        out_frame[ch] = channel[i];
+                    }
                 }
 
                 // Delayed by the compensation so they sit on the beat they
@@ -1114,6 +1143,15 @@ fn main() -> Result<(), coreaudio::Error> {
                 };
                 let [drum_visual, click_visual, file_visual, _] =
                     bus_delay.push([drum_frame, click_frame, file_bus, loop_bus]);
+
+                // One frame to the recorder: every input channel in the domain
+                // everything else is sounded in, then the two sides of the mix.
+                // Per frame rather than per output channel, and it can only
+                // push into a vector that was sized before the recording
+                // started -- a full one drops the frame and counts it.
+                if let Some(rec) = recording.as_mut() {
+                    rec.push_frame(&input_audio, out_frame);
+                }
 
                 // A wedged frontend must not be able to grow this without bound:
                 // it would cost memory, make the next drain's reserve enormous,
@@ -1185,6 +1223,7 @@ fn main() -> Result<(), coreaudio::Error> {
         .manage(input_level_state)
         .manage(kit_state)
         .manage(drum_samples_state)
+        .manage(recorder_state)
         .invoke_handler(tauri::generate_handler![
             get_samples,
             get_analysis,
@@ -1213,6 +1252,9 @@ fn main() -> Result<(), coreaudio::Error> {
             quarantine_presets,
             import_presets,
             export_presets,
+            start_recording,
+            stop_recording,
+            get_recording_status,
         ])
         .run(context)
         .expect("error while running tauri application");

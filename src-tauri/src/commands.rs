@@ -7,11 +7,12 @@ use crate::prefs::{load as load_prefs, save as save_prefs, AudioPrefs};
 use crate::presets;
 use crate::read_audio_file::{decode_audio_file, get_samples_from_filename, to_device_stereo};
 use crate::stretch::{desired_ratio, request as request_stretch};
+use crate::recorder::RecordingStatus;
 use crate::structs::{
     AnalysisFrames, AnalysisOutputBuffer, BeatResetState, BleedState, CalibrationState, Config,
     ConfigState, LoopGuardState,
     DrumSamples, InputChannelCount, LogState, LoopBufferState, Mp3BufferState, Payload,
-    SampleOutputBuffer, VisualSamples,
+    RecorderState, SampleOutputBuffer, VisualSamples,
 };
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -471,4 +472,36 @@ pub fn set_config(app_handle: tauri::AppHandle, new_config: Config) {
     // the file lock, so this side must never hold the two in the other order.
     drop(config);
     request_stretch(&app_handle, ratio);
+}
+
+/// Starts writing the session to `path`. The file is created *here*, before the
+/// callback is told anything, so a bad path or a full disk comes back as a
+/// failed command rather than as silence the audio thread cannot report.
+///
+/// `input` is what the microphone gave us in the domain everything else is
+/// sounded in -- the same signal the monitor plays and the looper records, so
+/// the high pass and the bleed canceller are in it exactly when their audio
+/// switches are on. `output` is the stereo mix, everything the speaker gets.
+#[tauri::command]
+pub fn start_recording(
+    state: State<RecorderState>,
+    path: String,
+    input: bool,
+    output: bool,
+) -> Result<(), String> {
+    state.0.start(&path, input, output)
+}
+
+/// Stops and finishes the file. Idempotent: stopping twice, or stopping
+/// something that was never started, answers with the status and does nothing.
+#[tauri::command]
+pub fn stop_recording(state: State<RecorderState>) -> RecordingStatus {
+    state.0.stop()
+}
+
+/// Polled by the panel while a recording runs -- how long it is, and whether
+/// the writer dropped anything or failed.
+#[tauri::command]
+pub fn get_recording_status(state: State<RecorderState>) -> RecordingStatus {
+    state.0.status()
 }

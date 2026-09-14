@@ -186,3 +186,15 @@ dispatched on type. Temp-tested restore, arrangement growth/shrink and
 corner, 11px and 0.5 alpha are taste calls made without seeing them, and a long
 name is clipped at the pane edge rather than truncated.
 
+**3. Record the session to WAV — landed 2026-09-14.** `recorder.rs`, three
+commands, a section at the foot of the file tab. Callback appends into a
+capacity-fixed buffer; a writer thread swaps and writes outside the lock; an
+overrun drops and counts. 32-bit float because the output bus is unclamped.
+Whole header rewritten on every flush, so a killed process leaves a readable
+file. **The call made:** two switches, input and output mix, defaulting to
+input; both on gives one file `inputs + 2` wide rather than two files or a sum.
+Temp-tested header bytes, symphonia round trip at 1/2/3 channels, size patching,
+overrun-without-realloc, double stop, refused start. Built clean, 3 expected
+warnings. Open: paused is not recorded (arguable), the switches reset on relaunch,
+and the drop path has never met a real disk stall.
+

@@ -175,6 +175,28 @@ export const HELP: Record<string, HelpEntry> = {
   },
   playFile: { title: "Play", body: "Plays or silences the file." },
   fileVolume: { title: "Volume", body: "How loud the file is. 1 is as recorded." },
+
+  // ---- recording ----
+  record: {
+    title: "Record to a file",
+    body: "Writes what you play, or what the app puts out, to a WAV file on disk. Nothing about it is saved in a preset or restored at launch -- it belongs to this moment, like being paused.",
+  },
+  "record.input": {
+    title: "Record the input",
+    body: "Your playing, as the app sounds it -- the same signal the looper records and the monitor plays, so the high pass and the bleed canceller are in it exactly when their audio switches are on. One track per input channel.",
+  },
+  "record.output": {
+    title: "Record the output mix",
+    body: "Everything going to the speakers: the click, the drums, the file, the looper's echoes and the monitor. Two tracks. With both switched on you get one file, your inputs first and the mix's two channels after them -- nothing is summed together that you might want apart.",
+  },
+  "record.start": {
+    title: "Record…",
+    body: "Asks where to put the file, then starts. The file is written as it goes, so a long session costs no memory; it is readable even if the app is killed part way through.",
+  },
+  "record.stop": {
+    title: "Stop",
+    body: "Finishes the file and says where it went. Recording pauses when the transport does, and stops for a latency or bleed measurement, since neither is you playing.",
+  },
   fileBeats: {
     title: "Length (beats)",
     body: "How many beats long the file is. This is what locks it to the beat so it never drifts. 0 plays it at its own speed, not locked to anything.",

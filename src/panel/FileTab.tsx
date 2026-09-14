@@ -1,6 +1,7 @@
 import { exprNumber } from "../config";
 import { Help, useHelp } from "../help";
 import { Input } from "../Input";
+import { Recorder } from "../Recorder";
 import { Divider, Section } from "./chrome";
 import { FileInfo, PanelProps } from "./types";
 
@@ -171,6 +172,11 @@ export const FileTab = (p: PanelProps) => {
             )}
           </div>
         )}
+      </Section>
+      {/* Here rather than under Play: this tab is where files on disk are
+          dealt with, and a recording is one coming the other way. */}
+      <Section label="Record to a file" help="record">
+        <Recorder />
       </Section>
     </>
   );

@@ -548,3 +548,9 @@ pub struct CalibrationState(
     pub Arc<Mutex<crate::calibration::Calibration>>,
     pub Arc<Mutex<crate::calibration::CalibrationResult>>,
 );
+
+/// The session recorder. Not part of `Config` and deliberately so: what is
+/// being recorded, and to where, is transport state like `paused` -- it has no
+/// business in a preset or in a restored session, where it would arm a
+/// recording nobody asked for over a path from another machine.
+pub struct RecorderState(pub Arc<crate::recorder::Recorder>);
