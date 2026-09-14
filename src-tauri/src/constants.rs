@@ -132,6 +132,7 @@ pub fn default_config() -> Config {
             offset: 0.0,
             shift: 0.0,
             gains: vec![1.0],
+            chances: vec![],
             rhythm: ParserRhythm {
                 start: 0.0,
                 end: 1.0,

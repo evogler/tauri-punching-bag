@@ -164,3 +164,15 @@ Report the finding before writing the UI.
 
 Appended as work happens: what was attempted, what landed, what was left.
 
+**1. `chances` — landed 2026-09-14.** Per-hit probability beside `gains`, same
+syntax, same `rem_euclid` indexing, expression-backed by the documented
+two-step. A lost roll keeps its slot and advances the hit counter, so the two
+lists stay in phase; the half-open draw is its own clamp, so an out-of-range
+value is sensible rather than a refused push; an empty field clears the key,
+which `gains` cannot do and does not need to. Temp-tested both sides (TS: the
+walk, re-resolution, a bare array, a vanished parameter; Rust: the phase
+property, drift, the out-of-range cases, serde default) and deleted. Built
+clean, 3 expected warnings. Open: the drum row now has six controls and gets
+cramped at a narrow panel, and a dropped hit is invisible rather than drawn
+differently.
+

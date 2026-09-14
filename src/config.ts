@@ -60,6 +60,12 @@ export type DrumVoice = {
   /// in the one config nothing on this side re-reads. The bare-array branch is
   /// what a session written before that looks like.
   gains?: NumberListExpr | number[];
+  /// Probability that each hit sounds, cycled by hit index the same way `gains`
+  /// is -- so the two stay in phase. A hit that loses the roll keeps its slot;
+  /// only the sample is dropped. Empty or absent means every hit sounds, which
+  /// is what a voice saved before this existed reads as. Expression-backed, so
+  /// it is in `resolveRustConfig`'s walk alongside the gains.
+  chances?: NumberListExpr | number[];
   rhythm: Rhythm;
 };
 
@@ -149,6 +155,21 @@ export const drumGainsText = (voice: DrumVoice): string =>
     ? voice.gains.inputText
     : formatNumberList(drumGains(voice));
 
+// Empty rather than `[1]`: no list means every hit sounds, and the audio thread
+// reads the empty case as "no gate" rather than as a probability of 1. Both say
+// the same thing, but only one of them survives being typed back to empty.
+export const drumChances = (voice: DrumVoice): number[] =>
+  voice.chances ? exprList(voice.chances) : [];
+
+// Empty text for a voice that has no chances, so the field reads as unset
+// rather than as a list somebody chose.
+export const drumChancesText = (voice: DrumVoice): string =>
+  voice.chances
+    ? Array.isArray(voice.chances)
+      ? formatNumberList(voice.chances)
+      : voice.chances.inputText
+    : "";
+
 // A gains list saved before it took expressions. Wrapped rather than renamed,
 // for the reason `normalizeView` wraps `beatsPerRow`: a rename would throw away
 // every saved drum part.
@@ -158,6 +179,10 @@ export const normalizeGains = (
   Array.isArray(gains)
     ? { inputText: formatNumberList(gains), val: gains }
     : gains;
+
+// Chances wants exactly the same wrapping and for exactly the same reason, so
+// it is the same function rather than a copy of it.
+export const normalizeChances = normalizeGains;
 
 // The built-in kit, as `samples/kit.json` describes it and Rust reports it.
 // Module-level for the same reason as the sample rate: `drumLabel` is called
@@ -1050,6 +1075,9 @@ export const resolveRustConfig = (
     // `offset` and `shift` are still literals precisely because they aren't
     // here -- add them before making them expression-backed, not after.
     gains: d.gains ? resolveList(normalizeGains(d.gains), params) : d.gains,
+    chances: d.chances
+      ? resolveList(normalizeChances(d.chances), params)
+      : d.chances,
   }));
   return out as RustConfig;
 };

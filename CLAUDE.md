@@ -2006,6 +2006,30 @@ repeats.
 (`hit.rem_euclid(gains.len())`), not by position in the bar, so a list whose
 length doesn't divide the rhythm's deliberately drifts in and out of phase rather
 than resetting each cycle. Empty means no modulation.
+
+`chances` is a list of per-hit *probabilities* beside it, same syntax and the
+same `rem_euclid` indexing, so the two read the same entry as each other.
+
+- **A hit that loses the roll keeps its slot.** Only the sample is dropped:
+  `drum_last_beats` still advances and nothing about the part's length or `end`
+  moves, which is the whole of what keeps `chances` and `gains` in phase. A
+  version that skipped the slot would make the accents walk against their own
+  rhythm whenever a hit was thinned.
+- **The roll is taken at the trigger**, which is `offset_beats` early -- still
+  exactly once per hit -- and *before* the section gate, so a muted section
+  doesn't change the sequence the rolls come out in.
+- **The comparison is its own clamp.** `gen::<f64>()` is half-open on [0,1), so
+  1 or more always sounds, 0 or less never does, and a non-finite chance fails
+  every comparison and stays silent. A typed `2` is therefore sensible rather
+  than a refused config push -- the *Failing loudly* rule, answered by
+  arithmetic rather than by validation.
+- **Empty is the default state, so the field can be typed back to empty** --
+  unlike `gains` and `rowColorPattern`, where `parseNumberList` refusing an
+  empty list is harmless because there is no off state to return to. Clearing
+  it removes the key, which is exactly what an untouched voice looks like.
+- Expression-backed, added to `resolveRustConfig`'s walk *first* and made
+  expression-backed second -- the documented ordering, and the reason `offset`
+  and `shift` are still literals.
 **The offset is a look-ahead, not a seek**: triggering evaluates
 `beat_bisect(times, beat + offset_beats)` so the sample starts *early* and its
 transient lands on the beat. Seeking into the file would chop the front off a

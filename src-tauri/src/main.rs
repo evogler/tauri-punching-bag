@@ -951,6 +951,22 @@ fn main() -> Result<(), coreaudio::Error> {
                             } else {
                                 voice.gains[hit.rem_euclid(voice.gains.len() as isize) as usize]
                             };
+                            // Rolled here, at the trigger, which is
+                            // `offset_beats` ahead of where the hit sounds --
+                            // still exactly once per hit. A lost roll only
+                            // silences the sample: `drum_last_beats` advances
+                            // below either way, so the hit keeps its slot and
+                            // `chances` stays in phase with `gains`.
+                            //
+                            // `gen` is half-open on [0,1), so the comparison is
+                            // its own clamp: 1 or more always passes, 0 or less
+                            // never does, and a non-finite chance fails it and
+                            // stays silent.
+                            let rolled = voice.chances.is_empty()
+                                || (rng.gen::<f64>()
+                                    < voice.chances[hit
+                                        .rem_euclid(voice.chances.len() as isize)
+                                        as usize]);
                             // Gated at the trigger, not at the mix: a hit that
                             // started just before the toggle boundary rings out
                             // instead of being chopped off mid-sample. The beat
@@ -966,7 +982,7 @@ fn main() -> Result<(), coreaudio::Error> {
                             let sounds_here = !sections_on
                                 || section_at(&bounds, beat + offset_beats, cycle_beats)
                                     .map_or(false, |i| config.sections[i].drums.contains(&v));
-                            if sounds_here {
+                            if sounds_here && rolled {
                                 sounding_samples.push(SoundingSample {
                                     sample: sample.clone(),
                                     pos: 0,

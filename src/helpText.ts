@@ -119,6 +119,10 @@ export const HELP: Record<string, HelpEntry> = {
     title: "Accents",
     body: "A volume for each hit in turn, cycling: `1, 0.5` alternates loud and soft, `1, 0.6x3` accents every fourth. A list whose length doesn't fit the rhythm drifts across the bar on purpose. Multiplies the volume slider.",
   },
+  "drums.chances": {
+    title: "Chance",
+    body: "How likely each hit in turn is to sound, cycling the same way accents do: `1, 0.5` drops every other hit half the time, `0.8` thins the whole part. Empty means every hit sounds. A hit that doesn't sound still keeps its place, so this and the accents stay in step.",
+  },
   "drums.shift": {
     title: "Shift (beats)",
     body: "Moves this part later by this many beats, so it doesn't have to start on one. Follows the tempo.",

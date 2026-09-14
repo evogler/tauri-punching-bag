@@ -388,6 +388,19 @@ pub struct DrumVoice {
     /// modulation. Defaulted for voices saved before it existed.
     #[serde(default)]
     pub gains: Vec<f64>,
+    /// Probability that each hit sounds, cycled by hit index exactly as `gains`
+    /// is -- so the two stay in phase, and a list that doesn't divide the
+    /// rhythm drifts across it rather than resetting. A hit that loses the roll
+    /// keeps its slot: the rhythm still defines the times and the hit counter
+    /// still advances, so nothing about the part's length moves.
+    ///
+    /// Compared against a half-open draw on [0,1), which is what makes an
+    /// out-of-range value behave without a clamp: 1 or more always sounds, 0 or
+    /// less never does, and a non-finite value fails the comparison and so is
+    /// silent. Empty means every hit sounds. Defaulted for voices saved before
+    /// it existed.
+    #[serde(default)]
+    pub chances: Vec<f64>,
     pub rhythm: ParserRhythm,
 }
 
