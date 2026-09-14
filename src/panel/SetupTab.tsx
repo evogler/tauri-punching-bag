@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api";
 import { BleedMeter } from "../BleedMeter";
 import { Calibration } from "../Calibration";
+import { GlobalShortcut } from "../GlobalShortcut";
 import { ChannelList } from "../ChannelList";
 import { exprNumber, numExpr } from "../config";
 import { DevicePicker } from "../DevicePicker";
@@ -15,7 +16,7 @@ import { PanelProps } from "./types";
 // latency between them, the inputs, the room on speakers, and updates. Mostly
 // set once, which is why it is not the first tab.
 export const SetupTab = (p: PanelProps) => {
-  const { get, set, params, audioDevices, activeDevices, audioPrefs, writeAudioPrefs, refreshDevices, inputChannelCount, channelLabels, sampleRate, openSetup } = p;
+  const { get, set, params, togglePaused, audioDevices, activeDevices, audioPrefs, writeAudioPrefs, refreshDevices, inputChannelCount, channelLabels, sampleRate, openSetup } = p;
   return (
     <>
       {/* First, so someone who skipped setup and is now stuck finds it. */}
@@ -87,6 +88,14 @@ export const SetupTab = (p: PanelProps) => {
           get={get}
         />
         <Input label="Keep adapting" _key="bleedTrackOn" set={set} get={get} />
+      </Section>
+
+      {/* Here rather than in the play tab: a binding belongs to this keyboard
+          and this person, like the devices above it, and not to the music. */}
+      <Section label="Global shortcut">
+        <Help id="globalShortcut">
+          <GlobalShortcut onTrigger={togglePaused} />
+        </Help>
       </Section>
 
       {/* With the device picker and Restart, because this is the tab that

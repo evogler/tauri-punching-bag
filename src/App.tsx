@@ -1895,6 +1895,7 @@ const App = () => {
       paneCount={viewCtxs.length}
       activeCfg={viewCtxs[activeView]?.cfg}
       openSetup={() => setSetupOpen(true)}
+      togglePaused={() => toggleRef.current("paused")}
     />
   );
 

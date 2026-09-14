@@ -219,3 +219,22 @@ re-resolution, groups, a bare array, a vanished parameter) and deleted. Built
 clean, 3 expected warnings. Open: it has not been heard, and how it reads against
 the practice cycle -- whose wrap voids the buffer under it -- is exactly the
 question the `Section` decision turns on.
+
+**5. Global start/stop — spiked and landed small, 2026-09-14.** The finding
+first: Tauri v1 reaches tao 0.16.11, whose macOS global shortcut is Carbon's
+`RegisterEventHotKey` (`platform_impl/macos/carbon_hotkey/carbon_hotkey_binding.c`),
+not an event tap — **no Accessibility or Input Monitoring grant, no prompt, no
+entitlement**. So the pleasant branch. Built the minimum: `GlobalShortcut.tsx`,
+a switch and one accelerator field in the setup tab, off by default, defaulting
+to ⌘⌥P — chosen because `App`'s own listener bails on `altKey`, so the two
+paths can never both fire. Stored in localStorage rather than
+`audio-prefs.json`: not a preset key, but also not audio and not needed before
+a window exists. A modifier is required, since a global bare key is taken from
+every app on the machine including a panel text field. **The sharp edge:** tao
+ignores the NULL from `register_hotkey`, and the commonest failure — another
+app already owning the combination — is not an error code at all, so the panel
+says so and counts presses instead of pretending. Temp-tested against a mocked
+`globalShortcut` (registration, release, the stale-closure ref, the modifier
+refusal, restore, StrictMode's double mount) and deleted. Built clean, 3
+expected warnings. Open: never pressed in the running app — whether macOS
+swallows it before the webview's own `keydown`, and whether ⌘⌥P is free.

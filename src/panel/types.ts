@@ -63,4 +63,8 @@ export type PanelProps = {
   patchView: (index: number, patch: Partial<ViewConfig>) => void;
 
   openSetup: () => void;
+  // The same thing ⌘P does. Handed over as an action rather than left to a
+  // `set("paused", !get("paused"))` at the call site, because the global
+  // shortcut's handler is captured once and must not close over a stale `get`.
+  togglePaused: () => void;
 };

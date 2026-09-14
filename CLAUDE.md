@@ -179,6 +179,8 @@ Rules that will bite you:
   would rebuild the listener each time. All three are taken unconditionally,
   text fields included: none is a text-editing key. ⌘R checks `shiftKey` and
   bows out, because the menu's ⌘⇧R (Restart) arrives at the webview too.
+- **One key reaches the transport from outside the app** -- see *The global
+  shortcut*, below. Off by default, and a different combination from ⌘P.
 - **The app menu carries Restart** (⌘⇧R), added to `Menu::os_default` rather
   than to a menu built from scratch -- building one drops Edit, and with it
   cut/copy/paste in every text field in the panel. `AppHandle::restart` reads
@@ -186,6 +188,59 @@ Rules that will bite you:
   which matters because only the bundle can hold the microphone grant. The
   session is written to local storage on every config change, so settings
   survive the relaunch; `paused` doesn't, being transient.
+
+### The global shortcut
+
+`src/GlobalShortcut.tsx`, a switch and one accelerator field in the setup tab,
+**off by default**. One action -- pause/play, the same thing ⌘P does -- so the
+transport can be reached with a DAW or a score in front.
+
+- **It needs no Accessibility or Input Monitoring grant**, which is the whole
+  reason it is a switch rather than a permissions flow. Tauri 1.8.3's
+  `globalShortcut` endpoint goes through `tauri-runtime-wry` to tao 0.16.11,
+  whose macOS implementation calls Carbon's `RegisterEventHotKey` directly
+  (`tao-0.16.11/src/platform_impl/macos/carbon_hotkey/carbon_hotkey_binding.c`).
+  That is the old system hotkey API, not a `CGEventTap`, and TCC does not gate
+  it. Nothing was added to `Entitlements.plist` and nothing prompts.
+- **A registration failure is silent at the source, and that cannot be fixed
+  from here.** `register_hotkey` returns NULL when Carbon refuses, and tao's
+  `register` ignores the null and returns `Ok` anyway
+  (`platform_impl/macos/global_shortcut.rs:70-83`). Worse, the commonest
+  failure is not an error at all: when another app already owns a combination
+  macOS simply delivers the press elsewhere. `isRegistered` only reports this
+  app's own bookkeeping, so it cannot answer either. What *does* surface is a
+  parse failure, a double registration, and the IPC call itself -- those are
+  shown in red -- and for the rest the panel says plainly that the key may have
+  gone elsewhere and counts presses, which is the only honest confirmation
+  available. The *Failing loudly* argument, at the edge of what the platform
+  allows.
+- **A modifier is required.** The key is taken from the whole machine, this app
+  included, so it fires while a panel text field has focus and the character
+  never reaches the field -- binding a bare `P` would mean never typing a P
+  anywhere until the switch went off. Refused rather than allowed, because the
+  way out is not obvious from inside the hole.
+- **The default is ⌘⌥P, deliberately not ⌘P.** `App`'s own listener bails on
+  `altKey`, so whichever path macOS hands the press to, exactly one of them
+  acts -- no double toggle, and no need to know whether Carbon consumes the
+  event before the webview sees it.
+- **localStorage, not `audio-prefs.json`.** A binding belongs to the person and
+  the keyboard, so it is not a config key and must never travel in a preset --
+  the device-choice argument. But the two reasons `audio-prefs.json` exists
+  don't apply: nothing here is audio, and nothing here is needed before a
+  window exists. `punching-bag.global-shortcut-on` / `-shortcut`, beside
+  `help-visible` and `setup-step`.
+- **Registrations are serialised through one promise chain**, because
+  StrictMode runs the effect twice on mount and two overlapping registrations
+  of one accelerator make the second fail as already registered -- an error
+  shown over a binding that is in fact working.
+- A Carbon hotkey dies with the process, so a stale system-wide grab cannot
+  outlive the app. It is still released on unmount and when the switch goes off.
+- **Not confirmed in the running app.** The registration path, the storage and
+  the StrictMode ordering are temp-tested against a mocked
+  `@tauri-apps/api/globalShortcut`; what no test can say is whether the press
+  actually arrives when another application is frontmost, whether macOS
+  swallows it before the webview's own `keydown`, and whether ⌘⌥P is free on a
+  real desktop.
 
 ## Parameters and expressions
 
@@ -3130,16 +3185,10 @@ See *Updates*.
   - **Names are cheap and independently useful**, and want none of the above.
     Worth doing first and on their own.
 
-- **Keybindings, including global start/stop.** Tauri v1 ships
-  `globalShortcut`, so there is no new dependency. Two things to check rather
-  than assume: whether a global hotkey on macOS needs an Accessibility grant
-  (input monitoring does; Carbon's `RegisterEventHotKey` historically does not,
-  and which one the plugin uses decides whether this is pleasant), and what a
-  bound key does while a text field has focus.
-  - **Not a preset key.** Bindings are a property of the person and the
-    keyboard, not of the music, so a shared preset must not rebind someone
-    else's keys. Same argument that put the device choice in
-    `audio-prefs.json`.
+- **A binding editor.** One global key exists now (see *The global shortcut*);
+  what is not built is a second action, a recorded-keystroke picker instead of
+  a typed accelerator, or a list. All three want the same store and the same
+  registration path, so they are additions rather than a redesign.
 
 - **Rendering a drum part to a file offline**, non-realtime, for a set length.
   - **The work is extracting the drum logic out of the render closure**, which

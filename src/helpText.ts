@@ -427,6 +427,10 @@ export const HELP: Record<string, HelpEntry> = {
     title: "Run setup again",
     body: "Walks through choosing devices, checking the microphone, speakers or headphones, and measuring latency -- the same controls as this tab, in order, with an explanation for each.",
   },
+  globalShortcut: {
+    title: "Pause from anywhere",
+    body: "One key that pauses and resumes even when another app is in front. Written as `CommandOrControl+Alt+P`; a modifier is required, since a bare key would be taken from every app on the machine. macOS gives no warning when another app already owns the combination, so press it once to check.",
+  },
   updates: {
     title: "Updates",
     body: "The version running, and a check for a newer one. Installing restarts the app.",
