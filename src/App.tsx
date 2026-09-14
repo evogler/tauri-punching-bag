@@ -20,7 +20,8 @@ import {
   channelStyle,
   channelGain,
   unionChannels,
-  BUILT_IN_DRUMS,
+  setKit,
+  KitSound,
   rowColorFor,
   ViewConfig,
   defaultViewConfig,
@@ -769,7 +770,9 @@ const App = () => {
   );
   const requestedSamples = useRef(new Set<string>());
   const loadDrumSample = (path: string) => {
-    if (BUILT_IN_DRUMS.includes(path)) return;
+    // Nothing behind `yarn start` to ask. Kit sounds need no special case:
+    // Rust answers for anything already loaded, built-ins included.
+    if (BROWSER_DEBUG_MODE) return;
     if (requestedSamples.current.has(path)) return;
     requestedSamples.current.add(path);
     setSampleStatus((s) => ({ ...s, [path]: "loading" }));
@@ -828,6 +831,20 @@ const App = () => {
         setSampleRate(hz);
         // The validators are module-level and can't read state.
         setSampleRateHz(hz);
+      })
+      .catch(() => {});
+  }, []);
+
+  // The built-in kit, for the add menu and every drum label. Held module-level
+  // (see `setKit`), since `drumLabel` has no way to reach state; this counter
+  // only exists to render once more when it arrives.
+  const [, setKitVersion] = useState(0);
+  useEffect(() => {
+    if (BROWSER_DEBUG_MODE) return;
+    invoke<KitSound[]>("get_kit")
+      .then((next) => {
+        setKit(next);
+        setKitVersion((v) => v + 1);
       })
       .catch(() => {});
   }, []);

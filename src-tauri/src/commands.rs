@@ -290,6 +290,12 @@ pub fn get_loop_guard(state: State<LoopGuardState>) -> (f32, f32) {
     *state.0.lock().unwrap()
 }
 
+/// The built-in kit: ids, display names and files, from `samples/kit.json`.
+#[tauri::command]
+pub fn get_kit(state: State<crate::structs::KitState>) -> Vec<crate::structs::KitSound> {
+    state.0.clone()
+}
+
 /// Peak input level per channel since the last call, then zeroed. What the
 /// setup's microphone check polls; the callback only ever raises the slots.
 #[tauri::command]
@@ -394,6 +400,12 @@ pub fn get_calibration_status(state: State<CalibrationState>) -> CalibrationResu
 /// callback only ever does a map lookup.
 #[tauri::command]
 pub fn load_drum_sample(state: State<DrumSamples>, path: String) -> Result<usize, String> {
+    // Already there -- a kit sound loaded at startup, or a file loaded before.
+    // Answering from the map means the frontend never has to know which names
+    // are built in before asking, so there is no race with fetching the kit.
+    if let Some(existing) = state.0.lock().map_err(|_| "sample map poisoned".to_string())?.get(&path) {
+        return Ok(existing.len());
+    }
     let samples = get_samples_from_filename(&path)?;
     let len = samples.len();
     let mut map = state

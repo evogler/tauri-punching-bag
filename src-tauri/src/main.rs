@@ -28,7 +28,7 @@ use crate::bleed::{
     TAPS as BLEED_TAPS, TRAIN_LEVEL,
 };
 use crate::commands::{
-    cancel_bleed_training, get_bleed_status, get_input_levels, get_loop_guard, start_bleed_training,
+    cancel_bleed_training, get_bleed_status, get_input_levels, get_kit, get_loop_guard, start_bleed_training,
     cancel_calibration, get_active_devices, get_analysis, get_audio_prefs,
     get_calibration_status, get_input_channel_count, get_sample_rate, get_samples,
     export_presets, get_presets, import_presets, list_audio_devices, load_drum_sample,
@@ -46,7 +46,7 @@ use crate::io_channels::{
 use crate::read_audio_file::get_samples_from_filename;
 use crate::structs::{
     AnalysisOutputBuffer, BeatResetState, BleedState, BusDelay, CalibrationState, ConfigState, DrumSamples,
-    LoopGuardState, InputLevelState, raise_level,
+    LoopGuardState, InputLevelState, raise_level, KitSound, KitState,
     InputChannelCount, LogState, LoopBuffer, LoopBufferState, Mp3Buffer, Mp3BufferState,
     SampleOutputBuffer, SoundingSample,
 };
@@ -93,6 +93,22 @@ fn menu_with_restart(app_name: &str) -> Menu {
     menu
 }
 
+// A missing or malformed manifest is an empty kit rather than a failed launch;
+// any voice naming a kit sound then shows as not found.
+fn load_kit(resource_dir: &str) -> Vec<KitSound> {
+    let path = format!("{}/samples/kit.json", resource_dir);
+    match std::fs::read_to_string(&path)
+        .map_err(|e| e.to_string())
+        .and_then(|text| serde_json::from_str(&text).map_err(|e| e.to_string()))
+    {
+        Ok(kit) => kit,
+        Err(e) => {
+            println!("built-in kit manifest {} unusable: {}", path, e);
+            vec![]
+        }
+    }
+}
+
 fn main() -> Result<(), coreaudio::Error> {
     let context = tauri::generate_context!();
     let app_config_dir = tauri::api::path::config_dir();
@@ -127,25 +143,24 @@ fn main() -> Result<(), coreaudio::Error> {
 
     // load samples
     let mut sample_buffers: HashMap<String, Arc<Vec<f32>>> = HashMap::new();
-    // The built-in kit. Bundled samples are filed under a plain name so a voice
-    // can refer to one without knowing where the app was installed, and a preset
-    // using them works on any machine. Names must match `BUILT_IN_DRUMS` in
-    // config.ts. A file that fails to load is skipped rather than unwrapped: a
-    // voice naming it then shows as missing, which beats not launching.
-    for (name, file) in [
-        ("kick", "kick.wav"),
-        ("snare", "snare.wav"),
-        ("hi-hat", "hi-hat.wav"),
-        ("ride", "ride_cropped.wav"),
-    ] {
-        let path = format!("{}/samples/{}", resource_dir, file);
+    // The built-in kit, described by `samples/kit.json`: an id, a name and a
+    // file, three separate things. The id is what a preset stores, so it must
+    // never change once shipped; the name is only what is shown; the file is
+    // whatever the sample happens to be called. Samples are filed under the id
+    // so a voice can refer to one without knowing where the app was installed.
+    // A sound that fails to load is skipped rather than unwrapped -- a voice
+    // naming it then shows as missing, which beats not launching.
+    let kit = load_kit(resource_dir);
+    for sound in &kit {
+        let path = format!("{}/samples/{}", resource_dir, sound.file);
         match get_samples_from_filename(&path) {
             Ok(samples) => {
-                sample_buffers.insert(name.to_string(), Arc::new(samples));
+                sample_buffers.insert(sound.id.clone(), Arc::new(samples));
             }
-            Err(e) => println!("built-in sample {} failed to load: {:?}", name, e),
+            Err(e) => println!("built-in sample {} failed to load: {:?}", sound.id, e),
         }
     }
+    let kit_state = KitState(kit);
     let drum_samples_arc = Arc::new(Mutex::new(sample_buffers));
     let drum_samples_state = DrumSamples(drum_samples_arc.clone());
     let drum_samples = drum_samples_arc.clone();
@@ -1152,6 +1167,7 @@ fn main() -> Result<(), coreaudio::Error> {
         .manage(bleed_state)
         .manage(loop_guard_state)
         .manage(input_level_state)
+        .manage(kit_state)
         .manage(drum_samples_state)
         .invoke_handler(tauri::generate_handler![
             get_samples,
@@ -1171,6 +1187,7 @@ fn main() -> Result<(), coreaudio::Error> {
             get_bleed_status,
             get_loop_guard,
             get_input_levels,
+            get_kit,
             start_bleed_training,
             cancel_bleed_training,
             cancel_calibration,

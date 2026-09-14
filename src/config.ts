@@ -159,9 +159,18 @@ export const normalizeGains = (
     ? { inputText: formatNumberList(gains), val: gains }
     : gains;
 
-// The built-in kit, loaded by name at startup from the bundle's samples folder.
-// Must match the list in main.rs. Kept in the order a drummer reads a kit.
-export const BUILT_IN_DRUMS = ["kick", "snare", "hi-hat", "ride"];
+// The built-in kit, as `samples/kit.json` describes it and Rust reports it.
+// Module-level for the same reason as the sample rate: `drumLabel` is called
+// from components that have no way to reach App's state. App re-renders when it
+// arrives, which is what picks the names up.
+export type KitSound = { id: string; name: string; file: string };
+let kit: KitSound[] = [];
+export const getKit = () => kit;
+export const setKit = (next: KitSound[]) => {
+  kit = next;
+};
+
+export const kitSound = (path: string) => kit.find((s) => s.id === path);
 
 export const channelPan = (pans: number[], index: number) => pans[index] ?? 0;
 
@@ -170,7 +179,7 @@ export const channelPan = (pans: number[], index: number) => pans[index] ?? 0;
 export const channelGain = (gains: number[], index: number) => gains[index] ?? 1;
 
 export const drumLabel = (path: string) =>
-  BUILT_IN_DRUMS.includes(path) ? path : path.split("/").pop() || path;
+  kitSound(path)?.name ?? (path.split("/").pop() || path);
 
 // `value` widened from `number` to also hold a list, so `divs = .6,.4` can be
 // repeated as `divs x 4` in any number-list field. Widening rather than

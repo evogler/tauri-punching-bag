@@ -2029,12 +2029,22 @@ Files are decoded in Rust by `load_drum_sample` and keyed by path; the callback
 only does a map lookup. Built-ins are keyed by plain name (`"ride"`) so a voice
 can refer to one without knowing the install path.
 
-**The built-in kit** is kick, snare, hi-hat and ride, bundled in
-`src-tauri/samples/` (already a Tauri resource) and loaded by name at startup.
-The names are listed twice and must agree: the loop in `main.rs` and
-`BUILT_IN_DRUMS` in `config.ts`. A kit sound is what makes a preset's drums work
-on someone else's machine, where a file path would not.
+**The built-in kit** is kick, snare, closed hi-hat and ride, bundled in
+`src-tauri/samples/` (already a Tauri resource). A kit sound is what makes a
+preset's drums work on someone else's machine, where a file path would not.
 
+- **`samples/kit.json` is the one list**, and each entry is three separate
+  things: `id` (what a preset stores -- `kick`, `snare`, `hi-hat`, `ride` --
+  and so **never renamed once shipped**, the `loopFeedback` rule again), `name`
+  (only what is shown, free to change), and `file`. Rust reads it at startup,
+  files each sample under its id, and hands the list over through `get_kit`;
+  the frontend keeps it module-level in `config.ts` (`setKit` / `kitSound`),
+  like the sample rate, because `drumLabel` is called where state can't reach.
+  Adding a sound is a file and a line of JSON, with no code change.
+- **`load_drum_sample` answers from the map when the key is already loaded.**
+  So the frontend never has to know which names are built in before it asks,
+  and there is no race between fetching the kit and loading a restored
+  session's voices. It used to skip built-ins by checking a hard-coded list.
 - **Loaded with `match`, not `unwrap`.** A missing or unreadable bundled sample
   is logged and skipped; any voice naming it then shows red as not found. The
   old `ride` load unwrapped, which would have made a bad resource a crash at

@@ -488,6 +488,20 @@ impl BusDelay {
 /// once per callback and polled by the panel.
 pub struct LoopGuardState(pub Arc<Mutex<(f32, f32)>>);
 
+/// One sound in the built-in kit, as `samples/kit.json` describes it. `id` is
+/// what a preset stores and must never change once shipped; `name` is only
+/// what is shown; `file` is the sample's filename inside `samples/`.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct KitSound {
+    pub id: String,
+    pub name: String,
+    pub file: String,
+}
+
+/// The kit as loaded at startup, handed to the frontend so the manifest is the
+/// one place the list lives.
+pub struct KitState(pub Vec<KitSound>);
+
 /// The loudest input sample per channel since the panel last asked, stored as
 /// f32 bits. Atomics rather than a mutex, so a meter being polled can never make
 /// the callback wait: the callback only ever raises a slot, and the command

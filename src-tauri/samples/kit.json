@@ -1,0 +1,6 @@
+[
+  { "id": "kick", "name": "Kick", "file": "kick.wav" },
+  { "id": "snare", "name": "Snare", "file": "snare.wav" },
+  { "id": "hi-hat", "name": "Closed hi-hat", "file": "hi-hat.wav" },
+  { "id": "ride", "name": "Ride", "file": "ride_cropped.wav" }
+]
