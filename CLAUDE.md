@@ -2786,6 +2786,18 @@ and several of them have since been confirmed. What is genuinely open is here:
   quarantine path, and whether a preset exported from one Mac imports cleanly
   on another.
 
+- **The drum grid has never been opened.** Built in two passes on 2026-09-14
+  from `docs/drum-grid.md`. The compile is heavily temp-tested -- the pass
+  count over every small (columns, pulse) pair, the emitted rhythm re-parsed
+  through the real parser2 with its note times checked against the cumulative
+  column starts, the cap refusing rather than truncating, a pre-grid session
+  restoring untouched -- so what is open is the surface, not the arithmetic:
+  whether painting with one shared value is the right gesture, whether 128
+  columns at ~3px is usable at all, whether the settings belong in the pop-up
+  or back in the tab, and whether a new row arriving silent is right now that
+  the matrix makes it visible. The help area sits *behind* the modal backdrop,
+  which `PresetDialog` already lives with and which is more noticeable here.
+
 - **Nothing shipped in v0.3.0 has been used in the app.** Five features built
   in one unsupervised pass on 2026-09-14 -- `chances`, pane names, recording to
   WAV, loop record cycles and the global pause key. Each is temp-tested where
