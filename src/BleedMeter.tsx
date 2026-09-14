@@ -24,6 +24,8 @@ type BleedResult = {
   message: string;
   minDb: number;
   minInputPeakDb: number;
+  liveDb: number;
+  liveDuty: number;
 };
 
 export const BleedMeter = ({ enabled }: { enabled: boolean }) => {
@@ -35,20 +37,23 @@ export const BleedMeter = ({ enabled }: { enabled: boolean }) => {
     invoke<BleedResult>("get_bleed_status").then(setResult).catch(() => {});
   }, []);
 
+  // Fast while a run is in flight, slow while it is only reporting what the
+  // tracking is doing, and not at all when the whole thing is switched off.
+  const measured = result?.phase === "done";
   useEffect(() => {
-    if (!running) {
+    if (!running && !(enabled && measured)) {
       if (timer.current) clearInterval(timer.current);
       timer.current = null;
       return;
     }
     timer.current = setInterval(() => {
       invoke<BleedResult>("get_bleed_status").then(setResult).catch(() => {});
-    }, 100);
+    }, running ? 100 : 500);
     return () => {
       if (timer.current) clearInterval(timer.current);
       timer.current = null;
     };
-  }, [running]);
+  }, [running, enabled, measured]);
 
   const start = () =>
     invoke("start_bleed_training")
@@ -61,6 +66,8 @@ export const BleedMeter = ({ enabled }: { enabled: boolean }) => {
           message: "",
           minDb: 6,
           minInputPeakDb: -50,
+          liveDb: 0,
+          liveDuty: 0,
         })
       )
       .catch(() => {});
@@ -98,6 +105,15 @@ export const BleedMeter = ({ enabled }: { enabled: boolean }) => {
         note(
           "Switched on, but nothing has been measured yet -- press measure bleed.",
           "#cc8"
+        )}
+      {enabled && result?.phase === "done" && !running &&
+        note(
+          result.liveDuty > 0.01
+            ? `Following the room: ${result.liveDb.toFixed(1)} dB removed, ` +
+              `learning from ${(result.liveDuty * 100).toFixed(0)}% of frames.`
+            : "Holding the measured filter -- it only learns from moments it can " +
+              "already explain, so it stops while you play.",
+          result.liveDuty > 0.01 ? "#8c8" : "#aaa"
         )}
       {enabled && result?.phase === "done" &&
         note("Picture only -- the looper still records what the microphone heard.")}

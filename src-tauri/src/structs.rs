@@ -241,6 +241,9 @@ pub struct Config {
     /// still records what the microphone actually heard and the analyzer still
     /// measures it -- the same line the high pass draws, for the same reason.
     pub bleed_cancel_on: bool,
+    /// Follow the path as it moves -- see `cancel` in `bleed.rs`. On by
+    /// default: it is guarded so that the worst it can do is stop following.
+    pub bleed_track_on: bool,
     pub looping_on: bool,
     pub click_on: bool,
     /// Run the practice cycle. Off, everything sounds continuously, which is
@@ -470,6 +473,9 @@ impl BusDelay {
 pub struct BleedState(
     pub Arc<Mutex<crate::bleed::BleedTraining>>,
     pub Arc<Mutex<crate::bleed::BleedResult>>,
+    /// Live tracking figures: dB removed, and the fraction of frames the guard
+    /// let the filter learn from.
+    pub Arc<Mutex<(f32, f32)>>,
 );
 
 /// The audio thread's calibration buffers, plus the last completed result.

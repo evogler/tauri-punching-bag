@@ -264,6 +264,10 @@ export const defaultRustConfig = {
   // speaker -> microphone response from the click and takes the echo out,
   // leaving what was played underneath. No amount to set -- see bleed.rs.
   bleedCancelOn: false,
+  // Follow the path as it moves: hands over a laptop keyboard are part of the
+  // response, not a perturbation of it. Guarded so that the worst it can do is
+  // stop following -- see bleed.rs.
+  bleedTrackOn: true,
   audioMonitorOn: false,
   beatsToLoop: numExpr(4),
   // How many times a phrase comes back, one `beatsToLoop` apart each time.

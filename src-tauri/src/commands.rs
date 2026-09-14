@@ -280,6 +280,9 @@ pub fn get_bleed_status(state: State<BleedState>) -> crate::bleed::BleedResult {
         *state.1.lock().unwrap() = train.result();
     }
     let mut result = state.1.lock().unwrap().clone();
+    let (live_db, live_duty) = *state.2.lock().unwrap();
+    result.live_db = live_db;
+    result.live_duty = live_duty;
     if train.active {
         result.phase = crate::bleed::BleedPhase::Running;
         result.progress = train.progress();

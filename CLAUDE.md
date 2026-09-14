@@ -878,6 +878,67 @@ which is the whole point of freezing it; 113 dB with the compensation 2 ms long
 and a refusal at 4 ms; 30 dB with it 4 ms short; and 43 dB against a speaker
 with 6% third-harmonic distortion, which is the ceiling no linear filter passes.
 
+#### Following the path as it moves
+
+`bleedTrackOn`, on by default. The measured filter is the prior; this is a
+bounded refinement around it, never a fresh search.
+
+- **The path really does move, and the owner found it before the code did.**
+  Hands over a laptop keyboard sit 5-15 cm from both transducers and return a
+  reflection a fraction of a millisecond behind the direct arrival, large enough
+  to be a first-order part of the response rather than a perturbation of it.
+  Measuring with your hands away and then putting them back is visibly worse.
+  So is the lid angle, and where you are sitting.
+- **The guard is the whole of why this is safe, and it is only available because
+  the filter was measured first.** Learn only from frames where the filter
+  already explains 10 dB more than it leaves behind: such a frame has almost
+  nothing of *you* in it by construction. That is exactly the judgement the
+  from-scratch adaptive version could not make -- with `predicted = 0` at
+  startup the test is meaningless -- and it is why the same idea works here and
+  had to be abandoned there.
+- **Both sides of the guard must be the same statistic, and both must attack
+  instantly.** A 20 ms average takes 20 ms to notice you have started playing
+  and adapts hard through all of it: 880 bad updates at the top of every phrase,
+  and they accumulate -- measured at **-2.6 dB against 6.4 frozen**. Fixing that
+  with an instant-attack error against an averaged prediction is worse than
+  useless in the other direction: peak against mean is not a comparison, the
+  guard reads as though nothing is explained and never opens at all. Peak-hold
+  on both, decaying over ~300 ms.
+- **The NLMS denominator needs a floor, and the training path cannot show you
+  why.** The step is divided by the reference window's energy, which is right
+  while the probe runs because the probe never stops. At runtime the reference
+  goes near-silent between one drum's decay and the next click, and a step
+  divided by almost nothing is almost anything: the filter diverged, its
+  residual went huge, and the guard then read the wreckage as "nothing is
+  explained" and froze it there. **6.4 dB frozen against -12 dB.** A peak of the
+  reference energy over the last few seconds both floors the denominator and
+  gates the frame.
+- **`TRACK_GUARD` is 10 by measurement, not by taste.** Over thirty seconds of
+  practising against a moved path, where the frozen filter manages 6.4 dB:
+
+  | guard | silent | bursts | loud bursts | never stops |
+  |---|---|---|---|---|
+  | 3 | 27.3 dB | 8.9 dB | 23.3 dB | **3.9 dB** |
+  | 10 | 27.3 dB | 23.6 dB | 6.4 dB | 6.4 dB |
+  | 30 | 6.4 dB | 6.4 dB | 6.4 dB | 6.4 dB |
+
+  Three tracks in more situations and is *worse than frozen* in the last
+  column. Thirty never opens. Ten either tracks or holds, and 6.4 dB is it
+  declining to act. Given that the two designs before this one were both
+  abandoned for making the picture worse, never-worse-than-frozen is the
+  property worth buying.
+- **What it costs is that loud continuous playing gets no tracking at all** --
+  the guard simply never opens, and you are back to the frozen filter. That is
+  the trade, taken deliberately.
+- **It pulls gently back toward the measured weights** on every adapting frame,
+  so "wandered somewhere strange" decays into "the filter you measured" rather
+  than persisting.
+- **The live readout is honest in a way the old one was not.** The reduction is
+  accumulated *only over guard-satisfied frames* -- the frames with little of
+  you in them -- which are the only frames on which such a figure means
+  anything. The continuous version's meter reported +2 dB where the truth was
+  -9, which is what disqualified it.
+
 #### Two designs that were tried first
 
 Both are recorded because both are the obvious thing to reach for, and the
@@ -2076,6 +2137,13 @@ and several of them have since been confirmed. What is genuinely open is here:
   around in front of the machine, how much of the real ceiling is the speaker's
   distortion, or whether what is left is actually easier to play against. The
   first thing to look at is the number the measurement itself reports.
+  **Roughly two thirds of the drums and click removed, 2026-09-13**, on the
+  laptop's own speaker and microphone, with hands in playing position -- helpful
+  rather than transformative, and well short of the simulated ceiling. Where the
+  rest of it goes is the open question: the speaker's own DSP, a response longer
+  than 11.6 ms, and drift between measuring and playing are the candidates, and
+  the measurement's own figure against the live one separates them. Tracking was
+  built after that and has not been looked at at all.
 - **The unmanaged second Mac has not been retried since the ad-hoc era.** The
   notarized build is expected to install with a plain drag, and the managed work
   Mac now does, but that particular machine has not been asked again.

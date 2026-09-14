@@ -2238,6 +2238,13 @@ const App = () => {
               get={get}
               title="Take the click and the drums back out of the picture when you are playing on speakers rather than headphones"
             />
+            <Input
+              label="keep tracking"
+              _key="bleedTrackOn"
+              set={set}
+              get={get}
+              title="Follow the response as it drifts -- your hands over the keyboard are part of it. Only learns from moments it can already explain, so it holds still while you play"
+            />
             <BleedMeter enabled={get("bleedCancelOn")} />
           </Section>
           <Section label="looping">

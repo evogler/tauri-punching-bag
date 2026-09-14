@@ -203,8 +203,14 @@ fn main() -> Result<(), coreaudio::Error> {
     // every callback and the result only when a run ends.
     let bleed_training_arc = Arc::new(Mutex::new(BleedTraining::default()));
     let bleed_result_arc = Arc::new(Mutex::new(BleedResult::default()));
-    let bleed_state = BleedState(bleed_training_arc.clone(), bleed_result_arc.clone());
+    let bleed_live_arc = Arc::new(Mutex::new((0.0f32, 0.0f32)));
+    let bleed_state = BleedState(
+        bleed_training_arc.clone(),
+        bleed_result_arc.clone(),
+        bleed_live_arc.clone(),
+    );
     let bleed_training = bleed_training_arc.clone();
+    let bleed_live = bleed_live_arc.clone();
     let mut rng = rand::thread_rng();
 
     let log_state = LogState(Arc::new(Mutex::new(io_log)));
@@ -463,6 +469,9 @@ fn main() -> Result<(), coreaudio::Error> {
         // the picture's echoes have to be filtered on the way out instead.
         let high_pass_echoes = high_pass_on && !config.high_pass_audio;
         let bleed_cancel_on = config.bleed_cancel_on && bleed_cancel.trained();
+        let bleed_track_on = bleed_cancel_on && config.bleed_track_on;
+        // Once per callback, like everything else that leaves the audio thread.
+        *bleed_live.lock().unwrap() = bleed_cancel.tracking_report();
         for hp in input_high_pass
             .iter_mut()
             .chain(loop_high_pass.iter_mut())
@@ -638,7 +647,12 @@ fn main() -> Result<(), coreaudio::Error> {
                     // what the microphone heard.
                     if bleed_cancel_on {
                         input_frame[ch] =
-                            bleed_cancel.cancel(ch, input_frame[ch], config.audio_in_gain);
+                            bleed_cancel.cancel(
+                                ch,
+                                input_frame[ch],
+                                config.audio_in_gain,
+                                bleed_track_on,
+                            );
                     }
                     let audio = if high_pass_audio { filtered } else { raw };
                     input_audio[ch] = audio;

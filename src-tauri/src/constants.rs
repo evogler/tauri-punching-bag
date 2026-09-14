@@ -87,6 +87,7 @@ pub fn default_config() -> Config {
         high_pass_hz: 800.0,
         high_pass_audio: false,
         bleed_cancel_on: false,
+        bleed_track_on: true,
         looping_on: false,
         click_on: true,
         sections_on: false,
