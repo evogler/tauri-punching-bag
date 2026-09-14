@@ -22,7 +22,7 @@ extern crate coreaudio;
 
 use crate::analysis::{Analyzer, OnsetParams, BINS, MAX_ANALYSIS_CHANNELS};
 use crate::bleed::{
-    BleedCanceller, BleedPhase, BleedResult, BleedTraining, LEAD as BLEED_LEAD,
+    BleedCanceller, BleedResult, BleedTraining, LEAD as BLEED_LEAD,
     TAPS as BLEED_TAPS, TRAIN_LEVEL,
 };
 use crate::commands::{
@@ -205,7 +205,6 @@ fn main() -> Result<(), coreaudio::Error> {
     let bleed_result_arc = Arc::new(Mutex::new(BleedResult::default()));
     let bleed_state = BleedState(bleed_training_arc.clone(), bleed_result_arc.clone());
     let bleed_training = bleed_training_arc.clone();
-    let bleed_result = bleed_result_arc.clone();
     let mut rng = rand::thread_rng();
 
     let log_state = LogState(Arc::new(Mutex::new(io_log)));
@@ -285,6 +284,73 @@ fn main() -> Result<(), coreaudio::Error> {
             should_reset_beat_arc.store(false, std::sync::atomic::Ordering::Relaxed);
         }
 
+        // Ahead of the pause check, unlike the calibration below it: this is
+        // measuring the speaker and the room, which have nothing to do with
+        // whether the transport is running. Paused, the run would otherwise sit
+        // at 0% forever with nothing saying why.
+        //
+        // Measuring the bleed takes the callback over for the same reason, and
+        // one more: anything *you* play during the run is a near-end signal the
+        // filter would try to explain away, which is the exact failure that
+        // made continuous adaptation unusable. Two and a half seconds of
+        // silence is what buys an estimate worth trusting.
+        {
+            let mut train = bleed_training.lock().unwrap();
+            if train.active {
+                if train.just_started {
+                    train.just_started = false;
+                    bleed_cancel.clear();
+                }
+                analyzer.reset();
+                // Normally done further down, which this path returns before.
+                bus_delay.resize(config.buffer_compensation);
+                for i in 0..num_frames {
+                    // Exactly the order the runtime path uses -- peek, push the
+                    // canceller, and only then push this frame's output into
+                    // the delay. Measuring through the same path the runtime
+                    // infers through means the alignment cannot disagree
+                    // between them, which is the one error that would be
+                    // invisible and fatal.
+                    let emitted = {
+                        let [d, c, f] = bus_delay.peek_lead(bleed_lead);
+                        d + c + f
+                    };
+                    bleed_cancel.push(emitted);
+                    // Every channel, and every channel drained whatever it is
+                    // doing: `make_buffers` hands out the same queue to both
+                    // ends, so an undrained one grows without bound.
+                    for (ch, buffer) in buffers.iter_mut().enumerate() {
+                        let sample = buffer.pop_front().unwrap_or(0.0);
+                        let residual = bleed_cancel.train(ch, sample);
+                        train.observe(sample, residual);
+                    }
+                    // Full-band noise, not the calibration's 500-8000 Hz sweep:
+                    // the click this has to cancel is white, and a chirp
+                    // measures nothing outside its own band.
+                    let probe = (rng.gen::<f32>() * 2.0 - 1.0) * TRAIN_LEVEL;
+                    bus_delay.push([probe, 0.0, 0.0]);
+                    for channel in data.channels_mut() {
+                        channel[i] = probe;
+                    }
+                    train.step();
+                }
+                if train.finished {
+                    // The probe went through here as a bus; without this it
+                    // replays into the drums trace for a whole compensation.
+                    bus_delay.clear();
+                    // A run that could not clear its own gates leaves the
+                    // filter switched out rather than installed and wrong.
+                    // Asked as a bool, not as a `BleedResult`: that one carries
+                    // a message, and formatting it would allocate here. The
+                    // command builds it, and clears `finished` when it has.
+                    if train.passed() {
+                        bleed_cancel.mark_trained();
+                    }
+                }
+                return Ok(());
+            }
+        }
+
         // Paused freezes everything that moves -- the beat, the file position, the
         // loop buffer -- so resuming picks up exactly where it stopped, and no
         // visual samples are produced so the display holds still.
@@ -336,68 +402,6 @@ fn main() -> Result<(), coreaudio::Error> {
                     for channel in data.channels_mut() {
                         channel[i] = probe;
                     }
-                }
-                return Ok(());
-            }
-        }
-
-        // Measuring the bleed takes the callback over for the same reason, and
-        // one more: anything *you* play during the run is a near-end signal the
-        // filter would try to explain away, which is the exact failure that
-        // made continuous adaptation unusable. Two and a half seconds of
-        // silence is what buys an estimate worth trusting.
-        {
-            let mut train = bleed_training.lock().unwrap();
-            if train.active {
-                if train.just_started {
-                    train.just_started = false;
-                    bleed_cancel.clear();
-                }
-                analyzer.reset();
-                // Normally done further down, which this path returns before.
-                bus_delay.resize(config.buffer_compensation);
-                for i in 0..num_frames {
-                    // Exactly the order the runtime path uses -- peek, push the
-                    // canceller, and only then push this frame's output into
-                    // the delay. Measuring through the same path the runtime
-                    // infers through means the alignment cannot disagree
-                    // between them, which is the one error that would be
-                    // invisible and fatal.
-                    let emitted = {
-                        let [d, c, f] = bus_delay.peek_lead(bleed_lead);
-                        d + c + f
-                    };
-                    bleed_cancel.push(emitted);
-                    // Every channel, and every channel drained whatever it is
-                    // doing: `make_buffers` hands out the same queue to both
-                    // ends, so an undrained one grows without bound.
-                    for (ch, buffer) in buffers.iter_mut().enumerate() {
-                        let sample = buffer.pop_front().unwrap_or(0.0);
-                        let residual = bleed_cancel.train(ch, sample);
-                        train.observe(sample, residual);
-                    }
-                    // Full-band noise, not the calibration's 500-8000 Hz sweep:
-                    // the click this has to cancel is white, and a chirp
-                    // measures nothing outside its own band.
-                    let probe = (rng.gen::<f32>() * 2.0 - 1.0) * TRAIN_LEVEL;
-                    bus_delay.push([probe, 0.0, 0.0]);
-                    for channel in data.channels_mut() {
-                        channel[i] = probe;
-                    }
-                    train.step();
-                }
-                if train.finished {
-                    train.finished = false;
-                    // The probe went through here as a bus; without this it
-                    // replays into the drums trace for a whole compensation.
-                    bus_delay.clear();
-                    let result = train.result();
-                    // A run that could not clear its own gates leaves the
-                    // filter switched out rather than installed and wrong.
-                    if result.phase == BleedPhase::Done {
-                        bleed_cancel.mark_trained();
-                    }
-                    *bleed_result.lock().unwrap() = result;
                 }
                 return Ok(());
             }

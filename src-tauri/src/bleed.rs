@@ -277,6 +277,26 @@ impl BleedTraining {
         }
     }
 
+    /// The verdict as a bool, which is all the audio thread is allowed to ask
+    /// for: `result` below formats a message, and formatting a message
+    /// allocates -- and then dropping the old one frees -- on a thread that
+    /// must do neither. Same split as the calibration, which leaves the
+    /// correlation to the command.
+    pub fn passed(&self) -> bool {
+        let peak_db = if self.peak > 0.0 {
+            20.0 * (self.peak as f64).log10()
+        } else {
+            -120.0
+        };
+        let db = if self.before > 0.0 && self.after > 0.0 {
+            (10.0 * (self.before / self.after).log10()) as f32
+        } else {
+            0.0
+        };
+        peak_db >= MIN_INPUT_PEAK_DB && db >= MIN_REDUCTION_DB
+    }
+
+    /// Built by the command, off the audio thread.
     pub fn result(&self) -> BleedResult {
         let input_peak_db = if self.peak > 0.0 {
             20.0 * (self.peak as f64).log10()
@@ -314,4 +334,5 @@ impl BleedTraining {
         r
     }
 }
+
 

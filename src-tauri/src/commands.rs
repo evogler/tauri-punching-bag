@@ -272,7 +272,13 @@ pub fn cancel_bleed_training(state: State<BleedState>) {
 /// the verdict.
 #[tauri::command]
 pub fn get_bleed_status(state: State<BleedState>) -> crate::bleed::BleedResult {
-    let train = state.0.lock().unwrap();
+    let mut train = state.0.lock().unwrap();
+    // The audio thread signals that a run is over and leaves the verdict to be
+    // written here, where a `String` may be allocated.
+    if train.finished {
+        train.finished = false;
+        *state.1.lock().unwrap() = train.result();
+    }
     let mut result = state.1.lock().unwrap().clone();
     if train.active {
         result.phase = crate::bleed::BleedPhase::Running;

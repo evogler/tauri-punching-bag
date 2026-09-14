@@ -841,6 +841,15 @@ designs are written out at the end because both look right on paper.
   came back" and "something came back and would not cancel" need opposite
   responses. A failed run leaves the canceller switched out, and an untrained
   canceller is a pass-through, not a subtraction.
+- **The audio thread asks for the verdict as a bool, never as the result.**
+  `BleedResult` carries a message, and formatting one allocates -- and then
+  frees the old one -- on the thread that must do neither. `passed()` is the
+  numeric gates alone; the command builds the message. Same split as the
+  calibration, which leaves the correlation to the command.
+- **A run works while paused**, because it sits ahead of the pause check. It is
+  measuring the speaker and the room, which have nothing to do with the
+  transport. The calibration sits *after* that check and so quietly does
+  nothing when paused -- a trap worth fixing there too.
 - **`audio_in_gain` is applied to the prediction, not folded into the weights**,
   so turning the input trim up does not silently invalidate a measurement.
 - **The high pass needs no special handling, by the LTI argument the looper
@@ -852,6 +861,12 @@ designs are written out at the end because both look right on paper.
   -- the same line the high pass draws, for the same reason. The looper's
   *echoes* therefore still carry the bleed; cancelling it there means running
   the reference through the same taps, which is a second history buffer.
+- **A laptop speaker is the hardest case for the linear part.** The built-in
+  output runs its own dynamic EQ and limiting, and that is a nonlinearity which
+  *changes with the content* -- so the response measured against noise is not
+  quite the one a click meets. The probe runs at about the click's own level to
+  narrow the gap, and this is the first thing to suspect if the measured figure
+  comes out low on the laptop and high through an interface.
 - **It does not survive a restart**, and it should: the filter is callback-local
   and the measurement is a property of a device pair, exactly like
   `pairCompensations` in `audio-prefs.json`. ~512 floats per channel per pair.
