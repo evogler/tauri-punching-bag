@@ -109,7 +109,7 @@ export const HELP: Record<string, HelpEntry> = {
   "drums.on": { title: "On", body: "Mutes or unmutes this one part." },
   "drums.sound": {
     title: "Sound",
-    body: "The sample this part plays. Built-in sounds are listed by name; a file you added shows its file name. Red means the file couldn't be found.",
+    body: "The sample this part plays. The built-in kit -- kick, snare, hi-hat, ride -- is listed by name and works on any machine; a file you added shows its file name. Red means the file couldn't be found.",
   },
   "drums.rhythm": {
     title: "Rhythm",
@@ -130,7 +130,7 @@ export const HELP: Record<string, HelpEntry> = {
   "drums.volume": { title: "Volume", body: "This part's volume, up to double." },
   "drums.add": {
     title: "Add sound…",
-    body: "Pick an audio file to play as a new drum part.",
+    body: "Adds a drum part: a sound from the built-in kit, or any audio file. Kit sounds travel with a preset to someone else's machine; a file only does if they have the same file in the same place.",
   },
 
   sectionsOn: {

@@ -2029,6 +2029,28 @@ Files are decoded in Rust by `load_drum_sample` and keyed by path; the callback
 only does a map lookup. Built-ins are keyed by plain name (`"ride"`) so a voice
 can refer to one without knowing the install path.
 
+**The built-in kit** is kick, snare, hi-hat and ride, bundled in
+`src-tauri/samples/` (already a Tauri resource) and loaded by name at startup.
+The names are listed twice and must agree: the loop in `main.rs` and
+`BUILT_IN_DRUMS` in `config.ts`. A kit sound is what makes a preset's drums work
+on someone else's machine, where a file path would not.
+
+- **Loaded with `match`, not `unwrap`.** A missing or unreadable bundled sample
+  is logged and skipped; any voice naming it then shows red as not found. The
+  old `ride` load unwrapped, which would have made a bad resource a crash at
+  launch.
+- **The source files are not all alike and don't need to be.** Kick and snare
+  are 24-bit at 44.1 kHz, the snare stereo; the hi-hat is 16-bit mono at 48 kHz.
+  `get_samples_from_filename` decodes through symphonia's `SampleBuffer<f32>`
+  (any PCM width) and converts rate and channels at load, so they all arrive as
+  device-rate stereo. Checked by a temporary test (run, then deleted) that
+  decoded all four through that path.
+- **Adding a drum part is a menu**: the kit by name, or *From a file…*. It resets
+  to its prompt after each pick, so it reads as an action rather than a setting.
+- The kit sounds came from the owner's own sample folder. This is the default
+  kit the *Interchangeable drum kits* entry below said was missing; roles
+  (`sound?` beside `path`) are still not built.
+
 ### The file player
 
 One file, played along with, looping. `playFile` switches it, `fileVolume` is

@@ -32,7 +32,7 @@ export type PanelProps = {
   loadPreset: (preset: Preset) => void;
 
   rustConfig: RustConfig;
-  addDrumSample: () => void;
+  addDrumSample: (builtIn?: string) => void;
   sampleStatus: Record<string, SampleStatus>;
   chooseFile: () => void;
   fileInfo: FileInfo | null;

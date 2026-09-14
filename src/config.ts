@@ -159,7 +159,9 @@ export const normalizeGains = (
     ? { inputText: formatNumberList(gains), val: gains }
     : gains;
 
-export const BUILT_IN_DRUMS = ["ride"];
+// The built-in kit, loaded by name at startup from the bundle's samples folder.
+// Must match the list in main.rs. Kept in the order a drummer reads a kit.
+export const BUILT_IN_DRUMS = ["kick", "snare", "hi-hat", "ride"];
 
 export const channelPan = (pans: number[], index: number) => pans[index] ?? 0;
 

@@ -127,13 +127,25 @@ fn main() -> Result<(), coreaudio::Error> {
 
     // load samples
     let mut sample_buffers: HashMap<String, Arc<Vec<f32>>> = HashMap::new();
-    let ride_path = &format!("{}/{}", resource_dir, "samples/ride_cropped.wav");
-    // Bundled samples are filed under a plain name so a voice can refer to one
-    // without knowing where the app was installed.
-    sample_buffers.insert(
-        "ride".to_string(),
-        Arc::new(get_samples_from_filename(ride_path).unwrap()),
-    );
+    // The built-in kit. Bundled samples are filed under a plain name so a voice
+    // can refer to one without knowing where the app was installed, and a preset
+    // using them works on any machine. Names must match `BUILT_IN_DRUMS` in
+    // config.ts. A file that fails to load is skipped rather than unwrapped: a
+    // voice naming it then shows as missing, which beats not launching.
+    for (name, file) in [
+        ("kick", "kick.wav"),
+        ("snare", "snare.wav"),
+        ("hi-hat", "hi-hat.wav"),
+        ("ride", "ride_cropped.wav"),
+    ] {
+        let path = format!("{}/samples/{}", resource_dir, file);
+        match get_samples_from_filename(&path) {
+            Ok(samples) => {
+                sample_buffers.insert(name.to_string(), Arc::new(samples));
+            }
+            Err(e) => println!("built-in sample {} failed to load: {:?}", name, e),
+        }
+    }
     let drum_samples_arc = Arc::new(Mutex::new(sample_buffers));
     let drum_samples_state = DrumSamples(drum_samples_arc.clone());
     let drum_samples = drum_samples_arc.clone();

@@ -778,7 +778,12 @@ const App = () => {
       .catch(() => setSampleStatus((s) => ({ ...s, [path]: "error" })));
   };
 
-  const addDrumSample = async () => {
+  const addDrumSample = async (builtIn?: string) => {
+    // A kit sound is already loaded under its name, so there is nothing to pick.
+    if (builtIn) {
+      set("drums", [...get("drums"), makeDrumVoice(builtIn)]);
+      return;
+    }
     let path: string | null = null;
     if (BROWSER_DEBUG_MODE) {
       path = window.prompt("Path to an audio file");
