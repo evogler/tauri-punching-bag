@@ -2710,6 +2710,29 @@ and several of them have since been confirmed. What is genuinely open is here:
   quarantine path, and whether a preset exported from one Mac imports cleanly
   on another.
 
+- **Nothing shipped in v0.3.0 has been used in the app.** Five features built
+  in one unsupervised pass on 2026-09-14 -- `chances`, pane names, recording to
+  WAV, loop record cycles and the global pause key. Each is temp-tested where
+  there was arithmetic to test and each built clean, so what is open is taste
+  and the real machine, not correctness. The things to look at, hardest first:
+  - **The record cycle against the looper**, which is the one with a real
+    design decision in it: a stretch that is not recorded is written as
+    *silence*, so a phrase comes back cleanly, and whether "4 off, 4 on" is
+    what the field should mean by a bare `4` is a judgement that only playing
+    it settles. It is also the thing that was supposed to fix the feedback the
+    guard made worse -- worth trying with `loopFeedbackGuardOn` off.
+  - **What the recorder does with `paused`**: it records nothing while paused,
+    so a file is shorter than the clock. The other answer is silence in the
+    file.
+  - **The global key.** Whether the press arrives with another app in front,
+    and whether ⌘⌥P is free, cannot be known without pressing it. macOS does
+    not report a combination already owned by somebody else, which is why the
+    panel counts presses instead.
+  - **`chances` in the drum row**, which now has six controls and may be
+    cramped, and whether a dropped hit being invisible is a problem.
+  - **The pane name's corner, size and opacity**, all chosen without seeing
+    them.
+
 - **The unmanaged second Mac has not been retried since the ad-hoc era.** The
   notarized build is expected to install with a plain drag, and the managed work
   Mac now does, but that particular machine has not been asked again.

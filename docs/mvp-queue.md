@@ -238,3 +238,9 @@ says so and counts presses instead of pretending. Temp-tested against a mocked
 refusal, restore, StrictMode's double mount) and deleted. Built clean, 3
 expected warnings. Open: never pressed in the running app — whether macOS
 swallows it before the webview's own `keydown`, and whether ⌘⌥P is free.
+**Released as v0.3.0, 2026-09-14.** All five built, committed and published --
+signed, notarized and stapled, with the updater manifest. Tier 1 and Tier 2 of
+this queue are now empty; what is left is Tier 3, all of which wants the owner.
+Nothing in the release has been used in the app -- see *Verification* in
+CLAUDE.md for what to look at and in what order.
+
