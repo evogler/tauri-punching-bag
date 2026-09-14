@@ -2182,8 +2182,15 @@ and several of them have since been confirmed. What is genuinely open is here:
   rather than transformative, and well short of the simulated ceiling. Where the
   rest of it goes is the open question: the speaker's own DSP, a response longer
   than 11.6 ms, and drift between measuring and playing are the candidates, and
-  the measurement's own figure against the live one separates them. Tracking was
-  built after that and has not been looked at at all.
+  the measurement's own figure against the live one separates them.
+  **The measure button reported 14.8 dB on that machine**, against roughly 10 dB
+  observed -- so the limit is mostly in the *fit*, not in drift between
+  measuring and playing. That points at the response being longer than the
+  11.6 ms window, or at the speaker's own DSP, and widening `TAPS` is the cheap
+  thing to try. Tracking helped visibly when the laptop was repositioned, which
+  is exactly what it was built for. Not looked at at all: the looper path, and
+  the live readout -- whose first version only showed a number while it was
+  *learning*, which is almost never.
 - **The unmanaged second Mac has not been retried since the ad-hoc era.** The
   notarized build is expected to install with a plain drag, and the managed work
   Mac now does, but that particular machine has not been asked again.
