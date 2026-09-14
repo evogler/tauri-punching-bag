@@ -260,14 +260,10 @@ export const defaultRustConfig = {
   // the microphone and draw bars of their own over the thing you are trying to
   // look at.
   //
-  // This subtracts an *envelope*, not a waveform -- `bleed_cancel_amount` in
-  // structs.rs has the why, which is that the click is white noise and so
-  // cannot be cancelled by anything that isn't aligned to the frame.
+  // A real subtraction, phase-accurate and sample by sample: it learns the
+  // speaker -> microphone response from the click and takes the echo out,
+  // leaving what was played underneath. No amount to set -- see bleed.rs.
   bleedCancelOn: false,
-  // Plain numbers rather than expressions, because the control is a slider and
-  // there is nowhere to type one -- and because the right value is a property
-  // of the room, not something arithmetic over the parameters could know.
-  bleedCancelAmount: 0,
   audioMonitorOn: false,
   beatsToLoop: numExpr(4),
   // How many times a phrase comes back, one `beatsToLoop` apart each time.

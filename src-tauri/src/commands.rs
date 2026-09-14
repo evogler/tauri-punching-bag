@@ -7,7 +7,8 @@ use crate::prefs::{load as load_prefs, save as save_prefs, AudioPrefs};
 use crate::read_audio_file::{decode_audio_file, get_samples_from_filename, to_device_stereo};
 use crate::stretch::{desired_ratio, request as request_stretch};
 use crate::structs::{
-    AnalysisFrames, AnalysisOutputBuffer, BeatResetState, CalibrationState, Config, ConfigState,
+    AnalysisFrames, AnalysisOutputBuffer, BeatResetState, BleedState, CalibrationState, Config,
+    ConfigState,
     DrumSamples, InputChannelCount, LogState, LoopBufferState, Mp3BufferState, Payload,
     SampleOutputBuffer, VisualSamples,
 };
@@ -245,6 +246,39 @@ pub fn set_audio_prefs(app_handle: tauri::AppHandle, prefs: AudioPrefs) -> Resul
 #[tauri::command]
 pub fn restart_app(app_handle: tauri::AppHandle) {
     app_handle.restart();
+}
+
+/// Starts a bleed measurement: a couple of seconds of noise through the
+/// speaker with everything else muted, fitting the filter against what comes
+/// back. Everything it needs already exists on the audio thread; this only
+/// flips the switch.
+#[tauri::command]
+pub fn start_bleed_training(state: State<BleedState>) {
+    *state.1.lock().unwrap() = crate::bleed::BleedResult {
+        phase: crate::bleed::BleedPhase::Running,
+        ..Default::default()
+    };
+    let frames = (crate::bleed::TRAIN_SECONDS * crate::constants::sample_rate()) as usize;
+    state.0.lock().unwrap().start(frames);
+}
+
+#[tauri::command]
+pub fn cancel_bleed_training(state: State<BleedState>) {
+    state.0.lock().unwrap().cancel();
+    *state.1.lock().unwrap() = crate::bleed::BleedResult::default();
+}
+
+/// Polled by the panel while a run is in flight, and read once afterwards for
+/// the verdict.
+#[tauri::command]
+pub fn get_bleed_status(state: State<BleedState>) -> crate::bleed::BleedResult {
+    let train = state.0.lock().unwrap();
+    let mut result = state.1.lock().unwrap().clone();
+    if train.active {
+        result.phase = crate::bleed::BleedPhase::Running;
+        result.progress = train.progress();
+    }
+    result
 }
 
 /// Begins a run. Everything it needs is allocated here, off the audio thread;

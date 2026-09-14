@@ -226,30 +226,21 @@ pub struct Config {
     /// looper keeps recording the dry signal and the picture's echoes are
     /// filtered on the way out instead.
     pub high_pass_audio: bool,
-    /// Discount the picture by the app's own output, for practising on
-    /// speakers: the click and the drums come back through the microphone and
-    /// draw bars of their own, which is the thing that makes your own playing
-    /// hard to pick out.
+    /// Subtract the app's own output back out of the picture, for practising
+    /// on speakers: the click and the drums come back in through the
+    /// microphone and draw bars of their own over what you are trying to look
+    /// at. Phase-accurate and sample by sample -- it removes the bleed and
+    /// leaves what was played underneath it, rather than dimming the span of
+    /// time the app happened to be making a noise in. See `bleed.rs`.
+    ///
+    /// No amount to set: the filter learns its own gain. It takes a few
+    /// seconds of clicks to converge, and the panel reports what it is
+    /// removing so that is visible rather than guessed at.
     ///
     /// Display only. `input_audio` and `input_raw` are untouched, so the looper
     /// still records what the microphone actually heard and the analyzer still
     /// measures it -- the same line the high pass draws, for the same reason.
     pub bleed_cancel_on: bool,
-    /// How much of the emitted envelope to take off the drawn magnitude.
-    ///
-    /// **This subtracts an envelope, not a waveform**, and the click is why.
-    /// It is `rng.gen()` -- white noise -- so its autocorrelation is a spike
-    /// one frame wide: a subtraction misaligned by even a single frame is
-    /// uncorrelated with what it is trying to remove and *adds* 3 dB instead.
-    /// `buffer_compensation` is only good to about three frames, and the
-    /// speaker smears the burst over several more, so nothing that subtracts
-    /// the signal itself can work here without a measured impulse response.
-    /// Taking the magnitude down by what we know we emitted needs no phase
-    /// alignment at all, and for a peak display it draws the same picture.
-    ///
-    /// Tuned by eye -- turn it up until the click stops drawing. Unsigned,
-    /// because an envelope has no polarity to get backwards.
-    pub bleed_cancel_amount: f32,
     pub looping_on: bool,
     pub click_on: bool,
     /// Run the practice cycle. Off, everything sounds continuously, which is
@@ -448,6 +439,13 @@ impl BusDelay {
     /// With no compensation set `push` passes this frame straight through,
     /// which is not a delayed signal at all -- so this answers silence, and
     /// the bleed subtraction is inert rather than wrong.
+    /// Drops what is in flight. Used after the bleed measurement, whose probe
+    /// is pushed through here as a bus and would otherwise replay into the
+    /// drums trace for a whole compensation afterwards.
+    pub fn clear(&mut self) {
+        self.slots.iter_mut().for_each(|s| *s = [0.0; BUS_COUNT]);
+    }
+
     pub fn peek_lead(&self, lead: usize) -> [f32; BUS_COUNT] {
         if self.slots.is_empty() {
             return [0.0; BUS_COUNT];
@@ -465,6 +463,14 @@ impl BusDelay {
         out
     }
 }
+
+/// A bleed-measuring run and its verdict, split the way `CalibrationState` is:
+/// the callback touches the counters every callback and the result only when a
+/// run ends.
+pub struct BleedState(
+    pub Arc<Mutex<crate::bleed::BleedTraining>>,
+    pub Arc<Mutex<crate::bleed::BleedResult>>,
+);
 
 /// The audio thread's calibration buffers, plus the last completed result.
 /// Locked once per callback, like the display buffers -- never per frame.

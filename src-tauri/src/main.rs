@@ -4,6 +4,7 @@
 )]
 
 mod analysis;
+mod bleed;
 mod commands;
 mod constants;
 mod calibration;
@@ -20,7 +21,12 @@ mod util;
 extern crate coreaudio;
 
 use crate::analysis::{Analyzer, OnsetParams, BINS, MAX_ANALYSIS_CHANNELS};
+use crate::bleed::{
+    BleedCanceller, BleedPhase, BleedResult, BleedTraining, LEAD as BLEED_LEAD,
+    TAPS as BLEED_TAPS, TRAIN_LEVEL,
+};
 use crate::commands::{
+    cancel_bleed_training, get_bleed_status, start_bleed_training,
     cancel_calibration, get_active_devices, get_analysis, get_audio_prefs,
     get_calibration_status, get_input_channel_count, get_sample_rate, get_samples,
     list_audio_devices, load_drum_sample, reset_beat, restart_app, set_audio_prefs, set_config,
@@ -35,7 +41,7 @@ use crate::io_channels::{
 };
 use crate::read_audio_file::get_samples_from_filename;
 use crate::structs::{
-    AnalysisOutputBuffer, BeatResetState, BusDelay, CalibrationState, ConfigState, DrumSamples,
+    AnalysisOutputBuffer, BeatResetState, BleedState, BusDelay, CalibrationState, ConfigState, DrumSamples,
     InputChannelCount, LogState, LoopBuffer, LoopBufferState, Mp3Buffer, Mp3BufferState,
     SampleOutputBuffer, SoundingSample,
 };
@@ -187,19 +193,19 @@ fn main() -> Result<(), coreaudio::Error> {
     let mut analyzer = Analyzer::new(sample_rate());
 
     let mut click_sound_counter: i32 = 0;
-    // Peak-hold envelope of what the speaker emitted, for the bleed
-    // subtraction. Instant attack and an exponential release: long enough to
-    // cover the room's tail on a click, far short of a beat at any tempo worth
-    // practising at, so it cannot duck the gap between hits.
-    let mut bleed_env: f32 = 0.0;
-    // 15 ms. Long enough that one setting of the amount covers a whole click
-    // and the room's tail behind it -- at 3 ms the envelope falls away under
-    // the burst and the amount needed triples -- and short enough that it has
-    // decayed to nothing well before the next beat at any tempo. Simulated: a
-    // hit 100 ms after a click keeps its full height.
-    let bleed_release = (-1.0f64 / (0.015 * sample_rate())).exp() as f32;
-    // How far ahead of the echo to arm the envelope. See `peek_lead`.
-    let bleed_lead = (0.005 * sample_rate()) as usize;
+    // Learns the speaker -> microphone response from the click and subtracts
+    // the app's own output back out of the picture. See `bleed.rs`.
+    let mut bleed_cancel = BleedCanceller::new(input_channels, BLEED_TAPS);
+    // Where in the filter's window the echo is expected to sit. See `LEAD`.
+    let bleed_lead = BLEED_LEAD;
+    // A measuring run, and its verdict. Two mutexes rather than one for the
+    // same reason the calibration has two: the callback touches the counters
+    // every callback and the result only when a run ends.
+    let bleed_training_arc = Arc::new(Mutex::new(BleedTraining::default()));
+    let bleed_result_arc = Arc::new(Mutex::new(BleedResult::default()));
+    let bleed_state = BleedState(bleed_training_arc.clone(), bleed_result_arc.clone());
+    let bleed_training = bleed_training_arc.clone();
+    let bleed_result = bleed_result_arc.clone();
     let mut rng = rand::thread_rng();
 
     let log_state = LogState(Arc::new(Mutex::new(io_log)));
@@ -335,6 +341,68 @@ fn main() -> Result<(), coreaudio::Error> {
             }
         }
 
+        // Measuring the bleed takes the callback over for the same reason, and
+        // one more: anything *you* play during the run is a near-end signal the
+        // filter would try to explain away, which is the exact failure that
+        // made continuous adaptation unusable. Two and a half seconds of
+        // silence is what buys an estimate worth trusting.
+        {
+            let mut train = bleed_training.lock().unwrap();
+            if train.active {
+                if train.just_started {
+                    train.just_started = false;
+                    bleed_cancel.clear();
+                }
+                analyzer.reset();
+                // Normally done further down, which this path returns before.
+                bus_delay.resize(config.buffer_compensation);
+                for i in 0..num_frames {
+                    // Exactly the order the runtime path uses -- peek, push the
+                    // canceller, and only then push this frame's output into
+                    // the delay. Measuring through the same path the runtime
+                    // infers through means the alignment cannot disagree
+                    // between them, which is the one error that would be
+                    // invisible and fatal.
+                    let emitted = {
+                        let [d, c, f] = bus_delay.peek_lead(bleed_lead);
+                        d + c + f
+                    };
+                    bleed_cancel.push(emitted);
+                    // Every channel, and every channel drained whatever it is
+                    // doing: `make_buffers` hands out the same queue to both
+                    // ends, so an undrained one grows without bound.
+                    for (ch, buffer) in buffers.iter_mut().enumerate() {
+                        let sample = buffer.pop_front().unwrap_or(0.0);
+                        let residual = bleed_cancel.train(ch, sample);
+                        train.observe(sample, residual);
+                    }
+                    // Full-band noise, not the calibration's 500-8000 Hz sweep:
+                    // the click this has to cancel is white, and a chirp
+                    // measures nothing outside its own band.
+                    let probe = (rng.gen::<f32>() * 2.0 - 1.0) * TRAIN_LEVEL;
+                    bus_delay.push([probe, 0.0, 0.0]);
+                    for channel in data.channels_mut() {
+                        channel[i] = probe;
+                    }
+                    train.step();
+                }
+                if train.finished {
+                    train.finished = false;
+                    // The probe went through here as a bus; without this it
+                    // replays into the drums trace for a whole compensation.
+                    bus_delay.clear();
+                    let result = train.result();
+                    // A run that could not clear its own gates leaves the
+                    // filter switched out rather than installed and wrong.
+                    if result.phase == BleedPhase::Done {
+                        bleed_cancel.mark_trained();
+                    }
+                    *bleed_result.lock().unwrap() = result;
+                }
+                return Ok(());
+            }
+        }
+
         // Resolved once per callback. Building these per frame -- as the click
         // rhythm used to be -- meant tens of thousands of allocations a second
         // on the audio thread.
@@ -390,8 +458,7 @@ fn main() -> Result<(), coreaudio::Error> {
         // The buffer holds whatever is *sounded*, so when the audio is left dry
         // the picture's echoes have to be filtered on the way out instead.
         let high_pass_echoes = high_pass_on && !config.high_pass_audio;
-        let bleed_cancel_on = config.bleed_cancel_on;
-        let bleed_cancel_amount = config.bleed_cancel_amount;
+        let bleed_cancel_on = config.bleed_cancel_on && bleed_cancel.trained();
         for hp in input_high_pass
             .iter_mut()
             .chain(loop_high_pass.iter_mut())
@@ -535,25 +602,20 @@ fn main() -> Result<(), coreaudio::Error> {
                 let emitted = {
                     let [d, c, f] = bus_delay.peek_lead(bleed_lead);
                     let dry = d + c + f;
-                    // Through the same high pass the picture is drawn through,
-                    // or the envelope describes a signal nobody is looking at.
-                    // A kick drum is almost entirely under a 400 Hz cutoff: it
-                    // contributes its full amplitude to an unfiltered envelope
-                    // and almost nothing to the filtered picture, so the
-                    // subtraction comes out enormous for the whole length of
-                    // the sample. Run unconditionally, like the others.
+                    // Through the same high pass the picture is drawn through.
+                    // The filter is linear and time-invariant, so regressing
+                    // the filtered input on the filtered reference recovers the
+                    // *same* acoustic response the raw pair would have --
+                    // H(x - h*d) = H(x) - h*H(d). The weights therefore survive
+                    // the high pass being switched on and off, and the
+                    // canceller is working on exactly the signal being drawn.
+                    // Run unconditionally, like the other filters.
                     let filtered = bleed_high_pass.process(dry);
-                    if high_pass_on { filtered.abs() } else { dry.abs() }
+                    if high_pass_on { filtered } else { dry }
                 };
-                // Run whether or not it is switched on, like the filters and
-                // for the same reason -- an envelope caught up mid-phrase is
-                // one that was never stale.
-                bleed_env = emitted.max(bleed_env * bleed_release);
-                let duck = if bleed_cancel_on {
-                    bleed_env * bleed_cancel_amount
-                } else {
-                    0.0
-                };
+                // Pushed whether or not it is switched on, so the history is
+                // never stale when it is.
+                bleed_cancel.push(emitted);
 
                 let mut monitor_out: [S; 2] = [0.0, 0.0];
                 for ch in 0..input_frame.len() {
@@ -565,23 +627,14 @@ fn main() -> Result<(), coreaudio::Error> {
                     let filtered = input_high_pass[ch].process(raw);
                     input_raw[ch] = raw;
                     input_frame[ch] = if high_pass_on { filtered } else { raw };
-                    // Scale the magnitude down rather than subtracting the
-                    // duck off it. Subtracting is a cliff: everything quieter
-                    // than the duck floors at exactly zero, so a passage played
-                    // under the bleed is not reduced but *erased*, and what you
-                    // see is a black band at every beat rather than a smaller
-                    // click. This ratio leaves the signal alone where it stands
-                    // well above the duck, fades it smoothly where it doesn't,
-                    // and can never reach zero while there is something there.
-                    //
-                    // It is also honest about the ceiling: where the bleed is
-                    // genuinely louder than the playing, no amount of magnitude
-                    // arithmetic can separate them, and this draws a reduced
-                    // bar instead of pretending by blanking one.
-                    if duck > 0.0 {
-                        let v = input_frame[ch];
-                        let m = v.abs();
-                        input_frame[ch] = v * (m / (m + duck));
+                    // Subtract the speaker's own output back out, sample by
+                    // sample and phase-accurate, leaving whatever was played
+                    // underneath it standing. Display only -- `input_audio` and
+                    // `input_raw` are untouched, so the looper still records
+                    // what the microphone heard.
+                    if bleed_cancel_on {
+                        input_frame[ch] =
+                            bleed_cancel.cancel(ch, input_frame[ch], config.audio_in_gain);
                     }
                     let audio = if high_pass_audio { filtered } else { raw };
                     input_audio[ch] = audio;
@@ -977,6 +1030,7 @@ fn main() -> Result<(), coreaudio::Error> {
         .manage(InputChannelCount(input_channels))
         .manage(active_devices)
         .manage(calibration_state)
+        .manage(bleed_state)
         .manage(drum_samples_state)
         .invoke_handler(tauri::generate_handler![
             get_samples,
@@ -993,6 +1047,9 @@ fn main() -> Result<(), coreaudio::Error> {
             restart_app,
             start_calibration,
             get_calibration_status,
+            get_bleed_status,
+            start_bleed_training,
+            cancel_bleed_training,
             cancel_calibration,
             load_drum_sample,
         ])

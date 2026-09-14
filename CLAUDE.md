@@ -801,87 +801,99 @@ it isn't throwaway work.
 
 ### Speaker bleed
 
-`bleedCancelOn` / `bleedCancelAmount`, in the Rust config, applied per input
-channel in the callback. For practising on speakers rather than headphones,
-where the click and the drums come back in through the microphone and draw bars
-of their own over the thing you are trying to look at. Display only, like the
-high pass, and off by default.
+`bleedCancelOn` in the Rust config, `bleed.rs`, and a **measure bleed** button
+in the signal tab. For practising on speakers rather than headphones, where the
+click and the drums come back in through the microphone and draw bars of their
+own over what you are trying to look at. Display only, off by default.
 
-- **It subtracts an *envelope*, not a waveform, and the click is why.** The
-  click is `rng.gen()` -- white noise -- so its autocorrelation is one frame
-  wide, and a subtraction misaligned by a single frame is uncorrelated with what
-  it is trying to remove and *adds* 3 dB. Simulated against a modelled speaker
-  and room: a least-squares one-tap subtraction leaves the click bar at 0.83-1.00x
-  at every alignment including a perfect one, because the speaker smears the
-  burst over several frames regardless. Nothing that subtracts the signal itself
-  works here without a measured impulse response. Taking the *magnitude* down by
-  what we know we emitted needs no phase alignment at all, and the picture is a
-  column peak, so it draws the same answer.
-- **So there is no polarity to get backwards**, which a waveform subtraction
-  would have had -- speaker and microphone polarity are both unknown, and the
-  wrong sign draws the click *taller*. An envelope has no sign. The amount is
-  unsigned for that reason.
-- **The reference is free, and it is already delayed by the right amount.**
-  `BusDelay` holds the drums, click and file for `buffer_compensation` frames so
-  they draw on the beat they sounded on -- and that compensation *is* the
-  measured round trip, so what it hands back is exactly the output the
-  microphone is returning the echo of now. `peek_lead` reads it without
-  advancing, because the input loop runs at the top of a frame and `push` at the
-  bottom.
+**It subtracts the waveform, and it is measured once and then frozen.** Both
+halves of that were arrived at the other way round first, and the two rejected
+designs are written out at the end because both look right on paper.
+
+- **The reference is free and already delayed by the right amount.** `BusDelay`
+  holds the drums, click and file for `buffer_compensation` frames so they draw
+  on the beat they sounded on -- and that compensation *is* the measured round
+  trip, so what it hands back is the output the microphone is returning the echo
+  of now. `peek_lead` reads it without advancing, since the input loop runs at
+  the top of a frame and `push` at the bottom.
 - **The three synthesised buses, not the output channel.** The output also
   carries the monitor and the looper's echoes, and subtracting those would take
   your own playing out of your own trace.
-- **The envelope is armed 5 ms early**, by reading *forward* into the delay ring
-  at output that has not echoed back yet. Without it the subtraction survives
-  three frames of error in `buffer_compensation` and the leading edge of every
-  click punches through; with it the window is about -2 ms to +5 ms. 5 ms
-  because that is already the spread `MAX_SPREAD_MS` refuses to answer beyond,
-  so it is the app's own standing claim about how well the round trip is known.
-- **15 ms release, instant attack.** At 3 ms the envelope falls away under the
-  burst and the amount needed triples; at 30 ms it starts eating what you play
-  after the beat, and a hit on the beat is the whole point of the display.
-- **It scales the magnitude, it does not subtract from it.** `m / (m + duck)`,
-  so the signal is left alone where it stands well above the duck and faded
-  smoothly where it does not. Subtracting was the first attempt and it is a
-  cliff: everything quieter than the duck floors at exactly zero, so a passage
-  played *under* the bleed is not reduced but erased. What that draws is a black
-  band at every beat with the playing gone from inside it -- which is worse than
-  the problem, and is what the first build actually did.
-- **The ceiling is real and the ratio is honest about it.** Where the bleed is
-  genuinely louder than the playing -- a laptop speaker inches from the laptop
-  microphone, say -- the two are not separable by any arithmetic on magnitudes,
-  because the information that tells them apart is in the phase. This draws a
-  reduced bar rather than pretending by blanking one. Removing bleed that is
-  *over* the playing needs the impulse response; see *Discussed but not built*.
-- **The amount is cubed on the way in from the slider**, which is the difference
-  between a usable control and an unusable one. The reference is the emitted
-  signal and is order 1; the microphone's copy of it is order 0.01; so the
-  multiplier that lines them up is a few thousandths, and a linear slider's
-  first step past zero was already ten times too much. The config holds the
-  real multiplier and the panel takes its cube root back, so the stored number
-  stays the meaningful one.
-- **Tuned by eye, and that is the design.** The right amount is a property of
-  the speaker's volume, the microphone's gain and the distance between them, so
-  there is no default that means anything and it starts at 0. Turn it up until
-  the click stops drawing and stop there: overshooting costs height on your own
-  hits, and the simulation above is the difference between 0.88x and 0.40x.
+- **The probe is full-band noise, not the calibration's sweep.** The click it
+  has to cancel is `rng.gen()` -- white -- and a 500-8000 Hz chirp measures
+  nothing about the response outside its own band. It runs at roughly the
+  click's own level, because a response measured quiet does not describe a
+  speaker being driven loud, which is where its nonlinearity lives.
+- **Measured through exactly the path it will be inferred through.** The
+  training loop peeks `bus_delay`, pushes the canceller, and only then pushes
+  the probe into the delay -- the same order, the same functions. An alignment
+  measured any other way could disagree with the runtime's by a few frames,
+  which is the one error that is both fatal and invisible.
+- **The window is biased late, not centred.** A reflection is always late --
+  no room returns sound before the direct path -- so the early side only has to
+  cover `buffer_compensation` reading long, while the late side has to cover it
+  reading short *and* hold the whole response. `LEAD` is a quarter of `TAPS`:
+  2.9 ms early, 8.7 ms late. Centring it cost a response 2.2 ms long its tail
+  whenever the compensation read 1 ms long, and cancellation fell from 117 dB
+  to 24.
+- **It refuses rather than installing a filter it cannot stand behind**, the
+  way the calibration does, and shows both measurements either way -- "nothing
+  came back" and "something came back and would not cancel" need opposite
+  responses. A failed run leaves the canceller switched out, and an untrained
+  canceller is a pass-through, not a subtraction.
+- **`audio_in_gain` is applied to the prediction, not folded into the weights**,
+  so turning the input trim up does not silently invalidate a measurement.
+- **The high pass needs no special handling, by the LTI argument the looper
+  already uses.** The probe is measured raw and the runtime reference is
+  filtered, and `H(x - h*d) = H(x) - h*H(d)` -- so the same response is correct
+  in both domains, and toggling the filter cannot invalidate a measurement.
 - **Display only.** `input_audio` and `input_raw` are untouched, so the looper
   records what the microphone actually heard and the analyzer still measures it
-  -- the same line the high pass draws, for the same reason.
-  - **So the looper's echoes still carry the bleed.** One buffer holds the
-    sounded signal, and unlike the high pass there is no LTI argument to rescue
-    it: this subtracts a *different* signal rather than filtering the stored one.
-    Cancelling it in the echoes means running the reference through the same
-    taps, which is a second history buffer. Not built.
-  - **The reference goes through the same high pass the picture does**, on its
-    own filter instance. Without that the envelope describes a signal nobody is
-    looking at: a kick drum is almost entirely under a 400 Hz cutoff, so it
-    contributes its full amplitude to an unfiltered envelope and nearly nothing
-    to the filtered picture, and the duck comes out enormous for the whole
-    length of the sample.
-- **The envelope follower runs whether or not the switch is on**, like the
-  filters and for the same reason: one caught up mid-phrase is one that was
-  never stale.
+  -- the same line the high pass draws, for the same reason. The looper's
+  *echoes* therefore still carry the bleed; cancelling it there means running
+  the reference through the same taps, which is a second history buffer.
+- **It does not survive a restart**, and it should: the filter is callback-local
+  and the measurement is a property of a device pair, exactly like
+  `pairCompensations` in `audio-prefs.json`. ~512 floats per channel per pair.
+  Not built; re-measuring takes two and a half seconds.
+
+Simulated end to end against a modelled speaker and room (run, then deleted):
+124 dB removed in the ideal case, **unchanged by loud playing over the top**,
+which is the whole point of freezing it; 113 dB with the compensation 2 ms long
+and a refusal at 4 ms; 30 dB with it 4 ms short; and 43 dB against a speaker
+with 6% third-harmonic distortion, which is the ceiling no linear filter passes.
+
+#### Two designs that were tried first
+
+Both are recorded because both are the obvious thing to reach for, and the
+reasons they fail are not visible until you measure.
+
+- **Taking the magnitude down by the emitted envelope.** No phase alignment
+  needed, and for a peak display it draws the same picture -- *if* your playing
+  is louder than the bleed. It is not, on a laptop, and then "sink the bleed
+  below the playing" and "mute the playing" are the same operation: what it
+  drew was a black band at every beat with the playing gone from inside it.
+  Subtracting a constant from a magnitude is a cliff, and scaling instead
+  (`m / (m + duck)`) only makes the same loss gradual. The information that
+  separates two sounds arriving at once is in the phase, and an envelope has
+  thrown it away.
+- **A continuously adapting NLMS filter.** The click is fresh white noise every
+  beat, which makes it ideal excitation -- maximally persistently exciting, and
+  uncorrelated with what you play. What kills it is that playing over the top is
+  not an interruption here, it is the entire activity: permanent double-talk.
+  Simulated across four regimes it reached 15 dB with the bleed well above the
+  playing, 4 dB with them comparable, and **9 dB worse than doing nothing** with
+  the playing above the bleed, where it settled into explaining part of *you*
+  out of the reference. Regularising the step against the unexplained power
+  helped and did not fix it; leakage did not help at all.
+  - **The fatal part is that the app cannot tell which regime it is in.** Energy
+    in against energy out -- the only self-check available without knowing the
+    answer -- reported *plus* 2 dB where the truth was minus 9. A filter that
+    can quietly make the picture worse and cannot be told that it is has no
+    business running unattended. Measuring in two and a half seconds of silence
+    removes the problem instead of managing it, and converges four orders of
+    magnitude further besides, because the probe is continuous rather than the
+    200 frames a beat a click affords.
 
 ### Input capture
 
@@ -2041,14 +2053,14 @@ and several of them have since been confirmed. What is genuinely open is here:
   to calibrate against, since the callback knows its trigger times exactly.
 - **`buffer_compensation` at 48 kHz.** Tuned by ear at 44.1 kHz, so ~8 ms short
   on a 48 kHz device. `measure latency` answers this in about ten seconds.
-- **Speaker bleed has never been tried against a real speaker.** The arithmetic
-  is simulated against a modelled room -- that waveform subtraction cannot work
-  on a noise click, that envelope subtraction sinks the click bar to a tenth
-  while a hit on the beat keeps 0.88 of its height, and what the lead and the
-  release buy. What no simulation can say is whether a real room's bleed
-  behaves like the model, whether one amount holds across the click and the
-  drums together, or whether the picture that comes out is actually easier to
-  play against.
+- **Speaker bleed has never been tried against a real speaker.** The whole
+  chain is simulated against a modelled room and a modelled nonlinear speaker,
+  and the two *rejected* designs were both killed by measurement rather than by
+  argument (see *Speaker bleed*). What no simulation can say is whether a real
+  laptop's response fits in 11.6 ms, whether a measurement holds while you move
+  around in front of the machine, how much of the real ceiling is the speaker's
+  distortion, or whether what is left is actually easier to play against. The
+  first thing to look at is the number the measurement itself reports.
 - **The unmanaged second Mac has not been retried since the ad-hoc era.** The
   notarized build is expected to install with a plain drag, and the managed work
   Mac now does, but that particular machine has not been asked again.
@@ -2422,38 +2434,22 @@ See *Updates*.
   first: they're the ground truth any detector would be checked against, and the
   point of the tool is that it's authoritative.
 - **Cancelling the app's own output out of the *sound*.** The picture half is
-  built -- see *Speaker bleed* -- but it works by taking the magnitude down,
-  which is no use to the looper or the monitor, where the waveform itself has to
-  come out. That needs the real thing: the speaker and room's impulse response,
-  convolved with what was emitted and subtracted sample by sample.
-  - **The measurement is already being taken and thrown away.** A swept sine
-    correlated against its own reference is the textbook way to measure an
-    impulse response, and `measure_probe` in `calibration.rs` computes exactly
-    that correlation over 500 ms of lags -- then keeps the index of the tallest
-    bin and drops the vector. Two changes make it usable: keep `corr`, and store
-    it signed rather than `acc.abs()`, which throws away the polarity a
-    subtraction needs.
-  - **The chirp's band is the catch.** It sweeps 500-8000 Hz, so the
-    correlation only knows the response inside that band -- and the click is
-    white, with most of its energy outside it. Cancelling a noise click needs a
-    full-band measurement: widen the probe, or measure against the click itself,
-    which is already a known white signal emitted on every beat.
-  - **Truncated to 5-10 ms, not the whole tail.** What makes a bar tall is the
-    direct path and the speaker's own ringing; the reverb tail is diffuse and
-    low. A few hundred taps per channel, which is affordable -- and `realfft` is
-    already in the tree if partitioned convolution is ever wanted.
-  - **Static, fitted once, never adapting.** An adaptive filter is the wrong
-    tool here twice over: you are deliberately playing *along with* the
-    reference, which is permanent double-talk, and a metronome is about as
-    non-exciting an input as exists, so the correlation matrix is near-singular
-    and anything at the period gets attributed ambiguously. It would learn to
-    cancel your own playing. The calibration measures in silence, which is the
-    one moment the problem is perfectly conditioned.
-  - **Expect 20-25 dB and no more**, because the speaker is nonlinear and a
-    linear filter cannot touch that. Real echo cancellers get the rest from a
-    nonlinear residual suppressor, which is spectral gating, which smears
-    transients -- the same objection that ruled out a phase vocoder for the
-    stretch. Not worth having here.
+  built and measured -- see *Speaker bleed* -- and the filter it fits is a real
+  impulse response, so the hard part is done. What is missing is applying it to
+  `input_audio` as well as `input_frame`, so the looper stops recording the
+  click and the monitor stops feeding it back.
+  - **The bar is much higher than for the picture.** A bar that is 20 dB down is
+    invisible; a click that is 20 dB down is still audible in a quiet passage,
+    and the residual has a spectrum rather than just a level. The measured
+    ceiling is the speaker's nonlinearity -- 43 dB in simulation against 6%
+    distortion, and a real laptop speaker driven hard is worse.
+  - **Everything past the linear filter costs transients.** Real echo
+    cancellers get their last 20 dB from a nonlinear residual suppressor, which
+    is spectral gating, which smears exactly what this app exists to let you
+    place. The same objection that ruled out a phase vocoder for the stretch.
+  - **It would want the filter persisted first** (see *Speaker bleed*), because
+    recording a take through a filter measured for a different volume is a
+    quieter kind of wrong than drawing one.
   - Headphones remain the answer for the sound.
 - **Decimated sample transport.** Send per-block peaks from Rust instead of raw
   samples. The frontend already reduces to per-pixel peaks, so the picture is
