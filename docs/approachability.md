@@ -5,7 +5,10 @@ makes it powerful. Nothing here removes a feature, a setting or the text
 inputs. The goal is that a newcomer can get to "playing against a grid" without
 understanding the rest, and can find the rest when they want it.
 
-Written 2026-09-13. Nothing in it is built yet.
+Written 2026-09-13. Nothing in it is built yet, with one exception noted
+below: **one row per note** (CLAUDE.md has the section) was built on the day
+this was written, because it is the setting the owner actually practises with
+and it needed no restructuring to add.
 
 ## Principles
 
@@ -87,18 +90,23 @@ title, a one-line description and a "try this" line.
 | Count-off, then groove | the practice cycle | change the order |
 | Loop yourself | looper, echoes | play a phrase, then play over it |
 | Play along with a song | file player, file beats, a–b repeat | choose a file |
-| Random tempo drill | parameters, `range`, ⌘R | reroll between passes |
 | Speakers, not headphones | speaker bleed | measure, then play |
+
+Advanced, listed after a divider in the picker:
+
+| Example | Teaches | Try this |
+|---|---|---|
+| Random tempo drill | parameters, `range`, ⌘R | reroll between passes |
 
 Implementation notes:
 
 - **They load through `loadPreset`**, so they get the existing guarantees for
   free: merged over the defaults, and `bufferCompensation` carried across so an
   example never overwrites a measured latency.
-- **Kept separately from user presets.** Bundled as a TS module rather than
-  seeded into localStorage, so an update can improve them and a user can't
-  delete them by accident. "Save as…" from an example makes an ordinary user
-  preset.
+- **A separate picker from saved presets** (decided 2026-09-13). Bundled as a
+  TS module rather than seeded into localStorage, so an update can improve them
+  and a user can't delete them by accident. Saving after loading an example
+  makes an ordinary user preset.
 - **Built from real config by saving from the running app**, not written by
   hand. A hand-written preset is the `audioSubdivisions` problem in CLAUDE.md
   (a `val` that isn't what its `inputText` parses to). A temp test that
@@ -112,57 +120,203 @@ Implementation notes:
 
 ## Phase 2: reorganise, rename, add the help panel
 
-### New tabs, organised by task
+### Order of work
 
-| Tab | Holds |
-|---|---|
-| **Play** | tempo, click, drums, practice cycle, file |
-| **Loop** | looper (on, beats, echoes, echo gain), audio monitor |
-| **See** | arrangement, chain panes, per-pane settings (channels, kind, rows, margins, gain, split, colours, grids, overlays), background and pane gap |
-| **Setup** | devices, latency (measure *and* the raw value together), speaker bleed, input gain, input channels (colour, pan, trim), updates, run setup again |
-| **Analysis** | high pass, spectrum analysis on/off, FFT window, flux band, onset threshold / gap / offset, frame time |
+1. **Split the panel out of `App.tsx`, with no visible change.** One component
+   file per current tab (`panel/SoundTab.tsx` etc.), plus the pinned header.
+   Props are the `get`/`set`/`params`/`viewIO` bundle they already close over.
+   Build, and check in the app that nothing moved. Every later step is then a
+   small diff in one file rather than a move inside 2,700 lines.
+2. **Rearrange** into the tabs below. Controls move; labels stay as they are, so
+   a missing or duplicated control is easy to spot.
+3. **Relabel** from the tables below. Text only.
+4. **Help panel**, then the description pass that fills `src/help.ts`.
 
-Moves worth calling out:
+Build after each step, as always.
 
-- **Latency becomes one section.** Today the measure button is under *device*
-  and `bufferCompensation` has a separate section further down.
-- **Frame time goes into Analysis**, at the bottom. It's a diagnostic.
-- **High pass moves to Analysis.** It exists mainly to make note starts easier
-  to see, and "filter the sound too" is the kind of expert knob that tab is for.
-- **Parameters stop being the first thing on screen.** Keep them reachable from
-  every tab (the reason they were pinned still holds), as a strip that starts
-  collapsed and shows a count ("parameters · 3"). It opens automatically when a
-  field references a parameter that doesn't exist.
-- **The preset bar and example picker stay pinned** with the transport.
-- The open tab stays plain React state, per the existing rule. Renaming a tab
-  changes nothing saved.
+### Vocabulary
 
-### Label pass
+Words used the same way everywhere. The help text defines each one once.
 
-One vocabulary everywhere. Some candidates:
+| Word | Means | Replaces |
+|---|---|---|
+| **Shift (beats)** | musical placement: moves a part later by beats, follows the tempo | "click offset (beats)", "file shift", the grid offset |
+| **Offset (ms)** | mechanical alignment: starts a sound early so its attack lands on the beat | "file offset (ms)", the drums' ms column |
+| **Pane** | one drawing area | "view" |
+| **Preset** | saved settings | "config" |
+| **Lead-in / lead-out** | beats drawn before and after a row | "left / right margin" |
+| **Live input** | what is coming in the microphone right now, as opposed to loop echoes | "monitor" |
+| **Attack strength** | the spectral flux curve | "flux" |
+| **Note starts** | detected onsets | "onsets" |
 
-| Now | Proposed |
-|---|---|
-| `beatsToLoop` | loop length (beats) |
-| `bufferCompensation` | latency (frames), with ms shown beside it |
-| RESET TIME | restart from beat 1 |
-| visual monitor / audio monitor | show input / hear input |
-| refresh at cycle end | draw: sweep / whole pass |
-| bar color mode | colour by loudness |
-| flux / show flux | attack strength |
-| fft window | analysis window |
-| click offset (beats), file shift (beats) | shift (beats) |
-| file offset (ms), drum offset | attack offset (ms) |
+Where a control shows both Shift and Offset, **Shift comes first.**
 
-- **Pick one word each for "shift" and "offset"** and use them for the click,
-  the drums, the file and the grids. "Shift" means musical placement in beats;
-  "offset" means aligning a sample's attack in ms. That split already exists in
-  the code and only needs to show up consistently in the labels.
-- **Consistent casing.** Everything lowercase to match the rest, or sentence
-  case throughout, but not both.
-- **Rewrite the error banner** in the user's terms: "A setting couldn't be
-  applied, so the sound doesn't match what the panel shows. Fix the field
-  outlined in red." Keep the technical detail underneath, smaller.
+### The arrangement, exactly
+
+Sentence case throughout. Tables list controls top to bottom. "Key" is the
+config key, which does not change; `—` means a button or display with no key.
+Anything marked **moved** comes from a different tab than today.
+
+#### Pinned above the tabs
+
+| Section | Control | Now | New label | Key |
+|---|---|---|---|---|
+| (transport) | pause button | ⏸ PAUSE / ▶ RESUME | ⏸ Pause / ▶ Resume | `paused` |
+| | reset button | RESET TIME | Restart from beat 1 | — |
+| | tempo field, **moved** from sound › bpm | bpm | Tempo (bpm) | `bpm` |
+| | looper switch, **moved** from signal › looping | looping (⌘L) | Looper (⌘L) | `loopingOn` |
+| (error banner) | | "the audio thread refused this config…" | **A setting couldn't be applied, so what's playing doesn't match the panel.** Fix the field outlined in red. *(technical detail below, smaller)* | — |
+| Examples | *Phase 1: space reserved, not built in Phase 2* | | | |
+| Presets | section | configs | Presets | — |
+| | dropdown empty state | -- pick a config -- / -- no saved configs -- | Choose a preset… / No saved presets | — |
+| | buttons | LOAD · DELETE · SAVE · DEFAULTS | Load · Delete · Save · Reset to defaults | — |
+| | hint | Name the current settings and hit SAVE. | Name your current settings and click Save. | — |
+| Parameters | section, collapsed by default, shows count | parameters | Parameters (3) | `parameters` |
+| | reroll all | 🎲 | Reroll all (⌘R) | — |
+
+The tab bar reads **Play · Loop · See · Setup · Analysis** (was sound · signal ·
+visual · views).
+
+#### Play
+
+| Section | Now | New label | Key |
+|---|---|---|---|
+| **Click** | click | Click | `clickOn` |
+| | click rhythm | Rhythm | `audioSubdivisions` |
+| | click volume | Volume | `clickVolume` |
+| | click offset (beats) | Shift (beats) | `clickShift` |
+| **Drums** | drums on | Drums | `drumOn` |
+| | columns: sound · rhythm · gain · beats · ms · vol | Sound · Rhythm · Accents · Shift · Offset · Volume | `drums[]` |
+| | add button | Add sound… | — |
+| **Practice cycle** | run the cycle | Run the cycle | `sectionsOn` |
+| | columns: beats · what sounds | Beats · What sounds | `sections[]` |
+| | per-section toggles: click · draw | Click · Show | `sections[].click`, `.show` |
+| | order | Order | `sectionOrder` |
+| | add button | Add section | — |
+| **Song file** (was file) | choose file… / none | Choose file… / No file | `filePath` |
+| | play file | Play | `playFile` |
+| | file volume | Volume | `fileVolume` |
+| | divider: against the grid | Lining up with the beat | — |
+| | file beats | Length (beats) | `fileBeats` |
+| | set tempo from file | Set tempo from file | — |
+| | file shift (beats) *(moves above offset)* | Shift (beats) | `fileShift` |
+| | file offset (ms) | Offset (ms) | `fileOffsetMs` |
+| | divider: follow tempo | Following the tempo | — |
+| | time stretch | Stretch to tempo | `fileStretch` |
+| | warning: needs \`file beats\` | Needs a length in beats. Playing at its own speed. | — |
+| | divider: a–b repeat | Repeat part of the file | — |
+| | repeat a–b | Repeat A–B | `fileRepeatOn` |
+| | a (beats) / b (beats) | From beat / To beat | `fileRepeatStart` / `fileRepeatEnd` |
+
+#### Loop
+
+| Section | Now | New label | Key |
+|---|---|---|---|
+| **Looper** | *(the on/off switch is pinned above the tabs)* | | |
+| | beatsToLoop | Loop length (beats) | `beatsToLoop` |
+| | loop echoes | Echoes | `loopEchoes` |
+| | loop echo gain | Echo volume | `loopEchoGain` |
+| **Live input** | audio monitor | Hear live input | `audioMonitorOn` |
+| | visual monitor, **moved** from visual | Draw live input | `visualMonitorOn` |
+| **On speakers** | out of the looper, **moved** from signal › speaker bleed | Keep the app's sound out of the loop | `bleedCancelAudioOn` |
+| | stop runaway | Stop feedback runaway | `loopFeedbackGuardOn` |
+| | *(new hint, shown if bleed hasn't been measured)* | Measure speaker bleed in Setup first. | — |
+
+"Draw live input" goes next to "Hear live input" because together they answer
+one question: are you seeing and hearing yourself, or only the echoes?
+
+#### See
+
+| Section | Now | New label | Key |
+|---|---|---|---|
+| **Panes** (was views) | arrangement / "2 across x 1 down" | Arrangement / "2 across × 1 down" | `viewCols`, `viewRows` |
+| | chain panes | Run panes in sequence | `viewsSequential` |
+| | view 1, view 2… | Pane 1, Pane 2… | — |
+| **Pane 2** *(new heading naming the selected pane; just "Pane" when there is one)* | divider: content | What it shows | — |
+| | channel picker | Channels | `channels` |
+| | kind: waveform / spectrogram | Display: Waveform / Spectrogram | `kind` |
+| | spectrogram channel · gain · floor | Spectrum of · Brightness · Floor | `spectrogram*` |
+| | divider: layout | Rows | — |
+| | one row per note… *(built)* | One row per note… | — |
+| | beats per row | Beats per row | `beatsPerRow` |
+| | left margin / right margin | Lead-in (beats) / Lead-out (beats) | `marginLeft` / `marginRight` |
+| | divider: drawing | Drawing | — |
+| | visual gain | Waveform size | `visualGain` |
+| | split up/down | Split channels top/bottom | `splitChannels` |
+| | bar color mode | Color by loudness | `barColorMode` |
+| | refresh at cycle end | Redraw once per pass | `refreshAtCycleEnd` |
+| | divider: overlays | Overlays | — |
+| | show flux / flux gain | Show attack strength / Attack strength size | `showFlux` / `fluxGain` |
+| | show onsets | Show note starts | `showOnsets` |
+| | divider: colors & grids | Colors | — |
+| | row colors | Row colors | `rowColors` |
+| | row color pattern (up) / (down) | Row color pattern (top) / (bottom) | `rowColorPattern` / `rowColorPatternDown` |
+| | *(new divider)* | Grids | — |
+| | grid list; offset tooltip | Grid list; "shift" in its help text | `grids` |
+| | add grid | Add grid | — |
+| **Look** (was visual › layout, **moved** below the panes) | background | Background | `waveformBackground` |
+| | grid width | Grid line width | `gridWidth` |
+| | divider: between panes | Between panes | — |
+| | pane gap / gap color | Gap / Gap color | `paneGap` / `paneGapColor` |
+
+Look goes last because it's the section people touch least, and the per-pane
+settings are what the tab is really for.
+
+#### Setup
+
+| Section | Now | New label | Key |
+|---|---|---|---|
+| **Audio devices** (was device) | input / output / system default | Input / Output / System default | `audio-prefs.json` |
+| | running: in X · out Y | Now using: X → Y | — |
+| | restart to apply | Restart to apply | — |
+| **Latency** (merged: the calibration from device, plus the latency section) | calibrate / measure latency | Measure latency *(the "calibrate" label goes)* | — |
+| | input level · match · agreement | Input level · Match · Agreement | — |
+| | apply / discard | Apply / Discard | — |
+| | bufferCompensation | Latency (frames), with "≈ 98 ms" beside it | `bufferCompensation` |
+| **Input** (merged: gain plus input channels) | input gain | Input gain | `audioInGain` |
+| | columns: col · opacity · gain · pan | Color · Opacity · Display level · Pan | `channelStyles`, `channelGains`, `channelPans` |
+| **Playing on speakers** (was speaker bleed) | measure bleed, *moves to the top of the section* | Measure speaker bleed | — |
+| | hide own output | Hide the app's sound from the picture | `bleedCancelOn` |
+| | keep tracking | Keep adapting | `bleedTrackOn` |
+| **Updates** | updates | Updates | — |
+
+#### Analysis
+
+| Section | Now | New label | Key |
+|---|---|---|---|
+| **High-pass filter**, **moved** from signal | high pass | High-pass filter | `highPassOn` |
+| | cutoff (Hz) | Cutoff (Hz) | `highPassHz` |
+| | filter the sound too | Filter what you hear too | `highPassAudio` |
+| **Spectrum**, **moved** from visual | spectrum analysis | Spectrum analysis | `analysisOn` |
+| | fft window | Analysis window | `analysisWindow` |
+| **Note starts**, **moved** from visual | flux band low (Hz) / high (Hz) | Attack band low (Hz) / high (Hz) | `analysisBandLow` / `analysisBandHigh` |
+| | onset threshold | Threshold | `onsetThreshold` |
+| | onset min gap (ms) | Minimum gap (ms) | `onsetMinGap` |
+| | onset offset (ms) | Offset (ms) | `onsetOffset` |
+| **Diagnostics**, **moved** from visual | frame time | Show frame time | `showFrameTime` |
+
+### Calls made in this arrangement, worth a second look
+
+- **Tempo and the looper switch move up next to the transport** (confirmed
+  2026-09-13). They're the controls reached for most during practice, and ⌘L
+  alone isn't discoverable.
+- **The bleed controls are split.** "Keep the app's sound out of the loop" goes
+  to Loop, because it changes what the looper records, next to "Stop feedback
+  runaway". Measuring and the picture-side switches stay in Setup. The cost is
+  that it depends on a measurement made in another tab, which is why there's a
+  hint.
+- **"Accents"** for the drums' per-hit gains. Accurate for how they're used, but
+  the field takes any multipliers, so the help text says so.
+- **"Waveform size"** for `visualGain`. It scales the drawing, not the sound,
+  and "gain" next to "input gain" invited confusing the two.
+- **"Offset" in Analysis › Note starts** is the one use of the word that isn't
+  about a sample's attack. It still means "move by this many ms", so it stays.
+- **Nothing is hidden behind "more" expanders yet.** Rearranging and relabelling
+  first shows how long each tab really is. Expanders are a follow-up if a tab
+  still scrolls.
+
+Unchanged by all of this: the open tab stays plain React state, and hidden tabs
+stay mounted.
 
 ### The help panel
 
@@ -215,6 +369,25 @@ under the mouse, or has focus, like Ableton's Info View.
   drawing, with no new parsing.
 - Taller variant for drum voices showing per-hit `gains` as tick height, so
   `1, 0.5x3` is visible as an accent pattern.
+
+### Pattern builder
+
+Decided 2026-09-13: worth building.
+
+- A grid of cells (steps across, optionally one row per sound) where clicking
+  toggles hits. It **writes rhythm text** in the existing syntax into the field,
+  and that text is what gets stored. The builder never becomes a second format.
+- One-way to start: builder → text. Reading arbitrary text *back* into cells
+  only works for text that is a plain step pattern (`[1, 0, 1, 1]`-shaped), and
+  the builder should say "this rhythm can't be shown as steps" rather than
+  simplifying someone's hand-written rhythm.
+- Choose the smallest text that reproduces the pattern, so the output teaches
+  the syntax instead of hiding it: four even hits come out as `4:1`, not a
+  bracketed list.
+- Opens from a button beside rhythm fields (click, drums, grids), next to the
+  syntax "?".
+- Check each shape it can produce by parsing the generated text with parser2
+  and comparing note times with the cells, in a temp test.
 
 ### Syntax examples on demand
 
@@ -270,16 +443,16 @@ What remains:
   change afterwards.
 - **`yarn tauri build` after every change**, as always.
 
+## Decisions (2026-09-13)
+
+- **Examples live in a separate picker** from saved presets.
+- **Sentence case** for every label. Lowercase may be tried afterwards as a
+  style choice; since it's text only, it's cheap either way.
+- **Pattern builder: yes**, writing the existing rhythm text (see Phase 3).
+- **Random tempo drill is an advanced example.**
+- **Phase 2 comes first**, before the setup and examples.
+
 ## Open questions
 
-- Should examples live in the preset dropdown (marked as examples) or in a
-  separate picker? Separate is clearer for newcomers; one dropdown is less UI.
-- Does the first-launch setup restart the app when the device changes, or defer
-  that until the end of setup?
-- Lowercase labels are part of the app's current voice. Keep that, or move to
-  sentence case during the label pass?
-- How much of the rhythm syntax should a newcomer ever need to see? Is there a
-  small "pattern builder" (click cells to toggle hits) worth having that
-  *writes* rhythm text, without replacing it?
-- Is the random tempo drill a beginner example, or does it belong with the
-  advanced ones?
+- Does first-launch setup restart the app when the device changes, or defer
+  that until the end of setup? Deferred until Phase 1 is being built.

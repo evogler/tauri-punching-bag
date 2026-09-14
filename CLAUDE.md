@@ -2826,6 +2826,12 @@ See *Updates*.
     through a filter measured for a different volume is a quieter kind of wrong
     than drawing one.
   - Headphones remain the answer for the sound.
+- **The preset thread, in the order it should be done** (2026-09-13). The three
+  entries below are one line of work, not three independent ideas: **kits
+  first**, because they make a shared preset clean by construction and change
+  what the other two mean; then **partial loading**, which is wanted soon and
+  reuses `PresetDialog`; then **bundling audio**, which may largely evaporate
+  once kits exist -- decide it afterwards rather than before.
 - **Interchangeable drum kits.** A voice would name a *role* (`kick`) and a
   machine-local kit would map roles to files -- the same split the config,
   `audio-prefs.json` and `LOCAL_RUST_KEYS` already make three times over. It
