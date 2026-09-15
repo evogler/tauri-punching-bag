@@ -4,7 +4,7 @@ import { Divider, Section } from "./chrome";
 import { PanelProps } from "./types";
 
 export const LayoutTab = (p: PanelProps) => {
-  const { get, set, gridWidth, paneScale, paneCount } = p;
+  const { get, set, gridWidth, paneScale, viewCols, viewRows } = p;
   return (
     <>
       {/* The frame rather than the signal: what a pane sits on, and what
@@ -58,9 +58,12 @@ export const LayoutTab = (p: PanelProps) => {
           onChange={(c) => set("paneGapColor", c)}
           help="paneGapColor"
         />
-        {(paneCount < 2 || get("paneGap") === 0) && (
+        {/* Asked of the *cells*, not the panes: an empty cell shows the gap
+            color over its whole area, so a 2x2 arrangement holding one pane
+            has plenty to see even at a gap of 0. */}
+        {viewCols * viewRows < 2 && get("paneGap") === 0 && (
           <div style={{ color: "#aaa", fontSize: "0.8em" }}>
-            No gutter to see -- needs more than one pane and a gap above 0.
+            No gutter to see -- needs more than one cell, or a gap above 0.
           </div>
         )}
       </Section>

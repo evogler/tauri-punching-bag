@@ -64,6 +64,8 @@ position, looper) derives from it.
 | `panel/` | The settings panel: `Panel.tsx` composes `PanelHeader` and one file per tab; `chrome.tsx` has `Section` / `Divider` / `TabBar` / `TabPanel`; `types.ts` is the one props bundle every tab gets from `App`. |
 | `config.ts` | `defaultRustConfig` / `defaultJsConfig` — the split below matters. |
 | `layout.ts` | `getCanvasPositions` — pure geometry, where a beat lands on screen. |
+| `paneLayout.ts` | Where each pane sits in the grid, and every operation that moves one. `fitViews` is the one place the no-overlap invariant is enforced. Pure. |
+| `PaneMap.tsx` | The arrangement as a picture: the pane selector, the `+` in an empty cell, and the grow/shrink/swap buttons. |
 | `Input.tsx` | Generic config inputs, dispatched on value type. |
 | `expression.ts` | The parameter expression language, and `parseNumberList` / `formatNumberList` built on it. Pure. |
 | `ParameterList.tsx` | The named-number UI. |
@@ -1679,10 +1681,15 @@ rulings at once -- `0.25x16` on the left, `0.3333x12` on the right -- so rows,
 margins, grids, visual gain, split, bar-colour mode and refresh mode are all
 per-pane, held in `views: ViewConfig[]`.
 
-- **`views.length === viewCols * viewRows` is an invariant.** The arrangement is
-  the only control over how many panes exist; `setArrangement` resizes the list,
-  and `migrateViews` re-squares it on load. Growing copies pane 0 (adding one is
-  nearly always "the same thing, against another grid"), shrinking truncates.
+- **A pane says where it sits**, in `col` / `row` / `colSpan` / `rowSpan`, and
+  the invariant is **no two panes overlap and every pane fits inside the grid**
+  -- enforced in one place, `fitViews` in `src/paneLayout.ts`, which every path
+  that can move a pane goes through. `views.length === viewCols * viewRows` is
+  **retired**: the arrangement is now how many *cells* there are, a ceiling
+  rather than a count, so a cell may be empty and a pane may span several.
+  **`docs/pane-layout.md` is the long version** -- every operation, the
+  migration, and why a deleted pane leaves a hole instead of a neighbour
+  growing into it.
 - **A view's arrays must never be shared between panes.** `copyView` deep-copies
   for exactly this reason -- two panes pointing at one `grids` array means
   editing either edits both.
@@ -1889,6 +1896,53 @@ per-pane, held in `views: ViewConfig[]`.
   `pixelsPerBeat` is derived from each pane's own cell width.
 - Only `channelStyles` and the channel selection stay global, so a channel keeps
   its colour in every pane -- unless the pane sets row colours, below.
+
+### Pane placement
+
+`col` / `row` / `colSpan` / `rowSpan` on `ViewConfig`, `src/paneLayout.ts` for
+every operation, `src/PaneMap.tsx` for the buttons. **`docs/pane-layout.md` is
+the long version**, including the two designs that were rejected.
+
+- **0-based, and the spans are counts.** CSS grid's 1-based lines are converted
+  in exactly two places, the canvas style and the map.
+- **`fitViews` is the only enforcement point**, and nothing else may write the
+  four keys. It walks the panes in the order they *read* -- top-left cell, row
+  first -- clamping each onto the grid, capping what it may take so a pane
+  behind it still has somewhere to go, relocating it if it collides, and
+  dropping it only when the grid has no free cell at all. Dropping is what
+  truncating to `cols * rows` already did; 2x2 to 1x1 still loses three panes.
+- **Nothing in the draw path changed, and that was the bet.** Each pane's
+  backing store is measured from its own box and everything is placed as a
+  fraction of that surface, so a pane spanning two cells is just a pane with a
+  bigger box. `minWidth: 0, minHeight: 0` is load-bearing a *third* time for
+  the same reason: a spanning pane's automatic minimum would be twice the
+  floor, and a track sized from it would push its neighbours off screen.
+- **A deleted pane leaves a hole.** A flat grid has no split tree to say which
+  neighbour should absorb the space, and a heuristic that picks the wrong one
+  has silently resized a pane you were reading. *Wider* and *Taller* close it
+  in one click, and refuse rather than collide.
+- **Add takes the first empty cell, or refuses.** Growing the grid from a
+  button labelled "add a pane" would resize every other pane as a side effect;
+  the arrangement dropdown is one line above it.
+- **Swap exchanges whole rectangles**, position and span together -- swapping
+  positions alone can overlap a third pane whenever the two differ in size.
+- **The chained timeline runs in `paneOrder`**, by top-left cell, not in array
+  order. Array order is creation order, which stops matching the screen the
+  first time a pane is swapped or added into a hole.
+- **A pre-placement session is placed in reading order** by `normalizeView`'s
+  fallback, all four keys together. The defaults put a pane at the top-left
+  cell, so merging a placement-less saved pane over them would stack a whole
+  layout in one corner -- the `loopFeedback` trap where it would be immediate
+  and destructive. A pre-placement config is still padded to `cols * rows`
+  panes; a config written since is not, because an empty cell is a layout.
+- **The panel's selection is a position into `views`**, like the draw state,
+  the layer and the canvas ref, so removing a pane shifts it --
+  `selectionAfterRemove` is that arithmetic. The rest are covered by
+  `layoutKey`, which changes whenever the number of panes does and repaints
+  every pane.
+- **Drag to resize is deliberately not built.** Buttons only: one click, a
+  definite answer, and a refusal that shows as a disabled button rather than a
+  drag that snaps back.
 
 ### Layout chrome
 
@@ -3299,15 +3353,13 @@ See *Updates*.
     those, it cannot be a section -- and that is the thing to settle before
     building either version.
 
-- **Tools for working with panes**: remove one, duplicate one, reorder them,
-  give them names shown in the pane, arbitrary layouts, and a drag UI.
-  - **The blocker is a documented invariant**: `views.length === viewCols *
-    viewRows`, with the arrangement as the *only* control over how many panes
-    exist. Remove, duplicate and reorder all break that model, so this is a move
-    to an explicit pane list plus a layout spec -- not a handful of buttons.
-    The drag UI is the easy part and comes last.
-  - **Names are cheap and independently useful**, and want none of the above.
-    Worth doing first and on their own.
+- **Tools for working with panes** -- **built 2026-09-14**, bar the drag UI.
+  Remove, add, grow, swap, copy from another pane and reset are all buttons in
+  the display tab's pane map; names were done earlier. See *Pane placement* and
+  `docs/pane-layout.md`.
+  - **What is left is the drag UI**, and arbitrary (non-grid) layouts, which
+    want the recursive split tree that document rejects. The drag UI needs
+    nothing about the schema to change.
 
 - **A binding editor.** One global key exists now (see *The global shortcut*);
   what is not built is a second action, a recorded-keystroke picker instead of

@@ -2,6 +2,7 @@ import { ActiveDevices, AudioDeviceInfo, AudioPrefs } from "../DevicePicker";
 import { Config, ConfigKey, Parameter, RustConfig, ViewConfig } from "../config";
 import { SampleStatus } from "../DrumList";
 import { Params } from "../expression";
+import { Rect } from "../paneLayout";
 import { Preset } from "../presets";
 
 // What `set_mp3_buffer` reports back about the file it just decoded. The
@@ -14,6 +15,19 @@ export type FileInfo = {
   sourceRate: number;
   sourceChannels: number;
   deviceRate: number;
+};
+
+// The pane layout operations, all of them going through `paneLayout.ts` so the
+// no-overlap invariant is enforced in one place.
+export type PaneOps = {
+  canAdd: boolean;
+  add: (at?: Rect) => void;
+  remove: (index: number) => void;
+  grow: (index: number, axis: "col" | "row", delta: 1 | -1) => void;
+  canGrow: (index: number, axis: "col" | "row", delta: 1 | -1) => boolean;
+  swap: (a: number, b: number) => void;
+  copyFrom: (from: number, to: number) => void;
+  reset: (index: number) => void;
 };
 
 // Everything the panel reads from App. One bundle rather than per-tab props:
@@ -59,6 +73,15 @@ export type PanelProps = {
   viewRows: number;
   setArrangement: (cols: number, rows: number) => void;
   paneCount: number;
+  // Every pane, so the layout controls can draw the grid as it actually is --
+  // which cells are taken, and by which pane. Read-only here: the operations
+  // below are the only way a placement changes.
+  views: ViewConfig[];
+  // Grouped rather than spread flat across the bundle, because these are one
+  // mechanism: each answers a list `paneLayout` has already made legal, or
+  // refuses. `canAdd` and `canGrow` exist so a button can be disabled rather
+  // than clicked into a refusal.
+  paneOps: PaneOps;
   activeView: number;
   setSelectedView: (index: number) => void;
   // The pane the panel is editing, and the view-scoped get/set for it.

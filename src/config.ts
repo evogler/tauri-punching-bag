@@ -779,6 +779,16 @@ export const ROW_COLORS = [
 // back and forth between 16ths and triplets is the whole point of having more
 // than one.
 export type ViewConfig = {
+  // Where this pane sits in the `viewCols` x `viewRows` grid of cells, 0-based,
+  // spanning `colSpan` x `rowSpan` of them. Explicit rather than derived from
+  // the pane's index, which is what lets a cell be left empty and a pane be
+  // twice as wide as its neighbour. No two panes may overlap and every pane
+  // must fit -- enforced in one place, `fitViews` in `paneLayout.ts`, which
+  // every path that can move a pane goes through.
+  col: number;
+  row: number;
+  colSpan: number;
+  rowSpan: number;
   // What this pane is called, drawn small in its own top corner. Frontend only
   // -- a label never reaches the audio thread -- and empty means draw nothing,
   // which is exactly what every pane did before this existed.
@@ -919,6 +929,13 @@ export const ANALYSIS_BINS = 64;
 export const ANALYSIS_WINDOWS = [256, 512, 1024, 2048, 4096];
 
 export const defaultViewConfig = (): ViewConfig => ({
+  // The top-left cell, one cell wide. Every caller that cares where a pane
+  // goes spreads a rectangle over this, so the default only has to be legal in
+  // the smallest grid there is.
+  col: 0,
+  row: 0,
+  colSpan: 1,
+  rowSpan: 1,
   name: "",
   kind: "waveform",
   channels: [0],
@@ -970,8 +987,11 @@ export const defaultJsConfig = {
   // compiles to is `drums`, an ordinary rhythm and an ordinary chances list.
   drumGrids: [] as DrumGrid[],
   views: [defaultViewConfig()] as ViewConfig[],
-  // The pane arrangement. `views.length` is held equal to viewCols * viewRows,
-  // so changing either resizes the list rather than letting the two disagree.
+  // The pane arrangement: how many *cells* there are. Panes place themselves
+  // in it explicitly (`col`/`row`/`colSpan`/`rowSpan`), so cells may be empty
+  // and `views.length` is unrelated to `viewCols * viewRows` -- what used to
+  // be an invariant is now only a ceiling. Shrinking the grid re-fits the
+  // panes and drops any that no longer have a cell; see `paneLayout.ts`.
   // Per-channel display trim, multiplied into the pane's own `visualGain`.
   // Display only, so unlike the pans it never reaches the audio thread, and it
   // applies to every channel including the synthetic buses. Sparse: a channel
@@ -1002,8 +1022,10 @@ export const defaultJsConfig = {
   // canvas backing store is unaffected, so this only moves where the panes sit,
   // never what is drawn in them.
   paneGap: 2,
-  // What shows through that gutter. Invisible at a 1x1 arrangement, and at a
-  // gap of 0, because there is no gutter to see.
+  // What shows through that gutter -- and, since a cell may now hold no pane at
+  // all, what an empty cell is. Invisible only when a single pane covers every
+  // cell and the gap is 0, because then there is nothing behind the panes to
+  // see.
   paneGapColor: "#333333",
   // Grid line thickness, in **CSS** pixels, so a line is the same weight on a
   // Retina display and an external monitor -- the draw code multiplies by the

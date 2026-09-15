@@ -333,13 +333,32 @@ export const HELP: Record<string, HelpEntry> = {
   // ---- display ----
   arrangement: {
     title: "Arrangement",
-    body: "How many panes, across and down. A new pane starts as a copy of pane 1, so you can watch the same playing against a different grid.",
+    body: "How many cells the display is divided into, across and down. Panes sit in those cells and can span more than one, so this is the space available rather than the number of panes. Making it smaller re-fits the panes, and drops any with nowhere left to go.",
   },
   viewsSequential: {
     title: "Run panes in sequence",
     body: "Off, every pane shows the same beats, each against its own ruling. On, the panes share one long timeline: the playing runs through pane 1's rows, then pane 2's.",
   },
-  panes: { title: "Pane", body: "Which pane the settings below edit." },
+  paneMap: {
+    title: "Panes",
+    body: "The display as it is divided up. Click a pane to edit it below; click a `+` to put a new pane in that empty cell. A removed pane leaves its cells empty rather than being absorbed by a neighbour -- which neighbour should grow is your decision, and it is one click.",
+  },
+  paneSize: {
+    title: "Pane size",
+    body: "Grow this pane into the empty cell to its right or below it, or give a cell back. Greyed out means the cells are taken or the pane is already against the edge of the grid.",
+  },
+  paneSwap: {
+    title: "Swap with",
+    body: "Exchange this pane's place with another one's -- position and size together, so two panes of different sizes trade shapes as well as cells.",
+  },
+  paneCopy: {
+    title: "Copy settings from",
+    body: "Take everything another pane draws -- rows, grids, channels, colours -- and leave this pane where it is.",
+  },
+  paneReset: {
+    title: "Reset this pane",
+    body: "Back to a fresh pane, still in the cells it occupies now.",
+  },
   "pane.name": {
     title: "Name",
     body: "What this pane is called, drawn small in its top corner so a wall of panes can be told apart. Empty draws nothing.",
@@ -443,7 +462,10 @@ export const HELP: Record<string, HelpEntry> = {
     title: "Gap",
     body: "Space between panes, in pixels. Needs more than one pane to see.",
   },
-  paneGapColor: { title: "Gap color", body: "The color showing through the gap between panes." },
+  paneGapColor: {
+    title: "Gap color",
+    body: "The color showing through between the panes -- and through any cell of the arrangement no pane is sitting in.",
+  },
 
   // ---- setup ----
   "device.input": {

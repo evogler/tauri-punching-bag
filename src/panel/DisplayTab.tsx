@@ -7,10 +7,15 @@ import { RowColorList } from "../RowColorList";
 import { RowPerNote } from "../RowPerNote";
 import { Slider } from "../Slider";
 import { SpectrogramControls } from "../SpectrogramControls";
+import { PaneMap } from "../PaneMap";
+import { paneLabel } from "../paneLayout";
 import { Divider, Section } from "./chrome";
 import { PanelProps } from "./types";
 
-// The pane arrangements the panel offers, as [across, down].
+// The grids of cells the panel offers, as [across, down]. Finer grids earn
+// their place now that a pane can span cells: 4x2 is where "one wide pane over
+// two narrow ones" lives, which was not expressible when one cell meant one
+// pane.
 const ARRANGEMENTS: [number, number][] = [
   [1, 1],
   [2, 1],
@@ -18,6 +23,8 @@ const ARRANGEMENTS: [number, number][] = [
   [3, 1],
   [2, 2],
   [4, 1],
+  [3, 2],
+  [4, 2],
 ];
 
 const rowStyle: React.CSSProperties = {
@@ -29,7 +36,7 @@ const rowStyle: React.CSSProperties = {
 // How it is drawn: how many panes, and the settings of the one being edited.
 // The frame every pane sits in is the layout tab.
 export const DisplayTab = (p: PanelProps) => {
-  const { get, set, params, viewCols, viewRows, setArrangement, paneCount, activeView, setSelectedView, channelLabels, inputChannelCount, activeCfg, viewIO, patchView } = p;
+  const { get, set, params, viewCols, viewRows, setArrangement, paneCount, activeView, setSelectedView, channelLabels, inputChannelCount, activeCfg, viewIO, patchView, views, paneOps } = p;
   return (
     <>
       <Section label="Panes">
@@ -55,36 +62,23 @@ export const DisplayTab = (p: PanelProps) => {
           set={set}
           get={get}
         />
-        {paneCount > 1 && (
-          <Help
-            id="panes"
-            style={{
-              display: "flex",
-              flexDirection: "row",
-              flexWrap: "wrap",
-              gap: "2px",
-              margin: "4px 0",
-            }}
-          >
-            {Array.from({ length: paneCount }, (_, index) => (
-              <button
-                key={index}
-                onClick={() => setSelectedView(index)}
-                style={{
-                  flex: 1,
-                  fontWeight: index === activeView ? "bold" : "normal",
-                  backgroundColor: index === activeView ? "#666" : undefined,
-                }}
-              >
-                Pane {index + 1}
-              </button>
-            ))}
-          </Help>
-        )}
+        {/* The map is the pane selector as well as the layout editor: which
+            pane the settings below belong to is a question about where it is
+            on screen, so it is answered by pointing at it. */}
+        <PaneMap
+          views={views}
+          cols={viewCols}
+          rows={viewRows}
+          activeView={activeView}
+          setSelectedView={setSelectedView}
+          ops={paneOps}
+        />
       </Section>
       {/* Its own section, named for the pane, so it is plain that everything
           below the pane buttons belongs to the one selected. */}
-      <Section label={paneCount > 1 ? `Pane ${activeView + 1}` : "Pane"}>
+      <Section
+        label={paneCount > 1 ? paneLabel(views, activeView) : "Pane"}
+      >
         {/* First, because it says which pane the rest of this belongs to --
             and a name is the one setting here that is about the pane rather
             than about what it draws. */}
@@ -228,6 +222,36 @@ export const DisplayTab = (p: PanelProps) => {
           setGrids={(grids) => viewIO.set("grids", grids)}
           params={params}
         />
+        {/* Everything above, in one go: taken from another pane, or thrown
+            away. Both leave the pane where it is -- where a pane sits is the
+            map's business, and nothing else here touches it. */}
+        <Divider label="Start over" />
+        {paneCount > 1 && (
+          <Help id="paneCopy" style={{ ...rowStyle, alignItems: "center" }}>
+            <label>Copy settings from</label>
+            <select
+              value=""
+              onChange={(e) => {
+                if (e.target.value !== "")
+                  paneOps.copyFrom(Number(e.target.value), activeView);
+              }}
+            >
+              <option value="">Choose…</option>
+              {views.map((_, i) =>
+                i === activeView ? null : (
+                  <option key={i} value={i}>
+                    {paneLabel(views, i)}
+                  </option>
+                )
+              )}
+            </select>
+          </Help>
+        )}
+        <Help id="paneReset" style={rowStyle}>
+          <button style={{ flex: 1 }} onClick={() => paneOps.reset(activeView)}>
+            Reset this pane
+          </button>
+        </Help>
       </Section>
     </>
   );

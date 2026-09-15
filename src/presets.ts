@@ -18,6 +18,7 @@ import {
   usableRhythmVal,
 } from "./config";
 import { formatNumberList } from "./expression";
+import { Rect, fitViews, readingOrderRect } from "./paneLayout";
 import { invoke } from "@tauri-apps/api";
 
 const STORAGE_KEY = "tpb.presets.v1";
@@ -242,6 +243,17 @@ const wrapList = (
     : fallback;
 };
 
+// Whether a stored pane says where it sits. Partial placement is not a shape
+// anything ever wrote, so all four fields are required together: mixing a saved
+// `col` with a derived `row` would put a pane somewhere nobody asked for.
+const PLACEMENT_KEYS: (keyof Rect)[] = ["col", "row", "colSpan", "rowSpan"];
+export const hasPlacement = (view: unknown) =>
+  typeof view === "object" &&
+  view !== null &&
+  PLACEMENT_KEYS.every((k) =>
+    Number.isFinite((view as Record<string, unknown>)[k] as number)
+  );
+
 // Merging over the defaults is what lets a view saved by an older build pick up
 // keys added since, the same way the top-level config already worked.
 const normalizeView = (
@@ -249,13 +261,21 @@ const normalizeView = (
   // What the session's channels were when every pane shared one list. A view
   // saved before the split has none of its own, and defaulting it to channel 0
   // would quietly drop whatever was on screen.
-  legacyChannels: number[]
+  legacyChannels: number[],
+  // Where this pane sat before placement existed: its position in the array,
+  // read left to right and then down. The defaults put every pane in the top
+  // left cell, and merging a placement-less saved pane over that would stack
+  // the whole layout in one corner -- the `loopFeedback` trap, in the one place
+  // where it would be visible immediately and destructive to a hand-built
+  // layout. Derived rather than defaulted for exactly that reason.
+  fallback: Rect
 ): ViewConfig => {
   const base = { ...defaultViewConfig(), channels: legacyChannels };
-  if (typeof view !== "object" || view === null) return base;
+  if (typeof view !== "object" || view === null) return { ...base, ...fallback };
   const merged = { ...base, ...(view as Partial<ViewConfig>) };
   return {
     ...merged,
+    ...(hasPlacement(view) ? {} : fallback),
     // A pane saved before names existed has none, and the merge above already
     // gives it the default; the guard is for a stored value of the wrong shape,
     // which the draw path would otherwise hand to `fillText`.
@@ -273,8 +293,8 @@ const normalizeView = (
   };
 };
 
-// Folds a pre-views js config into one view, then squares the list up with the
-// arrangement so `views.length === viewCols * viewRows` always holds.
+// Folds a pre-views js config into one view, gives every pane a placement, and
+// puts the result through the one function that enforces the layout invariant.
 const migrateViews = (
   js: Record<string, unknown>,
   legacyChannels: number[]
@@ -291,18 +311,28 @@ const migrateViews = (
     out.viewRows = 1;
   }
 
-  const views = (out.views as unknown[]).map((v) =>
-    normalizeView(v, legacyChannels)
-  );
+  const raw = out.views as unknown[];
   const cols = clampSide(out.viewCols);
   const rows = clampSide(out.viewRows);
-  const wanted = cols * rows;
-  // A new pane starts from the first one rather than the defaults -- adding a
-  // column is nearly always "show me this again, but against another grid".
-  while (views.length < wanted) views.push(copyView(views[0] ?? defaultViewConfig()));
-  views.length = wanted;
+  // A session or preset written before placement existed had exactly one pane
+  // per cell, in reading order, and must come back looking identical. One that
+  // was written since says where its panes go and must *not* be padded -- an
+  // empty cell is a layout, not a gap to fill.
+  const legacyLayout = !raw.some(hasPlacement);
+  const views = raw.map((v, i) =>
+    normalizeView(v, legacyChannels, readingOrderRect(i, cols))
+  );
+  if (legacyLayout) {
+    // A new pane starts from the first one rather than the defaults -- adding a
+    // column is nearly always "show me this again, but against another grid".
+    while (views.length < cols * rows)
+      views.push({
+        ...copyView(views[0] ?? defaultViewConfig()),
+        ...readingOrderRect(views.length, cols),
+      });
+  }
 
-  out.views = views;
+  out.views = fitViews(views, cols, rows);
   out.viewCols = cols;
   out.viewRows = rows;
   return out;

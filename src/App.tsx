@@ -26,7 +26,6 @@ import {
   ViewConfig,
   defaultViewConfig,
   isViewConfigKey,
-  copyView,
   MAX_VIEW_SIDE,
   Parameter,
   exprNumber,
@@ -40,6 +39,19 @@ import {
   setSampleRateHz,
   ANALYSIS_BINS,
 } from "./config";
+import {
+  Rect,
+  addView,
+  copySettings,
+  fitViews,
+  growView,
+  paneOrder,
+  removeView,
+  resetView,
+  selectionAfterRemove,
+  swapViews,
+  firstFreeRect,
+} from "./paneLayout";
 import {
   ActiveDevices,
   AudioDeviceInfo,
@@ -476,7 +488,9 @@ const App = () => {
   // were measured at, not `window.devicePixelRatio` read again, so the number
   // shown is the one actually being drawn with.
   const paneScale = paneSizes[0]?.scale ?? 1;
-  const paneCount = viewCols * viewRows;
+  // How many *panes*, which is no longer how many cells: a pane places itself
+  // explicitly and cells may be empty.
+  const paneCount = get("views").length;
 
   // The backing store is sized from the pane's own box, so one pixel of surface
   // is one pixel of screen. It used to be the *window's* size in physical
@@ -563,10 +577,17 @@ const App = () => {
   const viewWindows = get("views").map((cfg) =>
     viewRowBeats(cfg).reduce((sum, n) => sum + n, 0)
   );
-  const chainStarts = viewWindows.reduce(
-    (acc, n) => [...acc, acc.slice(-1)[0] + n],
-    [0]
-  );
+  // The chain runs in the order the panes *read* -- by top-left cell, left to
+  // right and then down -- not in array order. Array order is the order panes
+  // happened to be created in, which stops matching the screen the first time
+  // one is swapped or added into a hole, and "the signal runs through pane 1's
+  // rows, then pane 2's" has to mean what it looks like.
+  const chainStarts: number[] = new Array(viewWindows.length).fill(0);
+  let chainTotal = 0;
+  for (const i of paneOrder(get("views"))) {
+    chainStarts[i] = chainTotal;
+    chainTotal += viewWindows[i];
+  }
 
   const viewCtxs: ViewCtx[] = get("views").map((cfg, index) => {
     // Measured, not derived: the backing store is this pane's own box, so
@@ -594,7 +615,7 @@ const App = () => {
         beatsPerRow,
         rowStarts,
         beatsPerWindow: viewWindows[index],
-        cycleBeats: sequential ? chainStarts.slice(-1)[0] : viewWindows[index],
+        cycleBeats: sequential ? chainTotal : viewWindows[index],
         chainStart: sequential ? chainStarts[index] : 0,
         pixelsPerBeat: cellWidth / maxBeatsInRow,
         marginLeft,
@@ -644,21 +665,67 @@ const App = () => {
       views: js.views.map((v, i) => (i === index ? { ...v, ...patch } : v)),
     }));
 
-  // The arrangement is what decides how many panes there are, so it resizes the
-  // list itself -- a separate add/remove control would only be one more thing
-  // to keep in agreement with it. A new pane starts as a copy of the first,
-  // since adding one is nearly always "show me this again, against another grid".
+  // The arrangement now says how many *cells* there are, not how many panes.
+  // Growing it leaves empty cells for the add button to fill; shrinking it
+  // re-fits every pane, which moves or shrinks the ones that no longer fit and
+  // drops only those with nowhere left to go -- `fitViews` is the single place
+  // that judgement is made.
   const setArrangement = (cols: number, rows: number) => {
     const c = Math.max(1, Math.min(MAX_VIEW_SIDE, cols));
     const r = Math.max(1, Math.min(MAX_VIEW_SIDE, rows));
-    const wanted = c * r;
     setJsConfig((js) => {
-      const views = js.views.slice(0, wanted);
-      while (views.length < wanted)
-        views.push(copyView(views[0] ?? defaultViewConfig()));
+      const views = fitViews(
+        js.views.length ? js.views : [defaultViewConfig()],
+        c,
+        r
+      );
       return { ...js, viewCols: c, viewRows: r, views };
     });
-    setSelectedView((i) => Math.min(i, wanted - 1));
+    setSelectedView((i) => Math.min(i, c * r - 1));
+  };
+
+  // Every pane operation writes through here, so `views` is replaced wholesale
+  // by a list `paneLayout` has already made legal rather than edited in place.
+  const setViews = (next: (views: ViewConfig[]) => ViewConfig[] | null) =>
+    setJsConfig((js) => {
+      const views = next(js.views);
+      return views ? { ...js, views } : js;
+    });
+
+  // Add into the first empty cell. There is deliberately no "grow the grid to
+  // make room": the arrangement is a deliberate choice about how the space is
+  // divided, and a button labelled "add a pane" must not silently resize every
+  // other one. The button is disabled instead, and says why.
+  const paneRoom = firstFreeRect(get("views"), viewCols, viewRows) !== null;
+  const paneOps = {
+    canAdd: paneRoom,
+    // Computed here rather than inside the state updater: an updater has to be
+    // a pure function of the state it is handed, and this one has to tell the
+    // panel to select the pane it just made.
+    add: (at?: Rect) => {
+      const next = addView(get("views"), viewCols, viewRows, at);
+      if (!next) return;
+      setViews(() => next);
+      setSelectedView(next.length - 1);
+    },
+    // Leaves a hole. What it must not do is leave the *selection* pointing at a
+    // different pane than the one that was being edited: everything about a
+    // pane is indexed by its position in `views`, so removing one shifts every
+    // later pane down by one and a selection past the hole has to follow.
+    remove: (index: number) => {
+      setViews((views) => (views.length > 1 ? removeView(views, index) : views));
+      setSelectedView((i) =>
+        selectionAfterRemove(i, index, get("views").length)
+      );
+    },
+    grow: (index: number, axis: "col" | "row", delta: 1 | -1) =>
+      setViews((views) => growView(views, index, viewCols, viewRows, axis, delta)),
+    canGrow: (index: number, axis: "col" | "row", delta: 1 | -1) =>
+      growView(get("views"), index, viewCols, viewRows, axis, delta) !== null,
+    swap: (a: number, b: number) => setViews((views) => swapViews(views, a, b)),
+    copyFrom: (from: number, to: number) =>
+      setViews((views) => copySettings(views, from, to)),
+    reset: (index: number) => setViews((views) => resetView(views, index)),
   };
 
   // The pane the panel is currently editing.
@@ -1930,6 +1997,8 @@ const App = () => {
       setSelectedView={setSelectedView}
       viewIO={viewIO}
       patchView={patchView}
+      paneOps={paneOps}
+      views={get("views")}
       paneCount={viewCtxs.length}
       activeCfg={viewCtxs[activeView]?.cfg}
       openSetup={() => setSetupOpen(true)}
@@ -1971,11 +2040,20 @@ const App = () => {
           // backing store's aspect. Wide enough and the row outgrows the
           // window, which is why hiding the 600px panel -- and nothing else --
           // cut the bottom off. Zero lets the tracks size from the space there
-          // actually is.
+          // actually is. Load-bearing a third time now that a pane can span
+          // two cells: a spanning pane's backing store is twice as wide, so its
+          // automatic minimum would be twice the floor as well, and a track
+          // sized from it would push the panes it shares a row with off screen.
           style={{
             width: "100%",
             height: "100%",
             display: "block",
+            // Explicit placement: the pane's own rectangle of cells, rather
+            // than wherever auto-flow would have dropped it. CSS grid lines
+            // are 1-based and the config is 0-based, which is converted here
+            // and nowhere else.
+            gridColumn: `${v.cfg.col + 1} / span ${v.cfg.colSpan}`,
+            gridRow: `${v.cfg.row + 1} / span ${v.cfg.rowSpan}`,
             minWidth: 0,
             minHeight: 0,
           }}
@@ -2002,7 +2080,8 @@ const App = () => {
           <span ref={frameStatsRef}>measuring...</span>
           <span style={{ opacity: 0.6 }}>
             {"  ·  "}
-            {viewCols}x{viewRows} panes {"·"} {get("visibleChannels").length} ch
+            {paneCount} in {viewCols}x{viewRows} {"·"}{" "}
+            {get("visibleChannels").length} ch
           </span>
         </div>
       )}
