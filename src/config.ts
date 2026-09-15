@@ -813,6 +813,12 @@ export type ViewConfig = {
   // actually gets chosen -- and changing it never pushes config across.
   spectrogramFloor: number;
   beatsPerRow: NumberListExpr;
+  // How many strips the rows are wrapped into, side by side. 1 is one strip the
+  // full width of the pane, which is every pane before this existed. A plain
+  // number rather than an expression: it is a dropdown, with nowhere to type
+  // one. Clamped to the row count on the way into the layout -- more columns
+  // than rows is meaningless -- so this is only ever a request.
+  rowColumns: number;
   marginLeft: NumberExpr;
   marginRight: NumberExpr;
   grids: VisualGrid[];
@@ -943,6 +949,7 @@ export const defaultViewConfig = (): ViewConfig => ({
   spectrogramGain: 1,
   spectrogramFloor: 0.15,
   beatsPerRow: { inputText: "2x2", val: [2, 2] },
+  rowColumns: 1,
   marginLeft: { inputText: "0.11", val: 0.11 },
   marginRight: { inputText: "0.11", val: 0.11 },
   grids: [
@@ -967,6 +974,10 @@ export const defaultViewConfig = (): ViewConfig => ({
   showOnsets: false,
   splitChannels: false,
 });
+
+// Past this a row is narrower than it is tall at any useful row count, and the
+// point of wrapping is to read the rows, not to fit them.
+export const MAX_ROW_COLUMNS = 4;
 
 // A pane grid past this is unreadable long before it's slow, and it keeps a
 // stored 40x40 from building 1600 canvases on load.

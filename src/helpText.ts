@@ -394,6 +394,10 @@ export const HELP: Record<string, HelpEntry> = {
     title: "Beats per row",
     body: "How many beats each row spans, as a list, one entry per row. `0.25x16` is sixteen rows of a quarter beat; `bar/n x n` follows your parameters; `[.6,.4]x8` alternates.",
   },
+  rowColumns: {
+    title: "Columns of rows",
+    body: "Wraps the rows into strips side by side -- sixteen rows as two columns of eight. Still one pane: one row list, one set of grids, one set of margins. Each strip is narrower, so a beat gets fewer pixels; that is the trade for seeing twice as many rows.",
+  },
   marginLeft: {
     title: "Lead-in (beats)",
     body: "Extra beats drawn, dimmer, before each row's own beats -- so a note played a little early still shows at the start of its row.",

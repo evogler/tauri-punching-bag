@@ -1944,6 +1944,48 @@ the long version**, including the two designs that were rejected.
   definite answer, and a refusal that shows as a disabled button rather than a
   drag that snaps back.
 
+### Rows wrapped into columns
+
+`rowColumns` is per-pane, default 1, and wraps the rows into strips side by
+side -- newspaper fashion, filling a strip top to bottom before starting the
+next. Sixteen rows as two columns of eight is what makes *one row per note*
+readable past about sixteen rows.
+
+- **One source of truth, not several panes.** One `beatsPerRow`, one set of
+  grids, one set of margins, one channel list. Two panes kept in sync by hand
+  is the thing this exists to avoid, and it is the owner's own framing.
+- **`pixelsPerBeat` is a *strip's* width over the longest drawn row**, so two
+  columns halves it exactly. That is the trade -- twice the rows, half the
+  resolution -- and it is arithmetic rather than a compromise.
+- **`rowPlacement` in `layout.ts` is the single definition of a row's
+  horizontal extent**, the counterpart to `rowBox`'s vertical one, and
+  `clipToStrip` in `App.tsx` is what every painter goes through: the eraser,
+  the waveform, the flux, the onset ticks, the grids and the spectrogram's
+  backwards-drawn columns. They have to agree exactly, for the reason the
+  eraser and the waveform already share `columnLeft` -- the sweep only erases
+  columns it *visits*, so a pixel painted into a neighbouring strip is one
+  nothing ever comes back to clear.
+- **`columnWidth` is floored to a whole pixel.** A fractional strip boundary
+  leaves one pixel column shared between two strips, each erasing the other's
+  edge; the few pixels lost to the rounding sit unused at the pane's right
+  edge. For the same reason `drawSweep`'s span is bounded by the strip rather
+  than by the pane -- and the clip clamps both ends independently rather than
+  rejecting a run, so a position at a row's right edge still erases what it
+  painted.
+- **`Position.row` stays the pane's own row index** and `rowInColumn` is the
+  drawn one. `rowColorPattern` is indexed by the first -- "every fourth row
+  marks the beat" has to keep meaning that once the rows are dealt into strips.
+- **The rows per strip are what is fixed**, so a column count the rows cannot
+  fill collapses (4 rows in 3 columns is two strips of two, not two and an
+  empty third) and an uneven split leaves the gap at the bottom of the last
+  strip (5 rows in 2 columns is 3 then 2).
+- **`layoutKey` carries it**, like every other piece of geometry: a different
+  number of strips leaves the old picture standing in columns the new one never
+  reaches, exactly as a zoom change does.
+- Not rebalanced by row *length*: a swung `[.6,.4]` list splits by count, so
+  two strips can hold different total beats. That matches how one margin
+  already serves every row.
+
 ### Layout chrome
 
 `waveformBackground`, `paneGap` and `paneGapColor` in `defaultJsConfig`, edited
@@ -2852,6 +2894,19 @@ and several of them have since been confirmed. What is genuinely open is here:
   launch rather than after. Also unexercised: both native dialogs, the
   quarantine path, and whether a preset exported from one Mac imports cleanly
   on another.
+
+- **The pane placement work and `rowColumns` have not been seen running.**
+  Both are geometry, and both are temp-tested where geometry can be: a 1x1
+  layout everywhere is position-for-position identical to the old behaviour, a
+  300-trial fuzz never produced two overlapping panes, `rowColumns: 1` is
+  identical to a verbatim copy of the old `getCanvasPositions` over 600
+  off-grid beats in six configurations, and at two columns every instant is
+  still drawn exactly once. What that cannot say is whether the pane map reads
+  as a map, whether the grow/shrink buttons are the right four, or whether a
+  half-empty last strip looks like a bug. The starvation cap in `fitViews` --
+  no pane may claim so many cells that a pane behind it has nowhere to go --
+  is a judgement call that can shrink a deliberate 2x2 pane when the grid
+  shrinks around it.
 
 - **The drum grid has never been opened.** Built in two passes on 2026-09-14
   from `docs/drum-grid.md`. The compile is heavily temp-tested -- the pass

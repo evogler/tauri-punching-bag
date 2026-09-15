@@ -71,7 +71,12 @@ import {
   readSession,
   writeSession,
 } from "./presets";
-import { Layout, getCanvasPositions } from "./layout";
+import {
+  Layout,
+  Position,
+  getCanvasPositions,
+  rowColumnLayout,
+} from "./layout";
 import { SampleStatus, makeDrumVoice } from "./DrumList";
 import { open as openFileDialog } from "@tauri-apps/api/dialog";
 import { BROWSER_DEBUG_MODE } from "./env";
@@ -605,6 +610,15 @@ const App = () => {
       (acc, n) => [...acc, acc.slice(-1)[0] + n],
       [0]
     );
+    // The rows wrapped into strips. `pixelsPerBeat` is then a *strip's* width
+    // divided by the longest row, so asking for two columns halves it: twice
+    // as many rows on screen, each drawn at half the resolution. That is the
+    // whole trade, and it is arithmetic rather than a compromise.
+    const { rowColumns, rowsPerColumn, columnWidth } = rowColumnLayout(
+      beatsPerRow.length,
+      cfg.rowColumns ?? 1,
+      cellWidth
+    );
     while (viewStates.current.length <= index)
       viewStates.current.push(freshViewState());
     return {
@@ -617,12 +631,15 @@ const App = () => {
         beatsPerWindow: viewWindows[index],
         cycleBeats: sequential ? chainTotal : viewWindows[index],
         chainStart: sequential ? chainStarts[index] : 0,
-        pixelsPerBeat: cellWidth / maxBeatsInRow,
+        pixelsPerBeat: columnWidth / maxBeatsInRow,
         marginLeft,
         marginRight,
+        rowColumns,
+        rowsPerColumn,
+        columnWidth,
       },
       visualGain: exprNumber(cfg.visualGain),
-      rowHeight: cellHeight / beatsPerRow.length,
+      rowHeight: cellHeight / rowsPerColumn,
       gridLineWidth: gridWidth * scale,
       scale,
       width: cellWidth,
@@ -1186,19 +1203,48 @@ const App = () => {
   // between rows. Everything that paints inside a row derives its geometry from
   // here, and so does the eraser -- they were computed separately once, and
   // drifted.
-  const rowBox = (v: ViewCtx, row: number) => ({
-    y: row * v.rowHeight,
+  const rowBox = (v: ViewCtx, pos: Position) => ({
+    y: pos.rowInColumn * v.rowHeight,
     height: v.rowHeight - 1,
   });
+
+  // A row's *horizontal* extent, and the counterpart to `rowBox`. Wrapped into
+  // columns a row owns one strip of the pane rather than the whole width, so
+  // everything painted inside it is clipped here -- the eraser, the waveform,
+  // the flux, the onset ticks, the grids and the spectrogram alike. They have
+  // to agree exactly, for the reason the eraser and the waveform already share
+  // `columnLeft`: the sweep only ever erases columns it visits, so a pixel
+  // painted into the neighbouring strip is one nothing comes back to clear.
+  //
+  // With one column the strip is the pane, and the clip is the canvas edge the
+  // browser was already applying -- so this changes not a pixel there.
+  const clipToStrip = (
+    v: ViewCtx,
+    pos: Position,
+    left: number,
+    width: number
+  ) => {
+    const stripLeft = pos.column * v.layout.columnWidth;
+    const l = Math.max(left, stripLeft);
+    const r = Math.min(left + width, stripLeft + v.layout.columnWidth);
+    return { left: l, width: r - l };
+  };
+
+  // The whole pixel columns a draw at `x` spanning `span` of them occupies,
+  // clipped to its strip. `columnLeft` says which columns the sweep just
+  // crossed; this says which of them belong to this row.
+  const columnRect = (v: ViewCtx, pos: Position, span: number) =>
+    clipToStrip(v, pos, columnLeft(pos.x, span), span);
 
   const eraseColumn = (
     ctx: CanvasRenderingContext2D,
     v: ViewCtx,
-    x: number,
-    row: number,
+    pos: Position,
     span: number
   ) => {
-    const { y, height } = rowBox(v, row);
+    const { y, height } = rowBox(v, pos);
+    const { left, width } = columnRect(v, pos, span);
+    if (width <= 0) return;
     // Every pixel row a bar can *touch*, not the ones it fills. The vertical
     // extent is deliberately fractional -- rounding it would drop a quiet
     // passage to nothing -- so a full-amplitude bar antialiases into the pixel
@@ -1209,7 +1255,7 @@ const App = () => {
     drawOps.current++;
     ctx.globalAlpha = 1;
     ctx.fillStyle = background;
-    ctx.fillRect(columnLeft(x, span), top, span, bottom - top);
+    ctx.fillRect(left, top, width, bottom - top);
   };
 
   // `half` splits the waveform about the row's centre line: "up" draws only the
@@ -1218,36 +1264,38 @@ const App = () => {
   const drawChannel = (
     ctx: CanvasRenderingContext2D,
     v: ViewCtx,
-    x: number,
-    row: number,
+    pos: Position,
     span: number,
     value: number,
     style: ChannelStyle,
-    isMargin: boolean,
     half: "both" | "up" | "down"
   ) => {
-    const { y, height } = rowBox(v, row);
+    const { y, height } = rowBox(v, pos);
+    const { left, width } = columnRect(v, pos, span);
+    if (width <= 0) return;
     const val = Math.min(1, Math.max(value, 0));
     drawOps.current++;
     // Margin copies are repeats of another part of the loop, so they're dimmed
     // the way the single-channel version used a darker grey for them.
-    ctx.globalAlpha = style.alpha * (isMargin ? 0.55 : 1);
+    ctx.globalAlpha = style.alpha * (pos.isMargin ? 0.55 : 1);
     // Whole columns across, fractional down: the horizontal edges have to land
     // on the pixel grid so the eraser can cover them, but the vertical extent
     // is the *signal*, and rounding it would drop a quiet passage to nothing
     // instead of drawing it faintly.
-    const left = columnLeft(x, span);
     if (v.cfg.barColorMode) {
       const shade = Math.floor(val * 255)
         .toString(16)
         .padStart(2, "0");
       ctx.fillStyle = `#${shade}${shade}${shade}`;
-      ctx.fillRect(left, y, span, height);
+      ctx.fillRect(left, y, width, height);
     } else {
-      ctx.fillStyle = rowColorFor(v.cfg, row, half) ?? style.color;
+      // The row the colour pattern is indexed by is the pane's own row, not the
+      // slot it wrapped into -- "every fourth row marks the beat" has to keep
+      // meaning that when the rows are dealt into two strips.
+      ctx.fillStyle = rowColorFor(v.cfg, pos.row, half) ?? style.color;
       const top = half === "down" ? 0.5 : 0.5 - 0.5 * val;
       const bottom = half === "up" ? 0.5 : 0.5 + 0.5 * val;
-      ctx.fillRect(left, y + top * height, span, (bottom - top) * height);
+      ctx.fillRect(left, y + top * height, width, (bottom - top) * height);
     }
     ctx.globalAlpha = 1;
   };
@@ -1283,10 +1331,8 @@ const App = () => {
   const drawChannelsAt = (
     ctx: CanvasRenderingContext2D,
     v: ViewCtx,
-    x: number,
-    row: number,
+    pos: Position,
     span: number,
-    isMargin: boolean,
     peaks: number[]
   ) => {
     for (let i = 0; i < v.channels.length; i++) {
@@ -1297,12 +1343,10 @@ const App = () => {
       drawChannel(
         ctx,
         v,
-        x,
-        row,
+        pos,
         span,
         Math.min(1, peaks[slot] * v.visualGain * channelGains[channel]),
         style,
-        isMargin,
         halfFor(v, i)
       );
     }
@@ -1315,9 +1359,7 @@ const App = () => {
   const drawFluxAt = (
     ctx: CanvasRenderingContext2D,
     v: ViewCtx,
-    x: number,
-    row: number,
-    isMargin: boolean,
+    pos: Position,
     peaks: number[]
   ) => {
     for (let i = 0; i < v.channels.length; i++) {
@@ -1328,12 +1370,10 @@ const App = () => {
       drawChannel(
         ctx,
         v,
-        x,
-        row,
+        pos,
         1,
         Math.min(1, value * v.cfg.fluxGain),
         style,
-        isMargin,
         halfFor(v, i)
       );
     }
@@ -1369,8 +1409,8 @@ const App = () => {
       // win rather than the last one overwriting the rest.
       const column = Math.floor((beat % cycleBeats) * pixelsPerBeat);
       if (column !== v.state.fluxColumn) {
-        for (const { x, row, isMargin } of getCanvasPositions(v.layout, beat)) {
-          drawFluxAt(ctx, v, x, row, isMargin, peaks);
+        for (const pos of getCanvasPositions(v.layout, beat)) {
+          drawFluxAt(ctx, v, pos, peaks);
         }
         peaks.length = 0;
         v.state.fluxColumn = column;
@@ -1407,23 +1447,23 @@ const App = () => {
   const drawOnsetMark = (
     ctx: CanvasRenderingContext2D,
     v: ViewCtx,
-    x: number,
-    row: number,
-    isMargin: boolean,
+    pos: Position,
     mark: OnsetMark
   ) => {
     const index = v.channels.indexOf(mark.channel);
     const style = channelStyles[mark.channel];
     if (index < 0 || !style) return;
-    const { y, height } = rowBox(v, row);
+    const { y, height } = rowBox(v, pos);
+    const { left, width } = clipToStrip(v, pos, pos.x - 1, 2);
+    if (width <= 0) return;
     const tick = Math.max(3, height * ONSET_TICK);
     // In split mode the tick sits on the edge its channel's waveform grows
     // from, so two channels' onsets stay told apart.
     const top = halfFor(v, index) === "down" ? y + height - tick : y;
-    ctx.globalAlpha = style.alpha * (isMargin ? 0.55 : 1);
+    ctx.globalAlpha = style.alpha * (pos.isMargin ? 0.55 : 1);
     ctx.fillStyle = style.color;
     drawOps.current++;
-    ctx.fillRect(x - 1, top, 2, tick);
+    ctx.fillRect(left, top, width, tick);
     ctx.globalAlpha = 1;
   };
 
@@ -1434,8 +1474,8 @@ const App = () => {
     const { onsets } = analysis.current;
     if (!(v.layout.beatsPerWindow > 0)) return;
     for (const mark of onsets) {
-      for (const { x, row, isMargin } of getCanvasPositions(v.layout, mark.beat)) {
-        drawOnsetMark(ctx, v, x, row, isMargin, mark);
+      for (const pos of getCanvasPositions(v.layout, mark.beat)) {
+        drawOnsetMark(ctx, v, pos, mark);
       }
     }
   };
@@ -1470,9 +1510,9 @@ const App = () => {
           const b = startBeat + note.time + shift;
           if (b >= cycleBeats) break;
           if (b < 0) continue;
-          for (const { x, row } of getCanvasPositions(v.layout, b)) {
-            const top = Math.round(row * v.rowHeight);
-            const bottom = Math.round((row + 1) * v.rowHeight);
+          for (const pos of getCanvasPositions(v.layout, b)) {
+            const top = Math.round(pos.rowInColumn * v.rowHeight);
+            const bottom = Math.round((pos.rowInColumn + 1) * v.rowHeight);
             // Snapped to whole pixels, and filled rather than stroked. A stroke
             // at a fractional x spreads its width over one more column than it
             // asked for, at partial coverage -- and since the grids are
@@ -1481,8 +1521,18 @@ const App = () => {
             // therefore *how many columns it overlapped*, so 1 device pixel and
             // 2 came out as 2 columns and 3 rather than as 1 and 2, and the
             // setting looked like it did nothing.
+            // Clipped to the row's own strip like everything else: a line at
+            // the right edge of a row would otherwise land a pixel inside the
+            // next column, where it belongs to nothing.
+            const rect = clipToStrip(
+              v,
+              pos,
+              Math.round(pos.x - width / 2),
+              width
+            );
+            if (rect.width <= 0) continue;
             drawOps.current++;
-            ctx.fillRect(Math.round(x - width / 2), top, width, bottom - top);
+            ctx.fillRect(rect.left, top, rect.width, bottom - top);
           }
         }
       }
@@ -1546,20 +1596,23 @@ const App = () => {
           const closing =
             (v.state.pendingBeat % cycleBeats) * pixelsPerBeat;
           const advance = closing - v.state.lastFlushPixels;
-          for (const { x, row, isMargin } of getCanvasPositions(
-            v.layout,
-            v.state.pendingBeat
-          )) {
-            const right = Math.floor(x);
+          for (const pos of getCanvasPositions(v.layout, v.state.pendingBeat)) {
+            const right = Math.floor(pos.x);
             // Not finite on the first flush, negative when the loop wrapped;
-            // both mean "just this column". The pane's width bounds the rest.
+            // both mean "just this column". A row is only ever as wide as its
+            // own strip, so that -- not the pane -- bounds the rest. Columns
+            // the span reaches outside the strip are ones this row never drew
+            // into, and `columnRect` drops them.
             const left =
               advance > 0
-                ? Math.max(right - v.width + 1, Math.floor(x - advance) + 1)
+                ? Math.max(
+                    right - v.layout.columnWidth + 1,
+                    Math.floor(pos.x - advance) + 1
+                  )
                 : right;
             const span = right - left + 1;
-            eraseColumn(ctx, v, x, row, span);
-            drawChannelsAt(ctx, v, x, row, span, isMargin, peaks);
+            eraseColumn(ctx, v, pos, span);
+            drawChannelsAt(ctx, v, pos, span, peaks);
           }
           v.state.lastFlushPixels = closing;
         }
@@ -1581,18 +1634,20 @@ const App = () => {
   const drawSpectrumColumn = (
     ctx: CanvasRenderingContext2D,
     v: ViewCtx,
-    x: number,
-    width: number,
-    row: number,
+    pos: Position,
+    hopWidth: number,
     peaks: number[],
-    style: ChannelStyle,
-    isMargin: boolean
+    style: ChannelStyle
   ) => {
-    const { y, height } = rowBox(v, row);
+    const { y, height } = rowBox(v, pos);
     // The column is drawn backwards from `x`: the hops in it cover the span
     // ending at this beat, so anchoring them forward would put every one of
-    // them a whole hop late.
-    const left = x - width;
+    // them a whole hop late. Clipped to the row's strip, which is what stops a
+    // wide hop at a row's left edge reaching back into the column beside it --
+    // the same rule the waveform's eraser follows, and for the same reason:
+    // this pane repaints a strip at a time and never revisits its neighbour.
+    const { left, width } = clipToStrip(v, pos, pos.x - hopWidth, hopWidth);
+    if (width <= 0) return;
     ctx.globalAlpha = 1;
     drawOps.current++;
     ctx.fillStyle = background;
@@ -1609,7 +1664,7 @@ const App = () => {
       // Ceil rather than round: fractional bin heights would otherwise leave
       // background-coloured seams between the rects.
       ctx.globalAlpha =
-        Math.min(1, level) * style.alpha * (isMargin ? 0.55 : 1);
+        Math.min(1, level) * style.alpha * (pos.isMargin ? 0.55 : 1);
       drawOps.current++;
       ctx.fillRect(left, top, width, Math.ceil(bottom - top));
     }
@@ -1646,11 +1701,11 @@ const App = () => {
         // the window -- both mean "just this pixel".
         const spanBeats = beat - v.state.lastHopBeat;
         const width = Math.min(
-          v.width,
+          v.layout.columnWidth,
           Math.max(1, Math.ceil(spanBeats * pixelsPerBeat) || 1)
         );
-        for (const { x, row, isMargin } of getCanvasPositions(v.layout, beat)) {
-          drawSpectrumColumn(ctx, v, x, width, row, peaks, style, isMargin);
+        for (const pos of getCanvasPositions(v.layout, beat)) {
+          drawSpectrumColumn(ctx, v, pos, width, peaks, style);
         }
         peaks.length = 0;
         v.state.canvasPos = column;
@@ -1670,23 +1725,23 @@ const App = () => {
       // Every beat inside a column lands on the same pixel, so the middle of it
       // stands in for all of them.
       const beat = (column + 0.5) / v.layout.pixelsPerBeat;
-      for (const { x, row, isMargin } of getCanvasPositions(v.layout, beat)) {
-        drawChannelsAt(ctx, v, x, row, 1, isMargin, peaks);
+      for (const pos of getCanvasPositions(v.layout, beat)) {
+        drawChannelsAt(ctx, v, pos, 1, peaks);
       }
     });
     if (showsFlux(v)) {
       v.state.fluxColumns.forEach((peaks, column) => {
         const beat = (column + 0.5) / v.layout.pixelsPerBeat;
-        for (const { x, row, isMargin } of getCanvasPositions(v.layout, beat)) {
-          drawFluxAt(ctx, v, x, row, isMargin, peaks);
+        for (const pos of getCanvasPositions(v.layout, beat)) {
+          drawFluxAt(ctx, v, pos, peaks);
         }
       });
     }
     // Last, so a tick is never painted over by the waveform or the flux.
     if (showsOnsets(v)) {
       for (const mark of v.state.cycleOnsets) {
-        for (const { x, row, isMargin } of getCanvasPositions(v.layout, mark.beat)) {
-          drawOnsetMark(ctx, v, x, row, isMargin, mark);
+        for (const pos of getCanvasPositions(v.layout, mark.beat)) {
+          drawOnsetMark(ctx, v, pos, mark);
         }
       }
     }
@@ -1888,6 +1943,10 @@ const App = () => {
       (v) =>
         `${v.width}x${v.height}:${v.layout.pixelsPerBeat}:${v.layout.cycleBeats}:` +
         `${v.layout.chainStart}:${v.layout.marginLeft},${v.layout.marginRight}:` +
+        // The wrap is geometry too: with the rows dealt into a different number
+        // of strips the old picture stands in whatever columns the new one
+        // never reaches, which is exactly what a zoom change does.
+        `${v.layout.rowColumns}x${v.layout.columnWidth}:` +
         v.layout.beatsPerRow.join(",")
     )
     .join("|");

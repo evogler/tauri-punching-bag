@@ -1,4 +1,9 @@
-import { MAX_ANALYSIS_CHANNELS, VIEW_KINDS, ViewKind } from "../config";
+import {
+  MAX_ANALYSIS_CHANNELS,
+  MAX_ROW_COLUMNS,
+  VIEW_KINDS,
+  ViewKind,
+} from "../config";
 import { ChannelPicker } from "../ChannelPicker";
 import { GridList } from "../GridList";
 import { Help } from "../help";
@@ -139,6 +144,26 @@ export const DisplayTab = (p: PanelProps) => {
           params={params}
           {...viewIO}
         />
+        {/* Under the row list, because it is about how those rows are laid
+            out rather than about what a row is. A dropdown: it is a small
+            integer with an upper bound, and there is nothing to type. */}
+        <Help id="rowColumns" style={rowStyle}>
+          <label>Columns of rows</label>
+          <select
+            value={activeCfg?.rowColumns ?? 1}
+            onChange={(e) =>
+              viewIO.set("rowColumns", Number(e.target.value))
+            }
+          >
+            {Array.from({ length: MAX_ROW_COLUMNS }, (_, i) => i + 1).map(
+              (n) => (
+                <option key={n} value={n}>
+                  {n === 1 ? "1 (full width)" : `${n} columns`}
+                </option>
+              )
+            )}
+          </select>
+        </Help>
         <Input
           label="Lead-in (beats)"
           _key="marginLeft"

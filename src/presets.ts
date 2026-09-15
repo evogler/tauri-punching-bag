@@ -7,6 +7,7 @@ import {
   RustConfigKey,
   RustExprKey,
   ViewConfig,
+  MAX_ROW_COLUMNS,
   MAX_VIEW_SIDE,
   numExpr,
   copyView,
@@ -214,6 +215,15 @@ const clampSide = (n: unknown) =>
     ? Math.min(MAX_VIEW_SIDE, Math.max(1, Math.floor(n)))
     : 1;
 
+// A pane saved before the rows could be wrapped has no `rowColumns` at all, and
+// the merge over the defaults already gives it 1. This is for a stored value of
+// the wrong shape or an absurd one -- the layout would divide the pane's width
+// by it, so a 0 or a NaN is a pane with no pixels in it.
+const clampRowColumns = (n: unknown) =>
+  typeof n === "number" && Number.isFinite(n)
+    ? Math.min(MAX_ROW_COLUMNS, Math.max(1, Math.floor(n)))
+    : 1;
+
 // `beatsPerRow`, the margins and `visualGain` were plain numbers before they
 // took expressions. Restore merges saved values *over* the defaults, so the old
 // shape lands on top of the new one and `Math.max(...beatsPerRow)` comes back
@@ -282,6 +292,7 @@ const normalizeView = (
     name: typeof merged.name === "string" ? merged.name : base.name,
     channels: Array.isArray(merged.channels) ? merged.channels : base.channels,
     beatsPerRow: wrapList(merged.beatsPerRow, base.beatsPerRow),
+    rowColumns: clampRowColumns(merged.rowColumns),
     rowColorPattern: wrapList(merged.rowColorPattern, base.rowColorPattern),
     rowColorPatternDown: wrapList(
       merged.rowColorPatternDown,
