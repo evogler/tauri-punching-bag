@@ -1219,6 +1219,19 @@ order and explanation, never a second place anything is stored.
 - **Shown on a fresh install only** (no saved session), or when setup is part
   way through; *Run setup again* is at the top of the Setup tab. An install that
   already has a session was set up by hand and is not interrupted.
+- **Latency comes before the room question, and that order is load-bearing.**
+  The bleed measurement is inferred through the `buffer_compensation` delay --
+  it peeks `BusDelay`, whose lead *is* that number -- so running it before the
+  compensation has been measured measures the wrong path, and the check refuses
+  and asks for the very thing the next step was about to do. Reported from a
+  real run of the wizard.
+- **The step is stored by name, not by index.** It used to be an index into
+  `STEPS`, which the reorder above silently redefined: a saved `4` meant
+  *latency* and now means *room*. That is the `loopFeedback` trap in list form,
+  so the key was **renamed** (`punching-bag.setup-at`) rather than
+  reinterpreted, and an index left by an older build simply starts setup over.
+  `shouldOpenSetup` still reads the old key for whether setup is part way
+  through, and `finish` clears both.
 - **Its progress survives a restart, on purpose.** A device change needs a
   relaunch, so the current step is written to `punching-bag.setup-step` on
   *every* move -- not only on the wizard's own "Restart and continue", because

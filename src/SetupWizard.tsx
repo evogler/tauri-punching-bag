@@ -19,7 +19,14 @@ import {
 // Where setup has got to is install state, not config: kept out of presets and
 // the session, in its own keys. localStorage may be unavailable, in which case
 // setup behaves as though it has never run, which is harmless.
-const STEP_KEY = "punching-bag.setup-step";
+// The step by *name*. The key before this held an index into `STEPS`, and
+// reordering the steps silently redefined every saved one -- the `loopFeedback`
+// trap in list form. A name survives any future reordering, and renaming the
+// key rather than reinterpreting it is what keeps an old index from being read
+// as a position it never meant. `OLD_STEP_KEY` is still consulted for whether
+// setup is part way through, and cleared alongside.
+const STEP_KEY = "punching-bag.setup-at";
+const OLD_STEP_KEY = "punching-bag.setup-step";
 const DONE_KEY = "punching-bag.setup-done";
 const store = {
   get: (k: string) => {
@@ -41,7 +48,12 @@ const store = {
   },
 };
 
-const STEPS = ["welcome", "devices", "microphone", "room", "latency", "done"] as const;
+// Latency before the room, and that order is load-bearing rather than
+// cosmetic: the bleed measurement is inferred through the `buffer_compensation`
+// delay -- it peeks `BusDelay`, whose lead *is* that number -- so measuring it
+// against a compensation nobody has set yet measures the wrong path and the
+// check refuses, asking for the very thing the next step was going to do.
+const STEPS = ["welcome", "devices", "microphone", "latency", "room", "done"] as const;
 
 // Open at launch when setup is part way through -- changing a device restarts
 // the app, and it has to come back to the step it left -- or on a fresh
@@ -49,7 +61,7 @@ const STEPS = ["welcome", "devices", "microphone", "room", "latency", "done"] as
 // before this existed and is not interrupted; Run setup again is in the Setup
 // tab for it.
 export const shouldOpenSetup = (hasSession: boolean) => {
-  if (store.get(STEP_KEY) !== null) return true;
+  if (store.get(STEP_KEY) !== null || store.get(OLD_STEP_KEY) !== null) return true;
   if (store.get(DONE_KEY) === "true") return false;
   return !hasSession;
 };
@@ -160,8 +172,11 @@ export const SetupWizard = ({
   onClose: () => void;
 }) => {
   const [step, setStep] = useState(() => {
-    const saved = Number(store.get(STEP_KEY));
-    return Number.isInteger(saved) && saved > 0 && saved < STEPS.length ? saved : 0;
+    // An index left by an older build is not a step name, so it reads as -1 and
+    // setup starts from the top. Five skippable steps is the right price for
+    // never resuming at a step that means something else now.
+    const at = STEPS.indexOf(store.get(STEP_KEY) as (typeof STEPS)[number]);
+    return at > 0 ? at : 0;
   });
   const [room, setRoom] = useState<"headphones" | "speakers" | null>(null);
   const [applied, setApplied] = useState<number | null>(null);
@@ -169,11 +184,12 @@ export const SetupWizard = ({
   // Written on every move, not only before a restart: the device picker's own
   // Restart button relaunches too, and setup must come back either way.
   useEffect(() => {
-    store.set(STEP_KEY, String(step));
+    store.set(STEP_KEY, STEPS[step]);
   }, [step]);
 
   const finish = () => {
     store.remove(STEP_KEY);
+    store.remove(OLD_STEP_KEY);
     store.set(DONE_KEY, "true");
     onClose();
   };
@@ -188,7 +204,7 @@ export const SetupWizard = ({
     if (name === "done") return finish();
     if (name === "devices" && pendingDevice) {
       // Saved first: the relaunch is what brings setup back, one step on.
-      store.set(STEP_KEY, String(step + 1));
+      store.set(STEP_KEY, STEPS[step + 1]);
       invoke("restart_app").catch(() => {});
       return;
     }
@@ -323,7 +339,9 @@ export const SetupWizard = ({
               <>
                 <p style={note}>
                   Set the volume to where you'll play, then measure. Stay quiet
-                  for the couple of seconds it runs.
+                  for the couple of seconds it runs. It works from the latency
+                  measured on the last step, so redo that one first if you
+                  change devices.
                 </p>
                 <BleedMeter
                   enabled={get("bleedCancelOn")}
