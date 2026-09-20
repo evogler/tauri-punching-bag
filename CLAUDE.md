@@ -154,7 +154,7 @@ Rules that will bite you:
 
 ## The panel, the shortcuts and the menu
 
-- **The panel is seven sections, listed down a rail on its right-hand edge** --
+- **The panel is seven sections, listed down a rail on its left-hand edge** --
   play, file, loop, display, layout, setup, analysis -- with the transport,
   tempo, the looper switch, the examples, the preset bar and `parameters`
   outside the rail; presets and parameters both start collapsed.
@@ -172,6 +172,10 @@ Rules that will bite you:
     is the whole point: the list stays where you left it however far down the
     open section you are. Same argument as the help area, which is why they are
     the two things in the panel that do not scroll.
+  - **On the panel's left, against the window edge**, which is also where it
+    puts the settings' scrollbar: against the canvas rather than between the
+    settings and the rail, where the open section's flat edge would have had to
+    reach across it.
   - **`TAB_GROUPS` is the source of truth and `PanelTab` is derived from it.**
     A separate flat list of section names would let a new section be added
     without being put in a group, and an ungrouped section is one the rail
@@ -3077,10 +3081,10 @@ and several of them have since been confirmed. What is genuinely open is here:
 - **The section rail has never been looked at.** It builds and typechecks, and
   the structure is simple enough that the risks are all visual: whether ~85px
   off the settings' width makes the denser tabs cramped (Display especially),
-  whether the rail reads better on the panel's right-hand edge -- where it
-  sits, because that is where it was asked for -- or on its left against the
-  window edge, and whether three group headings for seven entries is one
-  heading too many at this size. All three are a line each to change.
+  and whether three group headings for seven entries is one heading too many at
+  this size. Both are a line each to change. It was built on the panel's right
+  first and moved to the left on sight, which is the kind of question only
+  looking at it answers.
 
 - **The examples picker has never been opened**, and the two examples in it
   have never been loaded. The store, the parse and both examples' arithmetic

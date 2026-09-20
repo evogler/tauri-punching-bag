@@ -86,20 +86,20 @@ export type PanelTab = (typeof TAB_GROUPS)[number]["tabs"][number];
 const railButton = (active: boolean): React.CSSProperties => ({
   padding: "5px 8px",
   textAlign: "left",
-  // Flat against the content on its left and rounded away from it, so the
+  // Flat against the settings on its right and rounded away from them, so the
   // open section reads as one piece with what it opened. The row of tabs did
   // the same thing upwards.
-  borderRadius: "0 8px 8px 0",
+  borderRadius: "8px 0 0 8px",
   border: "1px solid #777",
-  borderLeft: active ? "none" : "1px solid #777",
-  paddingLeft: active ? "9px" : "8px",
+  borderRight: active ? "none" : "1px solid #777",
+  paddingRight: active ? "9px" : "8px",
   backgroundColor: active ? "#444" : "#333",
   color: active ? "#fff" : "#aaa",
   fontWeight: active ? "bold" : undefined,
   cursor: "pointer",
 });
 
-/// The section list, down the right-hand edge of the panel.
+/// The section list, down the left-hand edge of the panel.
 ///
 /// A column rather than a row because a row divides one panel width between
 /// however many sections there are -- at seven each tab was already 85px, and

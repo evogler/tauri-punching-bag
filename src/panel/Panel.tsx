@@ -23,7 +23,7 @@ const readHelpVisible = () => {
   }
 };
 
-// The settings panel: the settings scroll, the section rail down the right and
+// The settings panel: the settings scroll, the section rail down the left and
 // the help area along the bottom stay put. Which section is open is held by App
 // rather than here, so it survives the panel being hidden.
 export const Panel = (
@@ -66,6 +66,8 @@ export const Panel = (
             which is the whole point of the column: the list of sections stays
             where you left it however far down the open one you are. */}
         <div style={{ display: "flex", flexDirection: "row", flex: 1, minHeight: 0 }}>
+          <TabRail active={p.panelTab} onSelect={p.setPanelTab} />
+
           <div
             style={{
               display: "flex",
@@ -106,8 +108,6 @@ export const Panel = (
               <AnalysisTab {...p} />
             </TabPanel>
           </div>
-
-          <TabRail active={p.panelTab} onSelect={p.setPanelTab} />
         </div>
         {helpVisible && <HelpArea register={register} />}
       </div>
