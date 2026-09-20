@@ -31,6 +31,15 @@ export const HELP: Record<string, HelpEntry> = {
     body: "Shows or hides this area. Remembered on this machine.",
   },
 
+  "examples.list": {
+    title: "Examples",
+    body: "Settings that come with the app, each one showing off one idea. Loading one replaces everything except your latency measurement -- save first if you want to keep what you have.",
+  },
+  "examples.load": {
+    title: "Load example",
+    body: "Loads the chosen example. Change anything you like afterwards; saving it under a name of your own makes it an ordinary preset.",
+  },
+
   "presets.list": {
     title: "Presets",
     body: "Settings you have saved. Your latency and whether you are paused are never part of a preset, since they belong to this machine and this moment.",

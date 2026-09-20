@@ -89,6 +89,11 @@ Notes:
 Read-only presets bundled with the app, each one teaching one idea, each with a
 title, a one-line description and a "try this" line.
 
+**Started 2026-09-19**: the picker, the store and the authoring script are
+built, with the first two examples in. The rest of this table is the queue --
+each one is now an afternoon in the app rather than a piece of code. See
+*Built-in examples* in CLAUDE.md for the mechanism.
+
 | Example | Teaches | Try this |
 |---|---|---|
 | Just a metronome | tempo, click, pause | change the bpm |
@@ -118,7 +123,9 @@ Implementation notes:
   hand. A hand-written preset is the `audioSubdivisions` problem in CLAUDE.md
   (a `val` that isn't what its `inputText` parses to). A temp test that
   re-parses every example's rhythm and expression text and compares it with the
-  stored `val` guards against drift.
+  stored `val` guards against drift. `yarn example:add <exported.json>` is that
+  flow: save it in the app, export it from *Manage…*, run the script, write the
+  description.
 - The "try this" line is displayed next to the preset bar while that example is
   loaded, and disappears once anything has been changed, or on dismiss.
 - Examples that need a file (play along with a song) can't ship one. They say
@@ -173,7 +180,9 @@ Anything marked **moved** comes from a different tab than today.
 | | tempo field, **moved** from sound › bpm | bpm | Tempo (bpm) | `bpm` |
 | | looper switch, **moved** from signal › looping | looping (⌘L) | Looper (⌘L) | `loopingOn` |
 | (error banner) | | "the audio thread refused this config…" | **A setting couldn't be applied, so what's playing doesn't match the panel.** Fix the field outlined in red. *(technical detail below, smaller)* | — |
-| Examples | *Phase 1: space reserved, not built in Phase 2* | | | |
+| Examples | section, **built 2026-09-19** | | Examples | — |
+| | dropdown empty state | | Choose an example… | — |
+| | try-this line, until anything changes | | **Try this:** … ✕ | — |
 | Presets | section | configs | Presets | — |
 | | dropdown empty state | -- pick a config -- / -- no saved configs -- | Choose a preset… / No saved presets | — |
 | | buttons | LOAD · DELETE · SAVE · DEFAULTS | Load · Delete · Save · Reset to defaults | — |

@@ -1,6 +1,7 @@
 import { useHelp } from "../help";
 import { Input } from "../Input";
 import { ParameterList } from "../ParameterList";
+import { ExampleBar } from "../ExampleBar";
 import { PresetBar } from "../PresetBar";
 import { Section } from "./chrome";
 import { PanelProps } from "./types";
@@ -83,6 +84,13 @@ export const PanelHeader = (
           </div>
         </div>
       )}
+
+      {/* Not collapsed, unlike the two sections under it: this is the one
+          part of the panel whose whole job is to be found by somebody who has
+          just opened the app, and a closed heading is not found. */}
+      <Section label="Examples">
+        <ExampleBar getCurrent={getCurrentPreset} onLoad={loadPreset} />
+      </Section>
 
       {/* Collapsed to start with, like parameters: reached for between
           sessions rather than during one. */}

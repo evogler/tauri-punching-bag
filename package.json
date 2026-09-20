@@ -24,7 +24,8 @@
     "eject": "react-scripts eject",
     "tauri": "node scripts/tauri.mjs",
     "dev": "yarn tauri dev",
-    "build:parser": "node scripts/build-parser.mjs"
+    "build:parser": "node scripts/build-parser.mjs",
+    "example:add": "node scripts/add-example.mjs"
   },
   "eslintConfig": {
     "extends": [

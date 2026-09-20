@@ -1,0 +1,517 @@
+{
+  "format": "tauri-punching-bag presets",
+  "version": 1,
+  "app": "bundled",
+  "presets": [
+    {
+      "id": "metronome",
+      "name": "Just a metronome",
+      "created": "2026-09-19T00:00:00.000Z",
+      "description": "One click a beat and nothing else, with four beats of the picture down the pane.",
+      "tryThis": "Change the tempo, and play along to see where your notes land.",
+      "rust": {
+        "audioInGain": {
+          "inputText": "1",
+          "val": 1
+        },
+        "highPassOn": false,
+        "highPassHz": {
+          "inputText": "800",
+          "val": 800
+        },
+        "highPassAudio": false,
+        "bleedCancelOn": false,
+        "bleedTrackOn": true,
+        "bleedCancelAudioOn": false,
+        "loopFeedbackGuardOn": false,
+        "audioMonitorOn": false,
+        "beatsToLoop": {
+          "inputText": "4",
+          "val": 4
+        },
+        "loopEchoes": {
+          "inputText": "1",
+          "val": 1
+        },
+        "loopEchoGain": {
+          "inputText": "1",
+          "val": 1
+        },
+        "loopRecordCycleOn": false,
+        "loopRecordCycle": {
+          "inputText": "4",
+          "val": [
+            4
+          ]
+        },
+        "bpm": {
+          "inputText": "90",
+          "val": 90
+        },
+        "analysisOn": true,
+        "analysisBandLow": {
+          "inputText": "30",
+          "val": 30
+        },
+        "analysisBandHigh": {
+          "inputText": "16000",
+          "val": 16000
+        },
+        "analysisWindow": 1024,
+        "onsetThreshold": {
+          "inputText": "0.05",
+          "val": 0.05
+        },
+        "onsetMinGap": {
+          "inputText": "40",
+          "val": 40
+        },
+        "onsetOffset": {
+          "inputText": "0",
+          "val": 0
+        },
+        "visibleChannels": [
+          0
+        ],
+        "channelPans": [],
+        "clickOn": true,
+        "sectionsOn": false,
+        "sections": [],
+        "sectionOrder": {
+          "inputText": "",
+          "val": []
+        },
+        "clickVolume": {
+          "inputText": "0.3",
+          "val": 0.3
+        },
+        "clickShift": {
+          "inputText": "0",
+          "val": 0
+        },
+        "drumOn": true,
+        "loopingOn": false,
+        "playFile": false,
+        "fileVolume": {
+          "inputText": "1",
+          "val": 1
+        },
+        "fileBeats": {
+          "inputText": "0",
+          "val": 0
+        },
+        "fileOffsetMs": {
+          "inputText": "0",
+          "val": 0
+        },
+        "fileShift": {
+          "inputText": "0",
+          "val": 0
+        },
+        "fileStretch": false,
+        "fileRepeatOn": false,
+        "fileRepeatStart": {
+          "inputText": "0",
+          "val": 0
+        },
+        "fileRepeatEnd": {
+          "inputText": "4",
+          "val": 4
+        },
+        "audioSubdivisions": {
+          "inputText": "1",
+          "val": {
+            "notes": [
+              {
+                "time": 0
+              }
+            ],
+            "start": 0,
+            "end": 1
+          },
+          "type": "parser2"
+        },
+        "visualMonitorOn": true,
+        "drums": [],
+        "testObject": {
+          "notes": [
+            {
+              "time": 0,
+              "sounds": [
+                "h"
+              ]
+            },
+            {
+              "time": 0.5
+            }
+          ],
+          "start": 0,
+          "end": 1
+        }
+      },
+      "js": {
+        "channelStyles": [],
+        "parameters": [],
+        "drumGrids": [],
+        "views": [
+          {
+            "col": 0,
+            "row": 0,
+            "colSpan": 1,
+            "rowSpan": 1,
+            "name": "the beat",
+            "kind": "waveform",
+            "channels": [
+              0
+            ],
+            "spectrogramChannel": 0,
+            "spectrogramGain": 1,
+            "spectrogramFloor": 0.15,
+            "beatsPerRow": {
+              "inputText": "1x4",
+              "val": [
+                1,
+                1,
+                1,
+                1
+              ]
+            },
+            "rowColumns": 1,
+            "marginLeft": {
+              "inputText": "0.11",
+              "val": 0.11
+            },
+            "marginRight": {
+              "inputText": "0.11",
+              "val": 0.11
+            },
+            "grids": [
+              {
+                "color": "#0088ff",
+                "alpha": 1,
+                "subdivisions": {
+                  "inputText": "1",
+                  "val": {
+                    "notes": [
+                      {
+                        "time": 0
+                      }
+                    ],
+                    "start": 0,
+                    "end": 1
+                  },
+                  "type": "parser2"
+                }
+              }
+            ],
+            "visualGain": {
+              "inputText": "10",
+              "val": 10
+            },
+            "barColorMode": false,
+            "refreshAtCycleEnd": false,
+            "rowColors": [],
+            "rowColorPattern": {
+              "inputText": "",
+              "val": []
+            },
+            "rowColorPatternDown": {
+              "inputText": "",
+              "val": []
+            },
+            "showFlux": false,
+            "fluxGain": 0.3,
+            "showOnsets": false,
+            "splitChannels": false
+          }
+        ],
+        "channelGains": [],
+        "viewCols": 1,
+        "viewRows": 1,
+        "viewsSequential": false,
+        "filePath": "",
+        "waveformBackground": "#222222",
+        "paneGap": 2,
+        "paneGapColor": "#333333",
+        "gridWidth": 1,
+        "showFrameTime": false
+      }
+    },
+    {
+      "id": "sixteenths",
+      "name": "16ths against the grid",
+      "created": "2026-09-19T00:00:00.000Z",
+      "description": "One row per 16th note, so the notes you are aiming at are a straight line down the pane. Green is the note, red is as far off it as you can get. The rows, the margins and both grids are written in terms of the parameters bar and n.",
+      "tryThis": "Set the parameter n to 12: every row becomes a triplet 8th and the whole pane follows it.",
+      "rust": {
+        "audioInGain": {
+          "inputText": "1",
+          "val": 1
+        },
+        "highPassOn": false,
+        "highPassHz": {
+          "inputText": "800",
+          "val": 800
+        },
+        "highPassAudio": false,
+        "bleedCancelOn": false,
+        "bleedTrackOn": true,
+        "bleedCancelAudioOn": false,
+        "loopFeedbackGuardOn": false,
+        "audioMonitorOn": false,
+        "beatsToLoop": {
+          "inputText": "4",
+          "val": 4
+        },
+        "loopEchoes": {
+          "inputText": "1",
+          "val": 1
+        },
+        "loopEchoGain": {
+          "inputText": "1",
+          "val": 1
+        },
+        "loopRecordCycleOn": false,
+        "loopRecordCycle": {
+          "inputText": "4",
+          "val": [
+            4
+          ]
+        },
+        "bpm": {
+          "inputText": "80",
+          "val": 80
+        },
+        "analysisOn": true,
+        "analysisBandLow": {
+          "inputText": "30",
+          "val": 30
+        },
+        "analysisBandHigh": {
+          "inputText": "16000",
+          "val": 16000
+        },
+        "analysisWindow": 1024,
+        "onsetThreshold": {
+          "inputText": "0.05",
+          "val": 0.05
+        },
+        "onsetMinGap": {
+          "inputText": "40",
+          "val": 40
+        },
+        "onsetOffset": {
+          "inputText": "0",
+          "val": 0
+        },
+        "visibleChannels": [
+          0
+        ],
+        "channelPans": [],
+        "clickOn": true,
+        "sectionsOn": false,
+        "sections": [],
+        "sectionOrder": {
+          "inputText": "",
+          "val": []
+        },
+        "clickVolume": {
+          "inputText": "0.3",
+          "val": 0.3
+        },
+        "clickShift": {
+          "inputText": "0",
+          "val": 0
+        },
+        "drumOn": true,
+        "loopingOn": false,
+        "playFile": false,
+        "fileVolume": {
+          "inputText": "1",
+          "val": 1
+        },
+        "fileBeats": {
+          "inputText": "0",
+          "val": 0
+        },
+        "fileOffsetMs": {
+          "inputText": "0",
+          "val": 0
+        },
+        "fileShift": {
+          "inputText": "0",
+          "val": 0
+        },
+        "fileStretch": false,
+        "fileRepeatOn": false,
+        "fileRepeatStart": {
+          "inputText": "0",
+          "val": 0
+        },
+        "fileRepeatEnd": {
+          "inputText": "4",
+          "val": 4
+        },
+        "audioSubdivisions": {
+          "inputText": "1",
+          "val": {
+            "notes": [
+              {
+                "time": 0
+              }
+            ],
+            "start": 0,
+            "end": 1
+          },
+          "type": "parser2"
+        },
+        "visualMonitorOn": true,
+        "drums": [],
+        "testObject": {
+          "notes": [
+            {
+              "time": 0,
+              "sounds": [
+                "h"
+              ]
+            },
+            {
+              "time": 0.5
+            }
+          ],
+          "start": 0,
+          "end": 1
+        }
+      },
+      "js": {
+        "channelStyles": [],
+        "parameters": [
+          {
+            "name": "bar",
+            "value": 4
+          },
+          {
+            "name": "n",
+            "value": 16
+          }
+        ],
+        "drumGrids": [],
+        "views": [
+          {
+            "col": 0,
+            "row": 0,
+            "colSpan": 1,
+            "rowSpan": 1,
+            "name": "one row per 16th",
+            "kind": "waveform",
+            "channels": [
+              0
+            ],
+            "spectrogramChannel": 0,
+            "spectrogramGain": 1,
+            "spectrogramFloor": 0.15,
+            "beatsPerRow": {
+              "inputText": "bar/n x n",
+              "val": [
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25
+              ]
+            },
+            "rowColumns": 1,
+            "marginLeft": {
+              "inputText": "(bar/n) * (1/4)",
+              "val": 0.0625
+            },
+            "marginRight": {
+              "inputText": "-((bar/n) * (1/4))",
+              "val": -0.0625
+            },
+            "grids": [
+              {
+                "color": "#33cc66",
+                "alpha": 1,
+                "subdivisions": {
+                  "inputText": "bar/n",
+                  "val": {
+                    "notes": [
+                      {
+                        "time": 0
+                      }
+                    ],
+                    "start": 0,
+                    "end": 0.25
+                  },
+                  "type": "parser2"
+                }
+              },
+              {
+                "color": "#ff5533",
+                "alpha": 1,
+                "subdivisions": {
+                  "inputText": "bar/n",
+                  "val": {
+                    "notes": [
+                      {
+                        "time": 0
+                      }
+                    ],
+                    "start": 0,
+                    "end": 0.25
+                  },
+                  "type": "parser2"
+                },
+                "shift": {
+                  "inputText": "(bar/n) / 2",
+                  "val": 0.125
+                }
+              }
+            ],
+            "visualGain": {
+              "inputText": "10",
+              "val": 10
+            },
+            "barColorMode": false,
+            "refreshAtCycleEnd": false,
+            "rowColors": [],
+            "rowColorPattern": {
+              "inputText": "",
+              "val": []
+            },
+            "rowColorPatternDown": {
+              "inputText": "",
+              "val": []
+            },
+            "showFlux": false,
+            "fluxGain": 0.3,
+            "showOnsets": false,
+            "splitChannels": false
+          }
+        ],
+        "channelGains": [],
+        "viewCols": 1,
+        "viewRows": 1,
+        "viewsSequential": false,
+        "filePath": "",
+        "waveformBackground": "#222222",
+        "paneGap": 2,
+        "paneGapColor": "#333333",
+        "gridWidth": 1,
+        "showFrameTime": false
+      }
+    }
+  ]
+}

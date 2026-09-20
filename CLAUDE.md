@@ -495,6 +495,46 @@ rule, and what a preset cannot carry.
   Neither breaks the config push: both commands return `Result`, so this is a
   failed command rather than a rejected `set_config`.
 
+### Built-in examples
+
+`src/examples.json`, `src/examples.ts` and `src/ExampleBar.tsx`: read-only
+presets bundled with the app, each teaching one idea, in their own picker above
+the presets. `docs/approachability.md` has the list they are being built
+towards and why examples come before a tour.
+
+- **They load through `loadPreset`**, so they inherit everything a preset load
+  already guarantees: merged over the *defaults* rather than over what you have,
+  and `bufferCompensation` carried across, so an example can never overwrite a
+  measured latency.
+- **The store is an ordinary preset *file* with two extra fields per entry**
+  (`description`, `tryThis`), which is what makes authoring one the same act as
+  saving one. It goes through `parsePresetFile` like any other, so an example
+  bundled today keeps loading after a key is renamed -- `migrateRust`,
+  `migrateViews` and `pickKnownKeys` all apply. The two teaching fields are not
+  part of a preset and that parser drops them, so `examples.ts` reads them back
+  off the raw entry by id.
+- **Never written by hand.** A hand-written preset is the `audioSubdivisions`
+  trap -- a `val` that is not what its `inputText` parses to -- and nothing in
+  the app would catch it. Build it in the app, save it, export it from
+  *Manage…*, then `yarn example:add exported.json`. The two that shipped first
+  were generated from the real defaults through the real parsers (and
+  `rowPerNotePatch`, so the 16ths example is exactly what the button writes) by
+  a temp test that also checked every `val` against a re-parse of its text.
+- **`yarn example:add` matches an existing entry by id and then by name**, so
+  re-exporting an example you have edited updates it in place and keeps its
+  description. Ids are stable slugs rather than the app's random preset ids,
+  because the descriptions are keyed by them -- the `loopFeedback` rename rule,
+  one level out. It drops `lastUsed`, and warns about the three things an
+  example may not do: a drum voice that is not a built-in kit sound, a
+  `filePath`, and no description.
+- **The "try this" line goes away by itself**, when the config stops hashing
+  equal to what the example loaded. The baseline can only be taken in an effect
+  -- `onLoad` sets state, so the settings are still the old ones for the rest of
+  the click that asked for them -- and clearing it stops the hashing, so it
+  costs nothing once it has fired.
+- **Not collapsed, unlike Presets and Parameters.** The one part of the panel
+  whose whole job is to be found by somebody who has just opened the app.
+
 ## Rhythm syntax
 
 Only ever documented in a comment at the top of the generated `parser2.js`, so
@@ -3011,6 +3051,18 @@ and several of them have since been confirmed. What is genuinely open is here:
   no pane may claim so many cells that a pane behind it has nowhere to go --
   is a judgement call that can shrink a deliberate 2x2 pane when the grid
   shrinks around it.
+
+- **The examples picker has never been opened**, and the two examples in it
+  have never been loaded. The store, the parse and both examples' arithmetic
+  are temp-tested -- every `val` re-parses to itself through the real parsers
+  after a simulated `loadPreset`, no voice names a file, and the authoring
+  script's round trip keeps the description while taking the new settings --
+  so what is open is whether they teach anything. Hardest first: whether the
+  try-this line disappearing the instant anything moves is helpful or
+  startling (a settling render after load would take it away immediately, and
+  nothing here can rule that out); whether *16ths against the grid* at 80 bpm
+  is playable; and whether an uncollapsed Examples section is worth the space
+  it takes from the transport.
 
 - **The drum grid has never been opened.** Built in two passes on 2026-09-14
   from `docs/drum-grid.md`. The compile is heavily temp-tested -- the pass
