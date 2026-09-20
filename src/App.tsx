@@ -82,7 +82,7 @@ import { open as openFileDialog } from "@tauri-apps/api/dialog";
 import { BROWSER_DEBUG_MODE } from "./env";
 import { Panel } from "./panel/Panel";
 import { SetupWizard, shouldOpenSetup } from "./SetupWizard";
-import { PanelTab } from "./panel/chrome";
+import { PanelTab, tabForDigit, tabStep } from "./panel/chrome";
 import { FileInfo, PanelProps } from "./panel/types";
 
 // A pane's backing store, in device pixels, and the ratio it was measured at --
@@ -2041,10 +2041,35 @@ const App = () => {
   toggleRef.current = (k) => set(k, !get(k));
   const rerollRef = useRef(() => {});
   rerollRef.current = () => reroll();
+  // Opening a section also brings the panel back: a shortcut that silently
+  // does nothing because the panel is hidden reads as a broken shortcut.
+  const openTabRef = useRef((tab: PanelTab) => {});
+  openTabRef.current = (tab) => {
+    setPanelTab(tab);
+    setHideConfig(false);
+  };
+  const stepTabRef = useRef((by: number) => {});
+  stepTabRef.current = (by) => openTabRef.current(tabStep(panelTab, by));
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!e.metaKey || e.ctrlKey || e.altKey) return;
       const key = e.key.toLowerCase();
+      // The section rail: ⌘1..⌘9 then ⌘0, counting down the rail, and ⌘[ / ⌘]
+      // to step through the whole of it once the digits run out. Taken
+      // unconditionally like ⌘P and ⌘L -- none of them is a text-editing key,
+      // and ⌘0 only resets the zoom in a browser, which this is not.
+      if (!e.shiftKey && key.length === 1 && key >= "0" && key <= "9") {
+        const tab = tabForDigit(key);
+        if (!tab) return;
+        e.preventDefault();
+        openTabRef.current(tab);
+        return;
+      }
+      if (!e.shiftKey && (key === "[" || key === "]")) {
+        e.preventDefault();
+        stepTabRef.current(key === "]" ? 1 : -1);
+        return;
+      }
       if (key === "r") {
         // cmd-shift-R is Restart, in the app menu. That arrives here too on the
         // way past, so it has to be let through rather than rerolling.

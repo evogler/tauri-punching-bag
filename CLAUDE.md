@@ -269,6 +269,26 @@ Rules that will bite you:
 - **Which tab is open is plain React state, not a config key** -- transient UI,
   kept out of presets and the session on purpose.
 - `Divider` is the labelled hairline that groups settings inside one Section.
+- **⌘1..⌘9 then ⌘0 open the sections, counting down the rail**, and ⌘[ / ⌘]
+  step through it. Same listener as the three below, and taken the same way:
+  none is a text-editing key, and ⌘0 only resets the zoom in a browser, which
+  this is not.
+  - **The digit is drawn in the rail button**, dim, and the accelerator is the
+    button's tooltip -- both generated from the section's position, so the
+    label and the key that works can never disagree. A shortcut nobody can see
+    is one nobody uses, which is the whole argument for spending the pixels.
+  - **Positional, which is the one part of the rail that does not scale**, and
+    that was taken deliberately rather than missed. Reordering the groups
+    renumbers everything and an eleventh section gets no digit at all -- but a
+    mnemonic scheme collides at once (play, presets and parameters all start
+    with p) and would have to be *remembered* rather than read. ⌘[ / ⌘] is why
+    nothing is unreachable however long the rail gets.
+  - **Opening a section also brings the panel back.** Otherwise the key does
+    nothing at all whenever the panel is hidden, which reads as a broken
+    shortcut rather than as a hidden panel.
+  - Checked by temp test (run, then deleted): every digit and its drawn label
+    agree in both directions, ⌘0 is the tenth, a section past the tenth gets
+    none, and stepping wraps both ways and reaches every section exactly once.
 - **⌘P pauses, ⌘L toggles looping, ⌘R rerolls every random parameter.** One
   `keydown` listener, registered once and reaching the current `set`/`get`
   through a ref -- those are new closures every render, so depending on them

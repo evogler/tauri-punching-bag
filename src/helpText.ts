@@ -32,6 +32,8 @@ export const HELP: Record<string, HelpEntry> = {
   },
 
   // ---- the section rail ----
+  // Each section's own shortcut is on the button as a tooltip, generated from
+  // where it sits, so it can never disagree with the key that works.
   "tabs.examples": {
     title: "Examples",
     body: "Settings that come with the app, each one showing off one idea. Start from one and change it.",

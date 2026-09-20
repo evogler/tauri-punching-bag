@@ -108,9 +108,47 @@ export const TAB_GROUPS = [
 
 export type PanelTab = (typeof TAB_GROUPS)[number]["tabs"][number];
 
+/// The rail read top to bottom, which is also the order the shortcuts count in.
+export const RAIL_TABS: PanelTab[] = TAB_GROUPS.flatMap(
+  (g) => g.tabs as readonly PanelTab[]
+);
+
+/// ⌘1..⌘9 then ⌘0, in rail order -- the browser-tab and Logic-screenset
+/// convention, and the only one where the key you press is something you can
+/// *see*: the digit is drawn in the rail button, so nobody has to be told.
+///
+/// **Positional, which is the one part of this rail that does not scale.**
+/// Reordering the groups renumbers everything, and an eleventh section gets no
+/// digit at all. Taken deliberately rather than by oversight: a mnemonic
+/// scheme collides immediately (play, presets and parameters all start with p)
+/// and would have to be remembered instead of read. ⌘[ and ⌘] step through the
+/// whole rail, so nothing is ever unreachable however long it gets.
+export const tabAccelerator = (tab: PanelTab): string | undefined => {
+  const i = RAIL_TABS.indexOf(tab);
+  if (i < 0 || i > 9) return undefined;
+  return String((i + 1) % 10);
+};
+
+/// Which section a digit selects, or nothing if it names none. ⌘1 is the first
+/// and ⌘0 the tenth, so the digit is shifted down one and wrapped; a rail with
+/// fewer than ten sections simply has no answer for the digits past its end.
+export const tabForDigit = (digit: string): PanelTab | undefined =>
+  RAIL_TABS[(Number(digit) + 9) % 10];
+
+/// One step through the rail, wrapping. What keeps an eleventh section
+/// reachable once the digits have run out.
+export const tabStep = (tab: PanelTab, by: number): PanelTab => {
+  const i = RAIL_TABS.indexOf(tab);
+  const n = RAIL_TABS.length;
+  return RAIL_TABS[(((i < 0 ? 0 : i) + by) % n + n) % n];
+};
+
 const railButton = (active: boolean): React.CSSProperties => ({
   padding: "5px 8px",
   textAlign: "left",
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "baseline",
   // Flat against the settings on its right and rounded away from them, so the
   // open section reads as one piece with what it opened. The row of tabs did
   // the same thing upwards.
@@ -169,16 +207,28 @@ export const TabRail = ({
         >
           {group.label}
         </span>
-        {group.tabs.map((tab) => (
-          <button
-            key={tab}
-            onClick={() => onSelect(tab)}
-            {...help(`tabs.${tab}`)}
-            style={railButton(tab === active)}
-          >
-            {tab[0].toUpperCase() + tab.slice(1)}
-          </button>
-        ))}
+        {group.tabs.map((tab) => {
+          const key = tabAccelerator(tab);
+          return (
+            <button
+              key={tab}
+              onClick={() => onSelect(tab)}
+              // Generated from the position rather than written down, so the
+              // label and the key that works can never disagree.
+              title={key ? `⌘${key}` : undefined}
+              {...help(`tabs.${tab}`)}
+              style={railButton(tab === active)}
+            >
+              <span>{tab[0].toUpperCase() + tab.slice(1)}</span>
+              {/* Dim, because it is a reminder rather than part of the name --
+                  but present, because a shortcut nobody can see is one nobody
+                  uses. */}
+              {key && (
+                <span style={{ opacity: 0.45, paddingLeft: "6px" }}>{key}</span>
+              )}
+            </button>
+          );
+        })}
       </div>
     ))}
   </div>
