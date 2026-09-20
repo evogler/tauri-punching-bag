@@ -10,7 +10,7 @@ use crate::stretch::{desired_ratio, request as request_stretch};
 use crate::recorder::RecordingStatus;
 use crate::structs::{
     AnalysisFrames, AnalysisOutputBuffer, BeatResetState, BleedState, CalibrationState, Config,
-    ConfigState, LoopGuardState,
+    ConfigReady, ConfigState, LoopGuardState,
     DrumSamples, InputChannelCount, LogState, LoopBufferState, Mp3BufferState, Payload,
     RecorderState, SampleOutputBuffer, VisualSamples,
 };
@@ -437,6 +437,12 @@ pub fn set_config(app_handle: tauri::AppHandle, new_config: Config) {
         )
         .unwrap();
     println!("set_config called: {:?}", new_config);
+    // The audio callback stays silent until this goes true, so the built-in
+    // default is never sounded. Set before the config is installed, not after:
+    // by the time the next callback reads the flag the new config is already
+    // behind the same lock it takes.
+    let ready: tauri::State<ConfigReady> = app_handle.state();
+    ready.0.store(true, std::sync::atomic::Ordering::Relaxed);
     let config_state: tauri::State<ConfigState> = app_handle.state();
     let mut config = config_state.0.lock().unwrap();
 

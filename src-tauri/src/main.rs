@@ -49,7 +49,7 @@ use crate::structs::{
     AnalysisOutputBuffer, BeatResetState, BleedState, BusDelay, CalibrationState, ConfigState, DrumSamples,
     LoopGuardState, InputLevelState, raise_level, KitSound, KitState,
     InputChannelCount, LogState, LoopBuffer, LoopBufferState, Mp3Buffer, Mp3BufferState,
-    RecorderState, SampleOutputBuffer, SoundingSample,
+    ConfigReady, RecorderState, SampleOutputBuffer, SoundingSample,
 };
 use crate::types::{Args, S};
 use crate::util::{
@@ -307,6 +307,8 @@ fn main() -> Result<(), coreaudio::Error> {
     let log_state = LogState(Arc::new(Mutex::new(io_log)));
 
     let config = default_config();
+    let config_ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let config_ready_audio = config_ready.clone();
     let config_state = ConfigState(Arc::new(Mutex::new(config)));
     let config1 = config_state.0.clone();
 
@@ -468,7 +470,17 @@ fn main() -> Result<(), coreaudio::Error> {
         // queue as both producer and consumer, so leaving it alone while the
         // input unit keeps pushing would grow it without bound and then play
         // back a pause-length backlog of stale audio on resume.
-        if config.paused {
+        // Silent until the frontend has spoken. Rust's `default_config()` is not
+        // anybody's saved settings, so sounding it while the window comes up is
+        // a beat of the wrong thing on every launch. Treated exactly as a pause
+        // rather than as its own path: the input still has to be drained, the
+        // levels still have to be metered for the setup wizard's microphone
+        // check, and the beat has to stay at zero so the first cycle starts on
+        // one. If the webview never loads, the app stays silent -- which is the
+        // right way round, since the alternative is playing settings nobody
+        // chose.
+        let ready = config_ready_audio.load(std::sync::atomic::Ordering::Relaxed);
+        if config.paused || !ready {
             // Same reason as the beat reset: the frames either side of a pause
             // aren't adjacent, so the history can't carry across it.
             analyzer.reset();
@@ -1280,6 +1292,7 @@ fn main() -> Result<(), coreaudio::Error> {
         .manage(input_level_state)
         .manage(kit_state)
         .manage(drum_samples_state)
+        .manage(ConfigReady(config_ready))
         .manage(recorder_state)
         .invoke_handler(tauri::generate_handler![
             get_samples,

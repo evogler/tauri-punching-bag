@@ -1126,10 +1126,16 @@ const App = () => {
   // Rust boots from its own default_config, so a restored session has to be
   // pushed across once at startup or the two sides silently disagree until the
   // first time a setting is touched.
-  const sentRestoredConfig = useRef(false);
+  // Pushed on mount whether or not a session was restored, and that is load
+  // bearing twice over. Rust boots from its own `default_config()` and stays
+  // *silent* until this arrives, so a fresh install with nothing saved would
+  // never become audible without it; and `default_config()` is a second
+  // definition of the defaults that can drift from `defaultRustConfig`, so
+  // pushing unconditionally keeps the frontend the one source of truth.
+  const sentFirstConfig = useRef(false);
   useEffect(() => {
-    if (sentRestoredConfig.current || !restoredSession) return;
-    sentRestoredConfig.current = true;
+    if (sentFirstConfig.current) return;
+    sentFirstConfig.current = true;
     invoke("set_config", { newConfig: snakeCaseKeys(unwrapValues(rustConfig)) });
   });
 

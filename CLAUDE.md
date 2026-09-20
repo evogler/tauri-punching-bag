@@ -132,8 +132,25 @@ Rules that will bite you:
   preset was saved comes back at its default -- the honest answer, and the one
   restore already gave.
 - **Session restore** merges over defaults, so new keys keep their default and
-  removed keys are dropped. A restored session pushes one `set_config` on mount,
-  because Rust boots from its own `default_config()`.
+  removed keys are dropped. **The frontend pushes one `set_config` on mount
+  whether or not a session was restored**, and Rust is *silent* until it
+  arrives.
+  - Rust boots from its own `default_config()`, which is a second definition of
+    the defaults and is nobody's saved settings. The window takes a moment to
+    come up, and for that moment the callback used to sound it -- a beat of the
+    wrong tempo and the wrong click on every launch, before the saved state
+    landed. `ConfigReady` is an atomic the callback reads and `set_config`
+    sets, and "not yet" is treated **exactly as a pause**: output silenced, the
+    input still drained (the queue is shared and would otherwise grow and then
+    replay), the levels still metered so the setup wizard's microphone check
+    works, and the beat held at zero so the first cycle starts on one.
+  - **The push had been conditional on there being a session**, which is why
+    the gate needs both halves: a fresh install would otherwise never become
+    audible. Pushing unconditionally also keeps the frontend the one source of
+    truth, rather than leaving a launch running on whatever `default_config()`
+    happens to say.
+  - If the webview never loads, the app stays silent. That is the right way
+    round -- the alternative is playing settings nobody chose.
 
 ## The panel, the shortcuts and the menu
 

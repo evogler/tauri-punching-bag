@@ -375,6 +375,19 @@ pub struct Config {
 }
 pub struct ConfigState(pub Arc<Mutex<Config>>);
 
+/// Whether the frontend has pushed a config yet.
+///
+/// Rust boots from its own `default_config()`, which is a *different* object
+/// from the frontend's `defaultRustConfig` and is nobody's saved settings. The
+/// window takes a moment to come up, and for that moment the callback was
+/// sounding the built-in default -- a beat of the wrong tempo and the wrong
+/// click on every launch, before the restored session arrived.
+///
+/// An atomic rather than a field on `Config`: `Config` is what the frontend
+/// deserializes into, and "has anyone spoken to us" is a property of the
+/// process rather than a setting anybody sets.
+pub struct ConfigReady(pub Arc<std::sync::atomic::AtomicBool>);
+
 #[derive(Clone, serde::Serialize)]
 pub struct Payload {
     pub message: Vec<String>,
