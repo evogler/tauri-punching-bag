@@ -2906,6 +2906,75 @@ exists to be read against.
   they survive `barColorMode` (a tick sits on top of the shading) where the flux
   does not.
 
+#### Running the picker over a file
+
+`src-tauri/examples/onsets.rs`. Until this existed there was no way to ask
+"where does this algorithm say the notes are" about anything but live audio,
+which is why *where the onsets land* stayed open for so long: every attempt to
+judge it was an attempt to judge a moving picture by eye.
+
+```
+cargo run --release --example onsets -- analyze take.wav [--expect f1,f2,...]
+cargo run --release --example onsets -- synth samples/snare.wav --at 20000,60000
+```
+
+- **It drives the real `Analyzer`, frame by frame, in exactly the order
+  `main.rs` does** -- `push`, `note_hop_beat`, `analyze_into`, `pick_onset`,
+  `advance_hop`. What it reports is what the app would have drawn.
+- **Onsets come out in frames because `beats_per_sample` is 1.** The analyzer
+  stamps in beats, so feeding it 1 and a hop stamp in frames makes "beats" *be*
+  frames -- nothing is converted, and the arithmetic under test is the
+  arithmetic that ships.
+- **`synth` is the half that needs nobody's recording.** It places a sample at
+  frames it chooses, so the ground truth is exact by construction rather than
+  measured off a picture. That is what the drums bus was always for -- the
+  callback knows its own trigger times -- without having to play anything
+  through a room.
+- **An `examples/` target rather than a second `[[bin]]`**, because cargo
+  builds examples only when asked: `yarn tauri build` neither compiles it nor
+  gains its warnings. Confirmed -- the ordinary build still reports exactly the
+  three.
+- **It includes `analysis.rs` by `#[path]` and stands in its own `Onset`.**
+  `structs.rs` reaches into `bleed`, `calibration` and `recorder`, and
+  `constants.rs` into Core Audio and the whole `Config`, so including either
+  would drag in the app to test one file. The stand-in is the same shape, and
+  if the real `Onset` gains a field this stops compiling -- the right kind of
+  failure.
+- **Its WAV reader is its own**, ~60 lines over PCM 16/24/32 and float32,
+  rather than symphonia: that path goes through `constants::sample_rate`, a
+  process-global `OnceLock`, and a harness whose whole job is timing has no
+  business inheriting a rate from anywhere but the file.
+
+##### What it found, 2026-09-20
+
+First run, against the built-in kit, before any guitar was recorded. The
+figures below subtract each sample's own lead-in -- measured separately as the
+first frame above a tenth of its peak -- so they are the *algorithm's* error
+and not the file's.
+
+| sample | its own attack | reported | error |
+|---|---|---|---|
+| snare | 0.05 ms in | +0.20 ms | **+0.15 ms** |
+| hi-hat | 0.06 ms in | +1.0 to +3.2 ms | +1 to +3 ms |
+| kick | 5.90 ms in | +7.4 to +8.6 ms | +1.5 to +2.7 ms |
+
+- **`ONSET_CENTRE_BIAS = 0.32` is right, and confirmed by something other than
+  the ear that set it.** A sharp attack lands within a fifth of a millisecond.
+- **The error grows as the attack softens**, which is the thing `onsetOffset`
+  cannot fix: it is one number, and this is not a constant. A plucked string
+  sits further along that same axis than a kick does, which is precisely why
+  the guitar recordings are still wanted.
+- **`onsetThreshold` at 0.05 is far too low, and that is the bigger finding.**
+  A real attack measures 1.3-1.8 here, so the default sits *twenty times*
+  below one -- and what gets in is a cymbal's own decay. A ride reported **21
+  onsets for 3 hits**, a hi-hat 5 for 3, each spurious one landing exactly
+  `onsetMinGap` after a real one and measuring 0.078 against the real 1.75.
+  Every threshold from 0.1 up reports exactly 3 on all four sounds. The
+  existing note that "a sustaining note reads under 0.009" was measured on a
+  *sine*, and a cymbal is not one.
+  - Not changed yet: what a quiet fingerpicked note measures is the other half
+    of the decision, and that is what the guitar file answers.
+
 #### Spectral flux
 
 The onset detection function, computed in `analyze_into` next to the
@@ -3044,10 +3113,13 @@ otherwise. The dated sections that follow record what was *new and unconfirmed
 at the time of writing* -- they are a build log, not a standing list of doubts,
 and several of them have since been confirmed. What is genuinely open is here:
 
-- **Onsets are not landing where they should.** The picker, the sub-hop
-  parabola, `ONSET_CENTRE_BIAS` and `onsetOffset` are all in and drawing, and
-  the placement is still off. Deserves follow-up; the drums bus is the reference
-  to calibrate against, since the callback knows its trigger times exactly.
+- **Onsets: measured at last, and it is mostly the threshold.** See *Running
+  the picker over a file*. Placement on a sharp attack is within 0.15 ms, so
+  the part everyone suspected is fine; what is wrong is that `onsetThreshold`
+  is twenty times below a real attack and lets a cymbal's decay through as
+  onsets of its own. Still open: what a quiet plucked note measures, which sets
+  where the threshold actually belongs, and how much further a slow attack
+  drifts late than a kick's +2 ms. Both want the guitar recordings.
 - **`buffer_compensation` at 48 kHz.** Tuned by ear at 44.1 kHz, so ~8 ms short
   on a 48 kHz device. `measure latency` answers this in about ten seconds.
 - **Speaker bleed has never been tried against a real speaker.** The whole
