@@ -154,21 +154,35 @@ Rules that will bite you:
 
 ## The panel, the shortcuts and the menu
 
-- **The panel is seven sections, listed down a rail on its left-hand edge** --
-  play, file, loop, display, layout, setup, analysis -- with the transport,
-  tempo, the looper switch, the examples, the preset bar and `parameters`
-  outside the rail; presets and parameters both start collapsed.
+- **The panel is ten sections, listed down a rail on its left-hand edge** --
+  examples, presets, parameters, play, file, loop, display, layout, analysis,
+  setup. **Only the transport, the tempo and the looper switch stay outside
+  it**: those are reached for mid-phrase, and tempo belongs to no one section.
   `docs/approachability.md` has the exact arrangement and why each control sits
-  where it does. Parameters are outside rather than a section because you edit
-  `n` while looking at a field that reads `bar/n x n`; they start **collapsed**
-  (`Section`'s `startCollapsed`, which hides rather than unmounts, like
-  `TabPanel`).
+  where it does.
+  - **Examples, presets and parameters were pinned above the tabs** and became
+    sections on the owner's call. Three boxes standing open over every tab --
+    two of them collapsed to a heading and so saying nothing at all -- was
+    clutter in the one part of the panel that is always on screen. What it
+    costs is real and was weighed: parameters were pinned precisely so `n`
+    could be edited while looking at a field that reads `bar/n x n`, and from
+    its own section you cannot see both. The list shows what each name resolves
+    to, which is the consolation.
+  - **They are unlabelled `Section`s**, since the rail already says where you
+    are. Every other section's captions name a group *inside* it, which is a
+    different job.
   - **A column, not the row of tabs it replaced.** A row divides one panel
     width between however many sections there are: at seven each tab was
     already 85px and the next few would have truncated their own labels, which
     is a layout that gets worse exactly as the app grows. A column costs a
     fixed strip of width once and then grows for nothing.
-  - **The rail is a sibling of the scrolling settings, not inside them**, which
+  - **The try-this line is held above both the picker and the header**
+  (`useExampleHint` in `ExampleBar.tsx`). The advice is about what to go and
+  *do*, so you load an example and then leave for Play, where the line has to
+  still be there -- it cannot live in the section that raised it. The config
+  error banner is the same shape of thing for the same reason, and both sit at
+  the top of the scrolling column rather than pinned.
+- **The rail is a sibling of the scrolling settings, not inside them**, which
     is the whole point: the list stays where you left it however far down the
     open section you are. Same argument as the help area, which is why they are
     the two things in the panel that do not scroll.

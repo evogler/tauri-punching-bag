@@ -195,6 +195,13 @@ Analysis** (was sound · signal · visual · views). Revised 2026-09-13 after
 seeing the first rearrangement: the file and the layout chrome got tabs of
 their own, "See" became "Display", and presets collapse like parameters.
 
+**Examples, Presets and Parameters moved into the rail, 2026-09-20**, leaving
+only the transport, the tempo and the looper switch pinned above the sections.
+Three boxes standing open over every tab was clutter in the one part of the
+panel that is always on screen. The examples' "try this" line still shows in
+the header, because it is transient and has to outlive the section it came
+from.
+
 **A column down the left-hand edge rather than a row of tabs, 2026-09-19.**
 A row divides one panel width between however many sections there are -- at
 seven each tab was already 85px and the next few would have truncated their own

@@ -1,13 +1,17 @@
 import { useCallback, useRef, useState } from "react";
 import { HelpArea, HelpProvider } from "../help";
 import { AnalysisTab } from "./AnalysisTab";
+import { ExampleHint, useExampleHint } from "../ExampleBar";
+import { ExamplesTab } from "./ExamplesTab";
 import { PanelTab, TabPanel, TabRail } from "./chrome";
 import { DisplayTab } from "./DisplayTab";
 import { FileTab } from "./FileTab";
 import { LayoutTab } from "./LayoutTab";
 import { LoopTab } from "./LoopTab";
 import { PanelHeader } from "./PanelHeader";
+import { ParametersTab } from "./ParametersTab";
 import { PlayTab } from "./PlayTab";
+import { PresetsTab } from "./PresetsTab";
 import { SetupTab } from "./SetupTab";
 import { PanelProps } from "./types";
 
@@ -40,6 +44,11 @@ export const Panel = (
 
   // The help area owns which entry is showing; this only forwards to it. A
   // stable function, so pointing at things never re-renders the tabs.
+  // Which example is in effect, and whether anything has been changed since.
+  // Up here because the picker sets it and the header shows it -- see
+  // `useExampleHint`.
+  const hint = useExampleHint(p.getCurrentPreset);
+
   const showRef = useRef<((id: string | null) => void) | null>(null);
   const show = useCallback((id: string | null) => showRef.current?.(id), []);
   const register = useCallback(
@@ -86,6 +95,19 @@ export const Panel = (
           >
             <PanelHeader {...p} helpVisible={helpVisible} toggleHelp={toggleHelp} />
 
+            {hint.showing && (
+              <ExampleHint example={hint.showing} onDismiss={hint.dismiss} />
+            )}
+
+            <TabPanel active={p.panelTab === "examples"}>
+              <ExamplesTab {...p} onLoaded={hint.loaded} />
+            </TabPanel>
+            <TabPanel active={p.panelTab === "presets"}>
+              <PresetsTab {...p} />
+            </TabPanel>
+            <TabPanel active={p.panelTab === "parameters"}>
+              <ParametersTab {...p} />
+            </TabPanel>
             <TabPanel active={p.panelTab === "play"}>
               <PlayTab {...p} />
             </TabPanel>

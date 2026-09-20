@@ -1,15 +1,12 @@
 import { useHelp } from "../help";
 import { Input } from "../Input";
-import { ParameterList } from "../ParameterList";
-import { ExampleBar } from "../ExampleBar";
-import { PresetBar } from "../PresetBar";
 import { Section } from "./chrome";
 import { PanelProps } from "./types";
 
 export const PanelHeader = (
   p: PanelProps & { helpVisible: boolean; toggleHelp: () => void }
 ) => {
-  const { get, set, params, resetBeat, configError, setParameters, reroll, getCurrentPreset, loadPreset, helpVisible, toggleHelp } = p;
+  const { get, set, params, resetBeat, configError, helpVisible, toggleHelp } = p;
   const help = useHelp();
   return (
     <>
@@ -52,7 +49,8 @@ export const PanelHeader = (
 			</button> */}
 
       {/* Tempo and the looper are what gets reached for mid-practice, and
-          tempo belongs to no one tab, so both sit with the transport. */}
+          tempo belongs to no one section, so both sit with the transport.
+          Everything else that used to be pinned here is in the rail now. */}
       <Section>
         <Input
           label="Tempo (bpm)"
@@ -84,35 +82,6 @@ export const PanelHeader = (
           </div>
         </div>
       )}
-
-      {/* Not collapsed, unlike the two sections under it: this is the one
-          part of the panel whose whole job is to be found by somebody who has
-          just opened the app, and a closed heading is not found. */}
-      <Section label="Examples">
-        <ExampleBar getCurrent={getCurrentPreset} onLoad={loadPreset} />
-      </Section>
-
-      {/* Collapsed to start with, like parameters: reached for between
-          sessions rather than during one. */}
-      <Section label="Presets" startCollapsed>
-        <PresetBar getCurrent={getCurrentPreset} onLoad={loadPreset} />
-      </Section>
-
-      {/* Pinned, because you edit `n` while looking at a field that reads
-          `bar/n x n` in whichever tab is open -- but collapsed to start with,
-          so a newcomer's first sight is not a list of variables. The count
-          says whether there is anything inside. */}
-      <Section
-        label={`Parameters (${get("parameters").length})`}
-        startCollapsed
-        help="parameters"
-      >
-        <ParameterList
-          parameters={get("parameters")}
-          setParameters={setParameters}
-          reroll={reroll}
-        />
-      </Section>
     </>
   );
 };

@@ -32,6 +32,18 @@ export const HELP: Record<string, HelpEntry> = {
   },
 
   // ---- the section rail ----
+  "tabs.examples": {
+    title: "Examples",
+    body: "Settings that come with the app, each one showing off one idea. Start from one and change it.",
+  },
+  "tabs.presets": {
+    title: "Presets",
+    body: "Your own saved settings -- save, load, rename, and move them between machines. Your latency and whether you are paused are never part of one.",
+  },
+  "tabs.parameters": {
+    title: "Parameters",
+    body: "Named numbers the rest of the panel can do arithmetic with. With `n = 16` and `bar = 4`, a pane's rows read `bar/n x n` and a grid `{n/bar}:1`, so \"switch to 16ths\" is one edit rather than five.",
+  },
   "tabs.play": {
     title: "Play",
     body: "What sounds: the click's rhythm and volume, the drum parts, and the practice cycle that mutes them in turn.",

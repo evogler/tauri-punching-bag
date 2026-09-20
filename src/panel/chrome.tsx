@@ -72,12 +72,18 @@ export const Section = ({
   );
 };
 
-// The panel groups by what you are doing: what plays, a file to play along
-// with, what comes back to you, how it is drawn and the frame it is drawn in,
-// what belongs to this machine, and the expert knobs. Transport, tempo, the
-// looper switch, examples, presets and parameters stay outside the rail --
-// parameters especially, since you edit `n` while looking at a field that
-// reads `bar/n x n`.
+// The panel groups by what you are doing: the settings as a whole, what plays,
+// a file to play along with, what comes back to you, how it is drawn and the
+// frame it is drawn in, and what belongs to this machine. Only the transport,
+// the tempo and the looper switch stay outside the rail -- those are reached
+// for mid-phrase, and tempo belongs to no one section.
+//
+// Examples, presets and parameters were pinned above the tabs and are sections
+// now: three boxes standing open over every tab, two of them collapsed to a
+// heading and saying nothing, was clutter in the one place that is always on
+// screen. Parameters loses something real by moving -- it was pinned so `n`
+// could be edited while looking at a field that reads `bar/n x n` -- and that
+// was weighed and taken.
 //
 // **The groups are the source of truth, and `PanelTab` is derived from them.**
 // A separate flat list of sections would let a new one be added without being
@@ -91,6 +97,10 @@ export const Section = ({
 // own: the high pass is explicitly for the picture, and the spectrum and the
 // onsets are drawn.
 export const TAB_GROUPS = [
+  // First, because the first question is where to start from, and because a
+  // newcomer who reads no further than the top of the rail has still found the
+  // examples.
+  { label: "settings", tabs: ["examples", "presets", "parameters"] },
   { label: "sound", tabs: ["play", "file", "loop"] },
   { label: "picture", tabs: ["display", "layout", "analysis"] },
   { label: "machine", tabs: ["setup"] },
