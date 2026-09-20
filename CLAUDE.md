@@ -188,6 +188,43 @@ Rules that will bite you:
   - **Each rail button carries its own help entry**, so pointing down the list
     is a tour of what the app can do -- the one place where hovering the
     *navigation* is worth explaining rather than only the controls.
+- **The panel's controls are styled in `src/index.css`, not inline**, because
+  what was wrong with them was systematic rather than per-component. Measured
+  against Audacity's preferences window, which is the same kind of surface done
+  conventionally, and the gap sorted into one sentence: *that page emphasises
+  the values and lets the structure recede, and this one did the opposite.*
+  Four changes, in the order of how much they mattered:
+  - **A field has to look like a field.** `input` was `border: 0` over the same
+    `#444` the sections are filled with, so every number sat in the panel as
+    plain text with nothing to say it could be typed in. They are recessed now
+    -- darker than what they sit on, with a hairline -- and the selector is
+    `input:not([type])` because our text fields carry no `type` at all, while
+    checkboxes, colour wells and range sliders must keep the native look they
+    are recognised by.
+  - **One type size.** Form controls default to 13.3px while body text was
+    16px, so every *value* was smaller and quieter than the label beside it --
+    exactly the wrong way round, since the value is the part you came to
+    change. `body` is 14px and every control inherits it. 14 rather than 16
+    because the panel is a fixed 600px and the density has to come from
+    somewhere; every `0.8em` note in the tree followed it down.
+  - **Chrome stopped shouting.** Unstyled `button` and `select` come out of the
+    system *white*, so Pause, Restart, Load, the help toggle and the one
+    dropdown were the brightest things on the screen while the settings were
+    the dimmest. A native `select` needs `appearance: none` to give that up,
+    which means drawing the chevron -- an inline SVG, so it sits where it is
+    put at any size. Checkboxes went the same way: a white square says nothing
+    until it is ticked, and the drum list stacks half a dozen of them.
+  - **Inline styles still win**, which is how the paused transport stays red,
+    the section rail keeps its own shape, and `invalidBorder` still turns a
+    field red.
+- **A section's name is a caption, not a title.** An unstyled `h4` is bold and
+  the same size as the labels under it, so the name of a group competed with
+  the settings inside it. Smaller and quieter than its own contents is the
+  right way round, and it is the same uppercase treatment the rail's group
+  names get. `Divider`'s label then had to stop being uppercase, or the two
+  levels read as one thing twice. The card's border went `#777` to `#525252`
+  for the same reason: a dozen bright outlines stacked were the loudest
+  structure in the panel, and it is the *fill* that groups.
 - **The help area** is the fixed strip under the panel that describes whatever
   is pointed at. `src/help.tsx` is the mechanism (`useHelp`, `<Help id>`,
   `HelpArea`), `src/helpText.ts` is every description in one place, keyed by
@@ -3077,6 +3114,17 @@ and several of them have since been confirmed. What is genuinely open is here:
   no pane may claim so many cells that a pane behind it has nowhere to go --
   is a judgement call that can shrink a deliberate 2x2 pane when the grid
   shrinks around it.
+
+- **The control restyle has never been looked at**, and it is the change here
+  most likely to be wrong on sight: 14px may simply be too small on the
+  owner's screen (one line in `index.css`), the custom checkbox's tick is
+  drawn geometry that no test can say is centred, and a field recessed to
+  `#2b2b2b` inside a `#444` card may read as a hole rather than as a field.
+  Two things it deliberately did *not* do, both from the same comparison and
+  both bigger: grouping by a tinted band with the caption outside it, instead
+  of an outlined card; and a shared vertical axis, so every control in a
+  section lines up on one edge the way Audacity's do. Either would be the next
+  pass.
 
 - **The section rail has never been looked at.** It builds and typechecks, and
   the structure is simple enough that the risks are all visual: whether ~85px

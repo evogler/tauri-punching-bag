@@ -26,10 +26,134 @@ html {
   height: 100%;
 }
 
-input {
-  background-color: #444;
-  border: 0;
-  color: #ccc !important;
+/* Controls are 13.3px by default while body text was 16px, which is why every
+   value read as smaller and quieter than the label next to it -- the wrong way
+   round, since the value is the part you came to change. One size for the
+   whole panel, and every control inherits it. 14 rather than 16 because the
+   panel is a fixed 600px and the density has to come from somewhere. */
+body {
+  font-size: 14px;
+}
+
+input,
+select,
+button,
+textarea {
+  font: inherit;
+  color: #ddd;
+}
+
+/* A field has to look like a field. These had `border: 0` over the same #444
+   the sections are filled with, so a number sat in the panel as plain text
+   with nothing to say it could be typed in. Recessed rather than raised: it is
+   darker than what it sits on, which is what a text field has looked like
+   since before any of this was on a screen.
+
+   Selected by what they are *not*, because our text fields carry no `type` at
+   all -- and checkboxes, colour wells and range sliders must keep the native
+   look they are recognised by. */
+input:not([type]),
+input[type="text"],
+input[type="number"],
+textarea,
+select {
+  background-color: #2b2b2b;
+  border: 1px solid #5a5a5a;
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+
+input:not([type]):focus,
+input[type="text"]:focus,
+input[type="number"]:focus,
+textarea:focus,
+select:focus {
+  border-color: #6a9bd8;
+  outline: none;
+}
+
+/* A native <select> renders as a white field with the system blue chevron,
+   which made the one dropdown in the panel the brightest thing on the screen.
+   `appearance: none` gives up the native widget, so the chevron has to be
+   drawn -- an inline SVG rather than a character, so it sits where it is put
+   at any font size. */
+select {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 20px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 12'%3E%3Cpath fill='%23999' d='M5 0.5L8.5 4.5H1.5z M5 11.5L8.5 7.5H1.5z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  background-size: 7px 9px;
+}
+
+/* A native checkbox is a white square, and the drum list alone stacks half a
+   dozen of them -- so the brightest marks in the panel were the ones that say
+   nothing until they are ticked. Custom, so an unticked box recedes like a
+   field and a ticked one is the only blue in the row. `appearance: none` means
+   the tick has to be drawn: a rotated corner of a border, which stays sharp at
+   any size where a glyph would not. */
+input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin: 0 2px;
+  background-color: #2b2b2b;
+  border: 1px solid #5a5a5a;
+  border-radius: 3px;
+  vertical-align: -2px;
+  position: relative;
+  cursor: pointer;
+}
+
+input[type="checkbox"]:checked {
+  background-color: #4a86d8;
+  border-color: #4a86d8;
+}
+
+input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  width: 3px;
+  height: 7px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+input[type="checkbox"]:focus-visible {
+  border-color: #6a9bd8;
+  outline: none;
+}
+
+/* Unstyled buttons come out of the system white, so Pause, Restart, Load and
+   the help toggle were louder than every setting in the panel -- chrome
+   shouting over content. Dark enough to sit with the sections, light enough to
+   read as raised against them. Inline styles still win, which is how the
+   paused transport stays red and the section rail keeps its own shape. */
+button {
+  background-color: #3f3f3f;
+  border: 1px solid #5a5a5a;
+  border-radius: 5px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background-color: #4a4a4a;
+}
+
+button:active:not(:disabled) {
+  background-color: #353535;
+}
+
+button:disabled {
+  color: #777;
+  border-color: #454545;
+  cursor: default;
 }
 
 label {

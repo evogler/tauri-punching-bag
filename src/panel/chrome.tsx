@@ -1,6 +1,22 @@
 import { useState } from "react";
 import { useHelp } from "../help";
 
+// A section's name, as a caption rather than a title. It used to be an
+// unstyled `h4` -- bold, and at the same size as the labels underneath it, so
+// the name of a group competed with the settings inside it. Smaller and
+// quieter than its own contents is the right way round: the group tells you
+// where you are, the controls are what you came for. Uppercase and
+// letter-spaced so it still reads as a heading at that size, which is the same
+// treatment the section rail's group names get.
+const headingStyle: React.CSSProperties = {
+  color: "#a5a5a5",
+  fontSize: "0.8em",
+  fontWeight: 600,
+  textTransform: "uppercase",
+  letterSpacing: "0.6px",
+  margin: "0 0 4px 1px",
+};
+
 // Passing `startCollapsed` makes the heading a toggle. Collapsed is hidden, not
 // unmounted, for the same reason as `TabPanel`: a half-typed field inside
 // would otherwise be thrown away. `help` names the entry the heading shows.
@@ -22,9 +38,13 @@ export const Section = ({
   return (
     <div
       style={{
-        border: "1px solid #777",
+        // A hairline barely above the fill it encloses. It used to be #777 on
+        // #444, which put a bright outline around every group -- a dozen of
+        // them stacked, and between them the loudest structure in the panel.
+        // The fill is what groups; the line only says where the group ends.
+        border: "1px solid #525252",
         margin: "4px",
-        padding: "4px",
+        padding: "5px 7px",
         borderRadius: "8px",
         backgroundColor: "#444",
       }}
@@ -34,17 +54,12 @@ export const Section = ({
           <h4
             onClick={() => setCollapsed(!collapsed)}
             {...headingHelp}
-            style={{
-              color: "#ccc",
-              margin: "1px ",
-              cursor: "pointer",
-              userSelect: "none",
-            }}
+            style={{ ...headingStyle, cursor: "pointer", userSelect: "none" }}
           >
             {collapsed ? "▸" : "▾"} {label}
           </h4>
         ) : (
-          <h4 {...headingHelp} style={{ color: "#ccc", margin: "1px " }}>
+          <h4 {...headingHelp} style={headingStyle}>
             {label}
           </h4>
         ))}
@@ -186,17 +201,10 @@ export const Divider = ({ label }: { label?: string }) => (
       margin: "8px 0 4px",
     }}
   >
+    {/* Not uppercase, unlike the section caption above it -- the two are one
+        level apart and would otherwise read as the same thing twice. */}
     {label && (
-      <span
-        style={{
-          color: "#999",
-          fontSize: "10px",
-          textTransform: "uppercase",
-          letterSpacing: "0.5px",
-        }}
-      >
-        {label}
-      </span>
+      <span style={{ color: "#8d8d8d", fontSize: "0.78em" }}>{label}</span>
     )}
     <div style={{ flex: 1, height: "1px", backgroundColor: "#777" }} />
   </div>
