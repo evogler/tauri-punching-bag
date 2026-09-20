@@ -19,13 +19,19 @@ use std::os::raw::c_char;
 use std::ptr::null;
 use std::sync::{Arc, Mutex};
 
-/// How many input channels a device actually offers. Core Audio reports this as
-/// a stream configuration -- a buffer list whose per-buffer channel counts sum to
-/// the total -- rather than as a plain number.
-pub fn get_device_input_channels(device_id: AudioDeviceID) -> usize {
+/// How many channels a device offers in one direction. Core Audio reports this
+/// as a stream configuration -- a buffer list whose per-buffer channel counts
+/// sum to the total -- rather than as a plain number.
+///
+/// Both directions matter, and only one of them used to be asked. A device that
+/// exists is not a device that can do the job: a microphone has zero output
+/// channels, and opening one as an output unit fails deep inside Core Audio
+/// with `InvalidPropertyValue` -- which, before any window exists, is a bare
+/// panic at launch.
+fn get_device_channels(device_id: AudioDeviceID, scope: AudioObjectPropertyScope) -> usize {
     let property_address = AudioObjectPropertyAddress {
         mSelector: kAudioDevicePropertyStreamConfiguration,
-        mScope: kAudioObjectPropertyScopeInput,
+        mScope: scope,
         mElement: kAudioObjectPropertyElementWildcard,
     };
     let data_size = 0u32;
@@ -57,6 +63,14 @@ pub fn get_device_input_channels(device_id: AudioDeviceID) -> usize {
         let buffers = std::slice::from_raw_parts((*list).mBuffers.as_ptr(), count);
         buffers.iter().map(|b| b.mNumberChannels as usize).sum()
     }
+}
+
+pub fn get_device_input_channels(device_id: AudioDeviceID) -> usize {
+    get_device_channels(device_id, kAudioObjectPropertyScopeInput)
+}
+
+pub fn get_device_output_channels(device_id: AudioDeviceID) -> usize {
+    get_device_channels(device_id, kAudioObjectPropertyScopeOutput)
 }
 
 /// The rate a device is actually running at. Core Audio calls this the
@@ -128,14 +142,18 @@ pub fn get_device_uid(device_id: AudioDeviceID) -> Option<String> {
     }
 }
 
-/// What the device picker shows. `input_channels` is 0 for output-only devices,
-/// which is how the frontend filters the input list.
+/// What the device picker shows. `input_channels` is 0 for output-only devices
+/// and `output_channels` is 0 for input-only ones, which is how the frontend
+/// filters each list. The output count was missing, so the output dropdown
+/// listed every device including microphones -- and picking one wrote a UID
+/// that could never be opened as an output.
 #[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AudioDeviceInfo {
     pub uid: String,
     pub name: String,
     pub input_channels: usize,
+    pub output_channels: usize,
     pub sample_rate: f64,
     pub is_default_input: bool,
     pub is_default_output: bool,
@@ -153,6 +171,7 @@ pub fn list_devices() -> Vec<AudioDeviceInfo> {
                 uid,
                 name: get_device_name(id).unwrap_or_else(|_| "unknown".to_string()),
                 input_channels: get_device_input_channels(id),
+                output_channels: get_device_output_channels(id),
                 sample_rate: get_device_sample_rate(id).unwrap_or(0.0),
                 is_default_input: Some(id) == default_in,
                 is_default_output: Some(id) == default_out,
@@ -172,21 +191,112 @@ pub struct ActiveDevices {
     pub input_name: String,
     pub output_uid: String,
     pub output_name: String,
-    /// A saved device was named and could not be found.
+    /// A saved device was named and could not be honoured.
     pub input_fell_back: bool,
     pub output_fell_back: bool,
+    /// Why, in words the panel can print. "Not found" and "found, but it is a
+    /// microphone and you asked it to be your output" need different fixes, so
+    /// a bare flag is not enough to act on. Empty when nothing fell back.
+    pub input_fallback_reason: String,
+    pub output_fallback_reason: String,
 }
 
-/// Resolve a saved UID back to a live device. Returns None when nothing
-/// matches, which the caller turns into "use the system default".
-fn device_for_uid(uid: &str) -> Option<AudioDeviceID> {
-    if uid.is_empty() {
-        return None;
+/// Which half of the round trip a device is being asked to be.
+#[derive(Clone, Copy, PartialEq)]
+enum Role {
+    Input,
+    Output,
+}
+
+impl Role {
+    fn name(self) -> &'static str {
+        match self {
+            Role::Input => "input",
+            Role::Output => "output",
+        }
     }
-    get_audio_device_ids()
+
+    /// How many channels this device offers in the direction it is wanted for.
+    /// Zero means it cannot do the job whatever else is true of it.
+    fn channels(self, device_id: AudioDeviceID) -> usize {
+        match self {
+            Role::Input => get_device_input_channels(device_id),
+            Role::Output => get_device_output_channels(device_id),
+        }
+    }
+}
+
+/// Resolve a saved UID back to a live device that can actually serve `role`.
+///
+/// `Ok(None)` means nothing was saved, so the system default is the answer.
+/// `Err(reason)` means something was saved and cannot be honoured -- and the
+/// caller treats both of its cases identically, falling back to the default and
+/// saying so. That the two cases *are* the same path is the fix: existing used
+/// to be the whole test, so a microphone saved as the output device resolved
+/// happily, was opened as an output unit, and took the process down with
+/// `InvalidPropertyValue` before any window existed to report it.
+fn device_for_role(uid: &str, role: Role) -> Result<Option<AudioDeviceID>, String> {
+    if uid.is_empty() {
+        return Ok(None);
+    }
+    let found = get_audio_device_ids()
         .unwrap_or_default()
         .into_iter()
-        .find(|id| get_device_uid(*id).as_deref() == Some(uid))
+        .find(|id| get_device_uid(*id).as_deref() == Some(uid));
+    match found {
+        None => Err(format!("saved {} device {} not found", role.name(), uid)),
+        Some(id) if role.channels(id) == 0 => Err(format!(
+            "saved {} device {:?} has no {} channels",
+            role.name(),
+            get_device_name(id).unwrap_or_else(|_| uid.to_string()),
+            role.name()
+        )),
+        Some(id) => Ok(Some(id)),
+    }
+}
+
+/// Open one audio unit, retrying with the system default if the chosen device
+/// refuses. Returns the unit, the device that was actually opened, and a reason
+/// if that is not the one asked for.
+///
+/// The role check above rules out the failure that has actually been seen, but
+/// it is a test of what a device *claims*; opening it is the only thing that
+/// knows for certain. Dying here means dying before any window exists, with
+/// nothing on screen and nothing in any log the owner would think to look at --
+/// so one retry against the device macOS itself is using is cheap insurance.
+fn open_unit(
+    device_id: AudioDeviceID,
+    role: Role,
+    default_id: AudioDeviceID,
+) -> Result<(AudioUnit, AudioDeviceID, Option<String>), String> {
+    let is_input = role == Role::Input;
+    match audio_unit_from_device_id(device_id, is_input) {
+        Ok(unit) => Ok((unit, device_id, None)),
+        Err(e) if device_id != default_id => {
+            let reason = format!(
+                "{} device {:?} could not be opened ({:?}); using the system default",
+                role.name(),
+                get_device_name(device_id).unwrap_or_else(|_| "unknown".to_string()),
+                e
+            );
+            println!("{}", reason);
+            let unit = audio_unit_from_device_id(default_id, is_input).map_err(|e| {
+                format!(
+                    "neither the chosen {} device nor the system default {:?} could be opened ({:?})",
+                    role.name(),
+                    get_device_name(default_id).unwrap_or_else(|_| "unknown".to_string()),
+                    e
+                )
+            })?;
+            Ok((unit, default_id, Some(reason)))
+        }
+        Err(e) => Err(format!(
+            "{} device {:?} could not be opened ({:?})",
+            role.name(),
+            get_device_name(device_id).unwrap_or_else(|_| "unknown".to_string()),
+            e
+        )),
+    }
 }
 
 /// Emitted when the set of devices changes. The picker re-enumerates on this
@@ -249,39 +359,68 @@ pub struct AudioSetup {
     pub active: ActiveDevices,
 }
 
-pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Error> {
+/// Open the pair of units the render callback is built around.
+///
+/// The error type is a message rather than `coreaudio::Error` on purpose: by
+/// the time anything here fails, which device and which role it failed for is
+/// the whole of what is worth knowing, and `Err(InvalidPropertyValue)` says
+/// neither. There is no window yet to show it in, so this is the only account
+/// of a failed launch there will ever be.
+pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, String> {
     let devices = get_audio_device_ids();
     devices.unwrap().iter().for_each(|d| {
         println!("device: {:?}", get_device_name(*d));
         println!("{:?}", get_supported_physical_stream_formats(*d));
     });
 
-    // A saved device that is no longer present falls back to the system default
-    // rather than refusing to start -- but it says so, and `ActiveDevices`
-    // carries the fact to the panel. Recording from the built-in mic while the
-    // user believes their interface is selected is exactly the kind of silent
-    // wrong answer that wastes an afternoon.
-    let default_input_id = get_default_device_id(true).unwrap();
-    let default_output_id = get_default_device_id(false).unwrap();
-    let requested_input = device_for_uid(&prefs.input_uid);
-    let requested_output = device_for_uid(&prefs.output_uid);
-    let input_fell_back = !prefs.input_uid.is_empty() && requested_input.is_none();
-    let output_fell_back = !prefs.output_uid.is_empty() && requested_output.is_none();
-    if input_fell_back {
-        println!("saved input device {} not found, using default", prefs.input_uid);
+    // A saved device that is no longer present -- or that is present and cannot
+    // do the job it was saved for -- falls back to the system default rather
+    // than refusing to start, and says so: `ActiveDevices` carries the reason
+    // to the panel. Recording from the built-in mic while the user believes
+    // their interface is selected is exactly the kind of silent wrong answer
+    // that wastes an afternoon.
+    let default_input_id =
+        get_default_device_id(true).ok_or_else(|| "no default input device".to_string())?;
+    let default_output_id =
+        get_default_device_id(false).ok_or_else(|| "no default output device".to_string())?;
+    let (requested_input, mut input_reason) = match device_for_role(&prefs.input_uid, Role::Input) {
+        Ok(id) => (id, None),
+        Err(why) => (None, Some(why)),
+    };
+    let (requested_output, mut output_reason) =
+        match device_for_role(&prefs.output_uid, Role::Output) {
+            Ok(id) => (id, None),
+            Err(why) => (None, Some(why)),
+        };
+    if let Some(why) = &input_reason {
+        println!("{}, using default", why);
     }
-    if output_fell_back {
-        println!("saved output device {} not found, using default", prefs.output_uid);
+    if let Some(why) = &output_reason {
+        println!("{}, using default", why);
     }
-    let input_device_id = requested_input.unwrap_or(default_input_id);
-    let output_device_id = requested_output.unwrap_or(default_output_id);
+
+    // Opened before the rate is settled, because a retry can land on a
+    // different input device than the one asked for and the rate has to be the
+    // one that was actually opened. `sample_rate()` can only be set once.
+    let (mut input_audio_unit, input_device_id, input_open_reason) =
+        open_unit(requested_input.unwrap_or(default_input_id), Role::Input, default_input_id)?;
+    let (mut output_audio_unit, output_device_id, output_open_reason) = open_unit(
+        requested_output.unwrap_or(default_output_id),
+        Role::Output,
+        default_output_id,
+    )?;
+    input_reason = input_reason.or(input_open_reason);
+    output_reason = output_reason.or(output_open_reason);
+
     let active = ActiveDevices {
         input_uid: get_device_uid(input_device_id).unwrap_or_default(),
         input_name: get_device_name(input_device_id).unwrap_or_else(|_| "unknown".to_string()),
         output_uid: get_device_uid(output_device_id).unwrap_or_default(),
         output_name: get_device_name(output_device_id).unwrap_or_else(|_| "unknown".to_string()),
-        input_fell_back,
-        output_fell_back,
+        input_fell_back: input_reason.is_some(),
+        output_fell_back: output_reason.is_some(),
+        input_fallback_reason: input_reason.unwrap_or_default(),
+        output_fallback_reason: output_reason.unwrap_or_default(),
     };
     println!("using input {:?}, output {:?}", active.input_name, active.output_name);
     let input_channels = get_device_input_channels(input_device_id).max(1);
@@ -291,7 +430,8 @@ pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Error
     // convert on the way in: point it at a 48 kHz microphone while asking for
     // 44.1 kHz and it returns zeroes, silently. Everything downstream --
     // beats_per_sample, the loop buffer, the analyzer -- is derived from this,
-    // so it has to be settled before any of them are built.
+    // so it has to be settled before any of them are built. Nothing in this
+    // process may read `sample_rate()` before this line; see `constants.rs`.
     let device_rate = get_device_sample_rate(input_device_id).unwrap_or(DEFAULT_SAMPLE_RATE);
     set_sample_rate(device_rate);
     let out_device_rate = get_device_sample_rate(output_device_id).unwrap_or(device_rate);
@@ -311,11 +451,6 @@ pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Error
             device_rate
         );
     }
-
-    let mut input_audio_unit = audio_unit_from_device_id(input_device_id, true)?;
-    let mut output_audio_unit = audio_unit_from_device_id(output_device_id, false)?;
-
-    // input_audio_unit.set_property(id, scope, elem, maybe_data);
 
     let format_flag = match SAMPLE_FORMAT {
         SampleFormat::F32 => LinearPcmFlags::IS_FLOAT,
@@ -371,17 +506,45 @@ pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Error
         );
         input_channels = 1;
         let asbd = make_in_format(1).to_asbd();
-        input_audio_unit.set_property(id, Scope::Output, Element::Input, Some(&asbd))?;
+        input_audio_unit
+            .set_property(id, Scope::Output, Element::Input, Some(&asbd))
+            .map_err(|e| {
+                format!(
+                    "input device {:?} would not take a mono {} Hz stream ({:?})",
+                    active.input_name, device_rate, e
+                )
+            })?;
     }
 
     let asbd = out_stream_format.to_asbd();
-    output_audio_unit.set_property(id, Scope::Input, Element::Output, Some(&asbd))?;
+    output_audio_unit
+        .set_property(id, Scope::Input, Element::Output, Some(&asbd))
+        .map_err(|e| {
+            format!(
+                "output device {:?} would not take a stereo {} Hz stream ({:?})",
+                active.output_name, device_rate, e
+            )
+        })?;
 
     // set audiounit buffer size to 32 samples, or however
     let id = kAudioDevicePropertyBufferFrameSize;
     let buffer_size: u32 = 2048;
-    input_audio_unit.set_property(id, Scope::Output, Element::Input, Some(&buffer_size))?;
-    output_audio_unit.set_property(id, Scope::Input, Element::Output, Some(&buffer_size))?;
+    input_audio_unit
+        .set_property(id, Scope::Output, Element::Input, Some(&buffer_size))
+        .map_err(|e| {
+            format!(
+                "input device {:?} would not take a {} frame buffer ({:?})",
+                active.input_name, buffer_size, e
+            )
+        })?;
+    output_audio_unit
+        .set_property(id, Scope::Input, Element::Output, Some(&buffer_size))
+        .map_err(|e| {
+            format!(
+                "output device {:?} would not take a {} frame buffer ({:?})",
+                active.output_name, buffer_size, e
+            )
+        })?;
 
     Ok(AudioSetup {
         input_unit: input_audio_unit,

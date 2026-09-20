@@ -8,6 +8,10 @@ export type AudioDeviceInfo = {
   uid: string;
   name: string;
   inputChannels: number;
+  /** 0 for a microphone. Each list is filtered on the count for its own
+   *  direction: a device that cannot do the role must not be offered for it,
+   *  because choosing one writes a UID that startup can only refuse. */
+  outputChannels: number;
   sampleRate: number;
   isDefaultInput: boolean;
   isDefaultOutput: boolean;
@@ -49,6 +53,10 @@ export type ActiveDevices = {
   outputName: string;
   inputFellBack: boolean;
   outputFellBack: boolean;
+  /** Why it fell back, in Rust's words. "Not found" and "found, but it has no
+   *  output channels" are opposite problems to the person reading it. */
+  inputFallbackReason?: string;
+  outputFallbackReason?: string;
 };
 
 export const emptyPrefs = (): AudioPrefs => ({
@@ -103,6 +111,10 @@ export const DevicePicker = ({
   onRestart: () => void;
 }) => {
   const inputs = devices.filter((d) => d.inputChannels > 0);
+  // The output list used to be every device, microphones included. Picking one
+  // wrote a UID that could never be opened as an output, and the next launch
+  // panicked in Core Audio before any window existed to say so.
+  const outputs = devices.filter((d) => d.outputChannels > 0);
   // An empty uid means "whatever macOS calls the default", which is the only
   // choice that keeps working when the machine's devices change underneath it.
   const pending =
@@ -144,7 +156,7 @@ export const DevicePicker = ({
       {select("Input", "device.input", prefs.inputUid, inputs, (uid) =>
         setPrefs({ ...prefs, inputUid: uid })
       )}
-      {select("Output", "device.output", prefs.outputUid, devices, (uid) =>
+      {select("Output", "device.output", prefs.outputUid, outputs, (uid) =>
         setPrefs({ ...prefs, outputUid: uid })
       )}
 
@@ -159,12 +171,14 @@ export const DevicePicker = ({
           app until you notice which device is lit. */}
       {active?.inputFellBack && (
         <div style={{ ...noteStyle, color: "#e08" }}>
-          Saved input device not found — using the system default
+          {active.inputFallbackReason || "Saved input device not found"} — using
+          the system default
         </div>
       )}
       {active?.outputFellBack && (
         <div style={{ ...noteStyle, color: "#e08" }}>
-          Saved output device not found — using the system default
+          {active.outputFallbackReason || "Saved output device not found"} —
+          using the system default
         </div>
       )}
 

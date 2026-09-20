@@ -124,6 +124,37 @@ fn main() -> Result<(), coreaudio::Error> {
 
     // access an asset file within the tauri app
 
+    // setup audio, and it has to come first.
+    //
+    // Everything that decodes a file converts it to the *device* rate, and the
+    // device rate is not known until the input device has been opened. Loading
+    // the built-in kit ahead of this read `sample_rate()` before it had been
+    // set, which used to freeze the process at the 44.1 kHz fallback: the
+    // samples were resampled to a rate the hardware was not running at, and
+    // then the input unit was opened at 44.1 against a 48 kHz microphone, which
+    // AUHAL answers with silence. Nothing above this line may read the rate.
+    //
+    // Device choice is read from disk, not from the config: the units are opened
+    // before any window exists, so localStorage is unreachable here.
+    let prefs_dir = tauri::api::path::app_config_dir(context.config())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let audio_prefs = prefs::load(&prefs_dir);
+    // There is no window to show this in and there never will be, so the
+    // message is the whole report. A bare `unwrap` here was a backtrace naming
+    // a line number and an enum variant -- nothing about which device, or which
+    // role it was being asked to play.
+    let setup = match get_input_output_channels(&audio_prefs) {
+        Ok(setup) => setup,
+        Err(message) => {
+            eprintln!("audio setup failed: {}", message);
+            eprintln!(
+                "Choose different devices in {}, or delete it to go back to the system defaults.",
+                prefs_dir.join("audio-prefs.json").display()
+            );
+            std::process::exit(1);
+        }
+    };
+
     // load mp3
     let path = "/Users/eric/Music/Logic/tauri-file.wav".into();
     println!("app_config_dir: {:?}", app_config_dir);
@@ -177,13 +208,6 @@ fn main() -> Result<(), coreaudio::Error> {
     // raising loop_echo_gain to a power for every frame and channel.
     let mut tap_gains: Vec<f32> = vec![];
 
-    // setup audio
-    // Device choice is read from disk, not from the config: the units are opened
-    // before any window exists, so localStorage is unreachable here.
-    let prefs_dir = tauri::api::path::app_config_dir(context.config())
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let audio_prefs = prefs::load(&prefs_dir);
-    let setup = get_input_output_channels(&audio_prefs).unwrap();
     let (mut input_audio_unit, mut output_audio_unit, input_channels, io_log) = (
         setup.input_unit,
         setup.output_unit,

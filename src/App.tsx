@@ -1036,6 +1036,30 @@ const App = () => {
     invoke("set_audio_prefs", { prefs: next }).catch(() => {});
   };
 
+  // A saved device that is present but cannot do the role it was saved for is
+  // not a temporary problem: a microphone will never grow output channels. So
+  // forget it and go back to the system default, which is what Rust has already
+  // fallen back to for this run. Deliberately *not* done for a device that is
+  // merely absent -- an interface that is unplugged today is the one you want
+  // back tomorrow, which is the whole reason the choice is stored by UID.
+  useEffect(() => {
+    if (BROWSER_DEBUG_MODE || audioDevices.length === 0) return;
+    const wrongRole = (uid: string, output: boolean) => {
+      if (!uid) return false;
+      const device = audioDevices.find((d) => d.uid === uid);
+      if (!device) return false;
+      return (output ? device.outputChannels : device.inputChannels) === 0;
+    };
+    const badInput = wrongRole(audioPrefs.inputUid, false);
+    const badOutput = wrongRole(audioPrefs.outputUid, true);
+    if (!badInput && !badOutput) return;
+    writeAudioPrefs({
+      ...audioPrefs,
+      inputUid: badInput ? "" : audioPrefs.inputUid,
+      outputUid: badOutput ? "" : audioPrefs.outputUid,
+    });
+  }, [audioDevices, audioPrefs]);
+
   // `audio-prefs.json` is the only home for this: it is excluded from presets
   // and from the session (see LOCAL_RUST_KEYS), so the config boots at the
   // default and the stored figure for whatever device actually opened is

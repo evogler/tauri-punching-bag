@@ -19,8 +19,25 @@ pub const DEFAULT_SAMPLE_RATE: f64 = 44100.0;
 /// callback runs, and read from both the audio thread and the command handlers.
 static SAMPLE_RATE_HZ: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
 
+/// Set by `sample_rate()` when it had to answer with the fallback. Reading the
+/// rate is not supposed to happen before audio setup has learned it, and for a
+/// while it was worse than not supposed to: `get_or_init` *froze* the fallback,
+/// so one stray early read -- decoding the built-in kit, say -- locked the
+/// process at 44.1 kHz and the later `set_sample_rate(48000)` did nothing. The
+/// input unit was then opened at the wrong rate against a 48 kHz device, which
+/// AUHAL answers with silence rather than an error. A read no longer decides
+/// anything; this flag only exists so that ordering mistake stays loud.
+static RATE_READ_EARLY: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 pub fn sample_rate() -> f64 {
-    *SAMPLE_RATE_HZ.get_or_init(|| DEFAULT_SAMPLE_RATE)
+    match SAMPLE_RATE_HZ.get() {
+        Some(hz) => *hz,
+        None => {
+            RATE_READ_EARLY.store(true, std::sync::atomic::Ordering::Relaxed);
+            DEFAULT_SAMPLE_RATE
+        }
+    }
 }
 
 /// Called once, from audio setup, before anything reads `sample_rate()`. A
@@ -32,6 +49,19 @@ pub fn set_sample_rate(hz: f64) {
     }
     if SAMPLE_RATE_HZ.set(hz).is_err() {
         println!("sample rate already fixed at {}, ignoring {}", sample_rate(), hz);
+        return;
+    }
+    // Nothing is wrong yet -- the cell was unset, so this call won -- but
+    // something already read the rate and acted on the fallback. Whatever it
+    // sized or resampled is at 44.1 kHz on a device that may not be, and it
+    // will not be recomputed. Say so where the two numbers are side by side.
+    if RATE_READ_EARLY.load(std::sync::atomic::Ordering::Relaxed) && hz != DEFAULT_SAMPLE_RATE {
+        println!(
+            "WARNING: something read the sample rate before audio setup ran, so it \
+             saw the {} Hz fallback rather than the device's {} Hz. Whatever that was \
+             is sized or resampled wrong; move it after get_input_output_channels.",
+            DEFAULT_SAMPLE_RATE, hz
+        );
     }
 }
 pub const SAMPLE_FORMAT: SampleFormat = SampleFormat::F32;
@@ -151,3 +181,4 @@ pub fn default_config() -> Config {
         },
     };
 }
+

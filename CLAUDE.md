@@ -1180,6 +1180,25 @@ reasons they fail are not visible until you measure.
   "play 44.1 on a 48 kHz device" path. The disagreement is logged. Genuinely
   separate devices still drift -- the answer there is an aggregate device, not
   offset correction (see *Discussed but not built*).
+- **A read of the rate must not decide it, and the order is load-bearing.**
+  `sample_rate()` was `get_or_init(|| DEFAULT_SAMPLE_RATE)`, so *any* read
+  locked the process at 44.1 kHz -- and `main` decoded the startup file and the
+  whole built-in kit before it ever opened a device. Every kit sound was
+  resampled to a rate the hardware was not running at, `set_sample_rate(48000)`
+  then did nothing but print `sample rate already fixed`, and the input unit
+  was opened at 44.1 against a 48 kHz microphone: AUHAL's silent zeroes, which
+  is exactly the failure this section exists to prevent, arrived at from the
+  other direction. Two halves to the fix and both are needed. `sample_rate()`
+  answers with the set value *or* the fallback without initialising the cell,
+  so a stray early read can no longer poison the process; and audio setup moved
+  above the mp3 and kit loads, because a read that no longer freezes the rate
+  still converts the samples to the wrong one. **Nothing in `main` above
+  `get_input_output_channels` may read the rate** -- `to_device_stereo` is the
+  reader to watch for, since everything that decodes a file goes through it. A
+  late `set_sample_rate` that finds the fallback was already read now prints a
+  `WARNING:` naming both numbers, because the old message only fired when the
+  cell had been *set* twice, which was never the case that bit. Latent since
+  the built-in kit landed.
 - **Everything sized in frames is now a fn, not a const**: `max_input_backlog()`,
   `max_visual_backlog()` (`constants.rs`) and `max_loop_frames()`
   (`get_loop_buffer_size.rs`). They are documented in seconds -- a quarter
@@ -1283,6 +1302,36 @@ the same thing from the menu.
   `kAudioDevicePropertyDeviceUID`, a CFString rather than a number, cribbed from
   `get_device_name` in `macos_helpers.rs`. A device with no readable UID is
   filtered out of the picker -- it cannot be persisted, so it cannot be offered.
+- **A saved device must be able to do the role it was saved for.** Existing was
+  the whole test, and a device that exists is not a device that can do the job:
+  `outputUid` was once set to the built-in *microphone*, `device_for_uid` found
+  it, `output_fell_back` stayed false, and `audio_unit_from_device_id(mic,
+  false)` came back `AudioUnit(InvalidPropertyValue)` into a bare `unwrap` -- a
+  panic at launch, before any window existed, with no prompt, no UI and nothing
+  in any log. `get_device_channels` now answers for either direction and
+  `device_for_role` requires a non-zero count for the one being asked; a device
+  that cannot serve takes **the same path a missing one already takes** --
+  system default, the `fell_back` flag, and a reason string the panel prints in
+  red. That the two share a path is the point: "not found" and "found, but it
+  is a microphone" want the same recovery and different words.
+- **The picker was offering it.** `AudioDeviceInfo` carried only
+  `input_channels`, so the frontend could filter the *input* list and had
+  nothing to filter the output list with -- it was fed every device,
+  microphones included, from the day the picker landed. `output_channels`
+  closes that, and the panel additionally clears a saved UID naming a *present*
+  device with no channels for its role: a microphone will never grow an output,
+  so that is a permanent wrong answer -- unlike an unplugged interface, which
+  is the whole reason the choice is stored by UID at all.
+- **Setup reports rather than panics.** `get_input_output_channels` returns a
+  message rather than a `coreaudio::Error`, because by the time anything fails,
+  *which device and which role* is the whole of what is worth knowing and
+  `Err(InvalidPropertyValue)` says neither. Each unit is opened through
+  `open_unit`, which retries once against the system default and says so; if
+  that fails too, `main` prints the device, the role, the error and the path of
+  `audio-prefs.json`, and exits. There is no window to put this in and there
+  never will be, so the message is the entire account of a failed launch -- the
+  *Failing loudly* argument at the one point in the program where nothing can
+  be shown.
 - **A saved device that is gone falls back to the system default and says so.**
   `ActiveDevices` carries `input_fell_back` / `output_fell_back` and the panel
   prints it in red next to what is actually running. Silently recording from the
@@ -2781,6 +2830,17 @@ exactly as before.
   Everything is converted to interleaved stereo at the device rate on the way
   in, so `sounding_samples[j].pos += 1` per output channel is now a correct
   assumption rather than a lucky one. See *The file player*.
+- ~~**A saved device was only checked for existing, not for being able to do
+  its role.**~~ -- **fixed 2026-09-19.** A microphone saved as the output
+  device panicked the process at launch, before any window. See *Device
+  selection*.
+- ~~**Any read of `sample_rate()` froze it at the 44.1 kHz fallback.**~~ --
+  **fixed 2026-09-19.** The kit was decoded before the device was opened, so
+  both the samples and the input stream format were at the wrong rate. See
+  *Input capture*.
+- **`describe()` in the device picker prints the input channel count in both
+  lists**, so a 4-in/4-out interface under *Output* reads "4 ch" meaning its
+  inputs. Cosmetic.
 - **The channel count `2` is a magic literal** in the output stream format and
   `if ch == 0 || ch == 1`. Untangling these into one constant is prerequisite work
   for any further channel changes.
