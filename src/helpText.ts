@@ -619,7 +619,7 @@ export const HELP: Record<string, HelpEntry> = {
   },
   onsetOffset: {
     title: "Offset (ms)",
-    body: "Moves detected note starts by this many milliseconds, to line them up with where you hear the attack.",
+    body: "Moves detected note starts by this many milliseconds, negative earlier. The detector reports every attack slightly late -- more so the slower the attack -- so this starts at -4. Nudge it until the ticks sit on the front of the notes you can see.",
   },
   showFrameTime: {
     title: "Show frame time",

@@ -154,7 +154,7 @@ impl Default for Opts {
             window: 1024,
             threshold: 0.4,
             gap_ms: 40.0,
-            offset_ms: 0.0,
+            offset_ms: -4.0,
             low: 30.0,
             high: 16000.0,
             channel: None,

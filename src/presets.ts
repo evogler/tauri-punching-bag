@@ -165,6 +165,15 @@ const migrateRust = (rust: Record<string, unknown>): Record<string, unknown> => 
   if (oldThreshold && oldThreshold.val === 0.05)
     out.onsetThreshold = defaultRustConfig.onsetThreshold;
 
+  // Same treatment, same reason: the onset trim defaulted to 0 while every
+  // sound measured came back late, so a saved 0 is not a choice to leave the
+  // bias in -- it is what the default was before anyone measured it. Exactly
+  // 0 moves; any other number, including a 0 somebody typed back deliberately,
+  // is indistinguishable from that and is the price of the rule.
+  const oldOffset = out.onsetOffset as NumberExpr | undefined;
+  if (oldOffset && oldOffset.val === 0)
+    out.onsetOffset = defaultRustConfig.onsetOffset;
+
   if ("audioSubdivisions" in out)
     out.audioSubdivisions = sanitizeRhythm(
       out.audioSubdivisions,

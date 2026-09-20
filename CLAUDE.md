@@ -2992,29 +2992,76 @@ known frames.
 - **The band stays 30-16000 Hz.** The "exclude the fundamental and the attack
   sharpens" hypothesis is **wrong**: 30 to 400 Hz moves the guitar's median by
   0.1 ms and its spread by 0.1 ms. 800 Hz costs a note.
-- **`onsetOffset` stays 0.** -3.8 ms would zero the guitar's median, but the
-  drums sit at +0.2 to +3.3 and a 3.8 ms trim is noise against a 44 ms spread.
-  Trimming now would be tuning to one instrument on one recording.
+- **`onsetOffset` stayed 0 here, and that was wrong.** The reasoning was that
+  a 3.8 ms trim is noise against a 44 ms spread -- true, but the 44 ms spread
+  was an artifact of the ground truth, and there is no spread of that size to
+  be noise against. Superseded the same day by *The late bias*, below.
 
-##### The spread is the open problem
+##### The late bias, 2026-09-20
 
-At the shipped settings the guitar's seven notes land at +3.0, +3.8, **-20.1**,
--4.1, +17.1, +23.7, +20.5 ms. Median +3.8, spread 44 ms -- a 16th note at 100
-bpm, so it matters.
+**Everything is reported late, and the measurement that said otherwise was
+measuring against the wrong zero.** Found by the owner looking at the running
+app for the first time -- every tick sitting a consistent distance to the right
+of the note it marked -- which is exactly the check *not seen in the app yet*
+was there to prompt.
 
-- **It is not attack softness.** r = +0.037 against rise time, slope 0.009
-  ms/ms. The slowest attack in the set (198 ms) is the second most accurate
-  note; the two fastest (18 and 22 ms) land 40 ms apart *with opposite signs*.
-  The kick's +1.6 ms had suggested a rise-time story and there isn't one -- at
-  1024. At 2048 a dependence does appear (r = +0.47), which is windows smearing
-  slow attacks later, and is another reason to stay at 1024.
-- **So no single trim can fix it, and neither can a rise-time correction.**
-- It correlates with position in the file instead (r = +0.64): the first two
-  notes sit near +3, the last three near +20. Pitch, register or level is the
-  likely hidden variable and this material cannot separate them.
-- **One note is genuinely ambiguous**: note 3 has two peaks of equal strength
-  0.53, at -20.1 and +11.9 ms, and no parameter setting prefers the better one.
-  It is most of the spread on its own.
+**Where "note start" is put decides the sign of the answer**, and that is the
+whole of the earlier mistake. The ground truth used for the threshold sweep
+was a crossing of 5% of full scale; a guitar note takes 20-30 ms to climb
+that far, so the zero was already deep inside the note and half the errors
+came out negative. The eye does not use that definition. Looking at a
+waveform, the note starts where the trace first leaves the baseline -- so the
+ground truth has to be the first departure from the noise floor, and against
+it nothing is early:
+
+| sound | error vs first departure |
+|---|---|
+| snare | +0.7 ms |
+| hi-hat | +2.2 ms |
+| ride | +3.5 ms |
+| kick | +7.0 ms |
+| guitar, four notes | +3.5 to +4.8 ms |
+| guitar, three notes | +23.5 to +29.3 ms |
+
+- **Eleven sounds, eleven late.** That is a bias, not a scatter, so the median
+  of 4.6 ms is a constant to subtract rather than the middle of a range.
+  `onsetOffset` defaults to **-4** -- rounded down so the sharpest attack
+  available (the snare, +0.7) comes out 3.3 ms early, inside the half hop the
+  sub-hop parabola is clamped to and so under the resolution of the thing
+  doing the measuring.
+- **It changes placement and nothing else.** Still 7/7 on the guitar with no
+  false positives; the trim is added after every test in `pick_onset`.
+- **A session carrying exactly 0 is migrated**, like the threshold before it.
+  0 was the default, not a decision, and restore merges saved values over the
+  defaults. The cost is that a deliberate 0 is indistinguishable from an
+  untouched one and moves too.
+- **The kit's own numbers got worse under the honest definition, and that is
+  the point.** The kick was recorded at +1.5 to +2.7 ms against a 10%-of-peak
+  lead-in; against first departure it is +7.0, because the kick genuinely
+  takes 5.9 ms to climb from the floor to 1% of full scale. The old table was
+  flattering the detector by handing it a late zero on both sides.
+
+**What the trim does not fix** is the three guitar notes at +23.5 to +29.3,
+which sit ~20 ms out even after it. Those are the ones whose envelope ramps
+gradually between 4x and 10x the noise floor -- a soft swell of 5-13 ms before
+the string really speaks -- where the other four depart abruptly. So the
+remaining error is *not* uniform and no constant absorbs it.
+
+- **Do not read a rise-time law into it.** r = -0.87 against rise time looks
+  strong and is not evidence: the seven notes fall into a cluster of four and
+  a cluster of three, and any variable separating those two clusters scores
+  that well. Position in the file scores +0.64 on the same seven points. What
+  separates the clusters is unestablished, and seven notes cannot establish
+  it.
+- **The earlier claim that it is not attack softness (r = +0.037) is
+  withdrawn**, along with the claim that one note is ambiguous at -20.1 ms --
+  both were computed against the 5%-of-full-scale zero and neither survives
+  the change of ground truth. The *direction* the kit suggested all along --
+  slower attack, later report -- is the one thing that does survive: snare
+  +0.7, hi-hat +2.2, ride +3.5, kick +7.0, in attack order.
+- **The material to settle it is the same one already wanted**: the same note
+  at several pitches, and quiet playing. Level and register are the candidates
+  this recording cannot separate.
 - **A sub-threshold neighbour used to steal the slot.** At low thresholds a
   weak noise peak 30-50 ms *before* a note is accepted first, and `onsetMinGap`
   then suppresses the real onset -- so the reported time was the *next* peak,
@@ -3030,6 +3077,13 @@ First run, against the built-in kit, before any guitar was recorded. The
 figures below subtract each sample's own lead-in -- measured separately as the
 first frame above a tenth of its peak -- so they are the *algorithm's* error
 and not the file's.
+
+**The lead-in definition is too generous and these errors are understated**;
+*The late bias* has the same sounds against first departure from the floor,
+where the kick is +7.0 rather than +1.5 to +2.7. Kept as written because the
+*ordering* it establishes -- sharper attack, smaller error -- is the finding
+that survived, and because it is the measurement the threshold work was done
+on top of.
 
 | sample | its own attack | reported | error |
 |---|---|---|---|
@@ -3192,15 +3246,21 @@ otherwise. The dated sections that follow record what was *new and unconfirmed
 at the time of writing* -- they are a build log, not a standing list of doubts,
 and several of them have since been confirmed. What is genuinely open is here:
 
-- **Onsets: measured, and the threshold is fixed.** See *Running the picker
-  over a file*. `onsetThreshold` 0.05 -> 0.4 takes 61 seconds of guitar from
-  269 reported onsets for 7 notes to exactly 7, with no misses, and a ride
-  from 21 for 3 hits to 3. **Not seen in the app yet** -- the whole result is
-  from the offline harness, so what is unconfirmed is that the ticks now land
-  on screen where the harness says, and that 0.4 holds for playing quieter
-  than the recording. Still open, and a harder problem than the threshold was:
-  the 44 ms spread on the guitar, which is not attack softness and not
-  anything one trim can absorb.
+- **Onsets: the threshold and the late bias are both measured and fixed.** See
+  *Running the picker over a file*. `onsetThreshold` 0.05 -> 0.4 takes 61
+  seconds of guitar from 269 reported onsets for 7 notes to exactly 7, with no
+  misses, and a ride from 21 for 3 hits to 3. `onsetOffset` 0 -> -4 takes out
+  the systematic lateness the owner saw in the app -- see *The late bias*,
+  which is also the entry that records the offline measurement having been
+  made against the wrong definition of "note start".
+  - **The trim has not been looked at in the app**, which is the whole of what
+    it was built to fix, so the number to trust is whatever the owner ends up
+    dialling while watching their own playing rather than -4. It is a live
+    control in the analysis section and the eye judging it is better ground
+    truth than any file here.
+  - **Still open**: three of seven guitar notes are ~20 ms late even after the
+    trim, and what separates them from the other four is unestablished. Also
+    untested: whether 0.4 holds for playing quieter than the recording.
 - **`buffer_compensation` at 48 kHz.** Tuned by ear at 44.1 kHz, so ~8 ms short
   on a 48 kHz device. `measure latency` answers this in about ten seconds.
 - **Speaker bleed has never been tried against a real speaker.** The whole

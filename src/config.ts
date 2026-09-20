@@ -636,9 +636,19 @@ export const defaultRustConfig = {
   onsetMinGap: numExpr(40),
   // Milliseconds to nudge every onset, positive later. A trim on top of the
   // structural correction in analysis.rs, which is measured on an instant
-  // attack; a slow-attack instrument sits differently. Calibrate against the
-  // drums bus, whose trigger times the callback knows exactly.
-  onsetOffset: numExpr(0),
+  // attack; a slow-attack instrument sits differently.
+  //
+  // -4 is measured, and it is a *bias* rather than a preference: against the
+  // first visible departure from the noise floor -- which is what the eye
+  // picks off the waveform, and the only definition of "note start" the
+  // picture can be judged by -- every sound measured is reported late. Snare
+  // +0.7, hi-hat +2.2, ride +3.5, kick +7.0, and seven guitar notes +3.5 to
+  // +29.3. Nothing is early, so the median of 4.6 is a constant to subtract
+  // rather than the middle of a scatter. Rounded to 4 so the sharpest attack
+  // there is (the snare) comes out 3.3 ms early -- inside the half hop the
+  // sub-hop parabola is clamped to, so under the resolution of the thing
+  // doing the measuring. See CLAUDE.md, *The late bias*.
+  onsetOffset: numExpr(-4),
   paused: false,
   // Which channels the callback packs into the sample stream, by device channel
   // index. Derived from the panes rather than set directly -- see

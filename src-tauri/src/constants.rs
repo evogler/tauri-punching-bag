@@ -153,7 +153,7 @@ pub fn default_config() -> Config {
         // Measured -- see the note beside `onsetThreshold` in config.ts.
         onset_threshold: 0.4,
         onset_min_gap: 40.0,
-        onset_offset: 0.0,
+        onset_offset: -4.0,
         visible_channels: vec![0],
         channel_pans: vec![],
         audio_subdivisions: ParserRhythm {
