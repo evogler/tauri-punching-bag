@@ -150,7 +150,8 @@ pub fn default_config() -> Config {
         analysis_band_low: 30.0,
         analysis_band_high: 16000.0,
         analysis_window: DEFAULT_WINDOW,
-        onset_threshold: 0.05,
+        // Measured -- see the note beside `onsetThreshold` in config.ts.
+        onset_threshold: 0.4,
         onset_min_gap: 40.0,
         onset_offset: 0.0,
         visible_channels: vec![0],

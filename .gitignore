@@ -24,3 +24,6 @@ yarn-error.log*
 
 # Apple notarization credentials (app-specific password). Never commit.
 .env.signing
+
+# Recordings to test the onset picker against. Personal, and megabytes.
+samples-inputs/

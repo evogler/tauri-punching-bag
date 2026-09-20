@@ -619,9 +619,17 @@ export const defaultRustConfig = {
   // is always a quarter of it.
   analysisWindow: 1024,
   // How far above its local median the flux has to peak to count as an attack.
-  // Relative, not absolute, so one number holds across dynamics -- a hard
-  // full-band onset measures around 2.3 and a sustaining note under 0.01.
-  onsetThreshold: numExpr(0.05),
+  // Relative, not absolute, so one number holds across dynamics.
+  //
+  // **0.4 is measured, not chosen.** It was 0.05, which came from a synthetic
+  // tone -- a hard full-band onset reads 2.3 and a sustaining *sine* under
+  // 0.01, so 0.05 looked safely between them. Real instruments are not sines:
+  // over 61 seconds of isolated guitar notes, 0.05 reported **269 onsets for
+  // 7 notes**, and a ride cymbal's own decay gave 21 for 3 hits. A guitar
+  // attack measures 0.44-0.92 here and the loudest thing that is not one
+  // measures 0.373, so there is a clean gap and this sits in it. See
+  // `src-tauri/examples/onsets.rs` and the sweep in CLAUDE.md.
+  onsetThreshold: numExpr(0.4),
   // Milliseconds an onset suppresses further ones on the same channel. A single
   // attack spreads over a few hops and the peak test alone reports the
   // shoulders of a broad one.

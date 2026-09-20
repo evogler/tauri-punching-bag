@@ -2945,7 +2945,86 @@ cargo run --release --example onsets -- synth samples/snare.wav --at 20000,60000
   process-global `OnceLock`, and a harness whose whole job is timing has no
   business inheriting a rate from anywhere but the file.
 
-##### What it found, 2026-09-20
+##### The threshold, 2026-09-20
+
+**`onsetThreshold` went 0.05 to 0.4**, which is the single biggest thing wrong
+with the onsets and is now measured rather than argued. Swept against 61
+seconds of isolated guitar notes (7 of them, ground truth taken independently
+from the amplitude envelope) and against all four kit sounds placed at exactly
+known frames.
+
+| threshold | guitar found | guitar false | ride false |
+|---|---|---|---|
+| 0.05 (old) | 7/7 | **259** | 18 |
+| 0.1 | 7/7 | 11 | 0 |
+| 0.3 | 7/7 | 3 | 0 |
+| **0.4** | **7/7** | **0** | 0 |
+| 0.45 | 7/7 | 0 | 0 |
+| 0.5 | **6/7** | 0 | 0 |
+
+- **The old number came from a sine.** The existing note said a sustaining tone
+  reads under 0.01, which made 0.05 look safely clear of it. A cymbal's decay
+  and a guitar's ring-out are not sines, and both walk straight through it.
+- **The guitar decides the whole sweep.** The drums are flat from 0.08 to 0.6 --
+  a drum attack measures 1.3-1.8 where a guitar note measures 0.44-0.92, so
+  tuning on drums alone would have left the threshold anywhere in a range that
+  silently loses half of real playing. That is what the recording was for.
+- **0.4 is mid-plateau, and the plateau is narrow**: 0.5 already loses a note.
+  Taken anyway, because 0.4 is *exact* on the only real material there is --
+  7/7 and nothing false -- and backing off to buy headroom against playing
+  nobody has recorded yet trades a measurement for a guess. Soft playing is the
+  untested case and the next recording to make.
+- **A session carrying exactly 0.05 is migrated to the new default**
+  (`migrateRust`). Restore merges saved values over the defaults, so otherwise
+  every existing install would keep the flood this exists to fix -- the
+  `loopFeedback` trap reached from the value side rather than the meaning side.
+  Only *exactly* the old default moves; any other number was typed on purpose.
+  Temp-tested both ways, then deleted.
+
+**Two things deliberately not changed.**
+
+- **`analysisWindow` stays 1024.** Swept: the drums get *sharper* the shorter
+  the window (256 is exact, zero spread) but the guitar misses up to five of
+  seven below 1024, and lateness grows monotonically with window on every
+  sound. 1024 is the only size that finds all seven. The window is purely a
+  guitar-versus-drums compromise, which is the axis to remember if per-pane
+  analysis tuning is ever wanted.
+- **The band stays 30-16000 Hz.** The "exclude the fundamental and the attack
+  sharpens" hypothesis is **wrong**: 30 to 400 Hz moves the guitar's median by
+  0.1 ms and its spread by 0.1 ms. 800 Hz costs a note.
+- **`onsetOffset` stays 0.** -3.8 ms would zero the guitar's median, but the
+  drums sit at +0.2 to +3.3 and a 3.8 ms trim is noise against a 44 ms spread.
+  Trimming now would be tuning to one instrument on one recording.
+
+##### The spread is the open problem
+
+At the shipped settings the guitar's seven notes land at +3.0, +3.8, **-20.1**,
+-4.1, +17.1, +23.7, +20.5 ms. Median +3.8, spread 44 ms -- a 16th note at 100
+bpm, so it matters.
+
+- **It is not attack softness.** r = +0.037 against rise time, slope 0.009
+  ms/ms. The slowest attack in the set (198 ms) is the second most accurate
+  note; the two fastest (18 and 22 ms) land 40 ms apart *with opposite signs*.
+  The kick's +1.6 ms had suggested a rise-time story and there isn't one -- at
+  1024. At 2048 a dependence does appear (r = +0.47), which is windows smearing
+  slow attacks later, and is another reason to stay at 1024.
+- **So no single trim can fix it, and neither can a rise-time correction.**
+- It correlates with position in the file instead (r = +0.64): the first two
+  notes sit near +3, the last three near +20. Pitch, register or level is the
+  likely hidden variable and this material cannot separate them.
+- **One note is genuinely ambiguous**: note 3 has two peaks of equal strength
+  0.53, at -20.1 and +11.9 ms, and no parameter setting prefers the better one.
+  It is most of the spread on its own.
+- **A sub-threshold neighbour used to steal the slot.** At low thresholds a
+  weak noise peak 30-50 ms *before* a note is accepted first, and `onsetMinGap`
+  then suppresses the real onset -- so the reported time was the *next* peak,
+  tens of ms late. That is why the guitar's median improved as the threshold
+  rose, and why a larger gap was worse than 40 ms at low thresholds. Raising
+  the threshold removes it in practice; the principled fix is to prefer the
+  strongest candidate within a gap rather than the first, which is a change to
+  `pick_onset` on the audio thread and is **not** made here.
+
+##### What the kit found, 2026-09-20
 
 First run, against the built-in kit, before any guitar was recorded. The
 figures below subtract each sample's own lead-in -- measured separately as the
@@ -3113,13 +3192,15 @@ otherwise. The dated sections that follow record what was *new and unconfirmed
 at the time of writing* -- they are a build log, not a standing list of doubts,
 and several of them have since been confirmed. What is genuinely open is here:
 
-- **Onsets: measured at last, and it is mostly the threshold.** See *Running
-  the picker over a file*. Placement on a sharp attack is within 0.15 ms, so
-  the part everyone suspected is fine; what is wrong is that `onsetThreshold`
-  is twenty times below a real attack and lets a cymbal's decay through as
-  onsets of its own. Still open: what a quiet plucked note measures, which sets
-  where the threshold actually belongs, and how much further a slow attack
-  drifts late than a kick's +2 ms. Both want the guitar recordings.
+- **Onsets: measured, and the threshold is fixed.** See *Running the picker
+  over a file*. `onsetThreshold` 0.05 -> 0.4 takes 61 seconds of guitar from
+  269 reported onsets for 7 notes to exactly 7, with no misses, and a ride
+  from 21 for 3 hits to 3. **Not seen in the app yet** -- the whole result is
+  from the offline harness, so what is unconfirmed is that the ticks now land
+  on screen where the harness says, and that 0.4 holds for playing quieter
+  than the recording. Still open, and a harder problem than the threshold was:
+  the 44 ms spread on the guitar, which is not attack softness and not
+  anything one trim can absorb.
 - **`buffer_compensation` at 48 kHz.** Tuned by ear at 44.1 kHz, so ~8 ms short
   on a 48 kHz device. `measure latency` answers this in about ten seconds.
 - **Speaker bleed has never been tried against a real speaker.** The whole

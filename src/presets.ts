@@ -153,6 +153,18 @@ const migrateRust = (rust: Record<string, unknown>): Record<string, unknown> => 
   for (const key of RUST_EXPR_KEYS) {
     if (typeof out[key] === "number") out[key] = numExpr(out[key] as number);
   }
+  // The old onset threshold of 0.05 was wrong by roughly an order of magnitude
+  // -- see the note beside `onsetThreshold` in config.ts -- so a session or a
+  // preset carrying it is carrying a number nobody chose. Restore merges saved
+  // values *over* the defaults, which would otherwise leave every existing
+  // install with the flood of false onsets the new default exists to fix: the
+  // `loopFeedback` trap, arrived at from the value side rather than the
+  // meaning side. Only *exactly* the old default is replaced -- any other
+  // number was typed on purpose.
+  const oldThreshold = out.onsetThreshold as NumberExpr | undefined;
+  if (oldThreshold && oldThreshold.val === 0.05)
+    out.onsetThreshold = defaultRustConfig.onsetThreshold;
+
   if ("audioSubdivisions" in out)
     out.audioSubdivisions = sanitizeRhythm(
       out.audioSubdivisions,

@@ -152,7 +152,7 @@ impl Default for Opts {
         // right now" rather than "what does some other tuning do".
         Opts {
             window: 1024,
-            threshold: 0.05,
+            threshold: 0.4,
             gap_ms: 40.0,
             offset_ms: 0.0,
             low: 30.0,

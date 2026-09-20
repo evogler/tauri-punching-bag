@@ -611,7 +611,7 @@ export const HELP: Record<string, HelpEntry> = {
   },
   onsetThreshold: {
     title: "Threshold",
-    body: "How far a peak in attack strength has to stand above what's typical just before it to count as a note start. Higher finds fewer.",
+    body: "How far a peak in attack strength has to stand above what's typical just before it to count as a note start. Higher finds fewer. Measured on guitar: a note's attack reads about 0.5, and the loudest thing that is not one reads about 0.37. Below about 0.2 a ringing note's own decay starts being reported as new notes; above about 0.5 quiet notes go missing.",
   },
   onsetMinGap: {
     title: "Minimum gap (ms)",
