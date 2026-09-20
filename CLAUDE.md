@@ -154,14 +154,36 @@ Rules that will bite you:
 
 ## The panel, the shortcuts and the menu
 
-- **The panel is seven tabs, grouped by task** -- play, file, loop, display,
-  layout, setup, analysis -- with the transport, tempo, the looper switch, the
-  preset bar and `parameters` pinned above them; presets and parameters both
-  start collapsed. `docs/approachability.md` has the exact
-  arrangement and why each control sits where it does. Parameters are pinned
-  rather than tabbed because you edit `n` while looking at a field that reads
-  `bar/n x n`; they start **collapsed** (`Section`'s `startCollapsed`, which
-  hides rather than unmounts, like `TabPanel`).
+- **The panel is seven sections, listed down a rail on its right-hand edge** --
+  play, file, loop, display, layout, setup, analysis -- with the transport,
+  tempo, the looper switch, the examples, the preset bar and `parameters`
+  outside the rail; presets and parameters both start collapsed.
+  `docs/approachability.md` has the exact arrangement and why each control sits
+  where it does. Parameters are outside rather than a section because you edit
+  `n` while looking at a field that reads `bar/n x n`; they start **collapsed**
+  (`Section`'s `startCollapsed`, which hides rather than unmounts, like
+  `TabPanel`).
+  - **A column, not the row of tabs it replaced.** A row divides one panel
+    width between however many sections there are: at seven each tab was
+    already 85px and the next few would have truncated their own labels, which
+    is a layout that gets worse exactly as the app grows. A column costs a
+    fixed strip of width once and then grows for nothing.
+  - **The rail is a sibling of the scrolling settings, not inside them**, which
+    is the whole point: the list stays where you left it however far down the
+    open section you are. Same argument as the help area, which is why they are
+    the two things in the panel that do not scroll.
+  - **`TAB_GROUPS` is the source of truth and `PanelTab` is derived from it.**
+    A separate flat list of section names would let a new section be added
+    without being put in a group, and an ungrouped section is one the rail
+    never draws -- a tab you cannot reach, with nothing saying so. Deriving the
+    type makes that unrepresentable rather than something to remember.
+  - **The groups are headed** (sound, picture, machine), because a column of
+    ten unbroken entries reads as a list to search rather than a place to go.
+    Analysis is under the picture rather than on its own: the high pass is
+    explicitly for the picture, and the spectrum and the onsets are drawn.
+  - **Each rail button carries its own help entry**, so pointing down the list
+    is a tour of what the app can do -- the one place where hovering the
+    *navigation* is worth explaining rather than only the controls.
 - **The help area** is the fixed strip under the panel that describes whatever
   is pointed at. `src/help.tsx` is the mechanism (`useHelp`, `<Help id>`,
   `HelpArea`), `src/helpText.ts` is every description in one place, keyed by
@@ -3051,6 +3073,14 @@ and several of them have since been confirmed. What is genuinely open is here:
   no pane may claim so many cells that a pane behind it has nowhere to go --
   is a judgement call that can shrink a deliberate 2x2 pane when the grid
   shrinks around it.
+
+- **The section rail has never been looked at.** It builds and typechecks, and
+  the structure is simple enough that the risks are all visual: whether ~85px
+  off the settings' width makes the denser tabs cramped (Display especially),
+  whether the rail reads better on the panel's right-hand edge -- where it
+  sits, because that is where it was asked for -- or on its left against the
+  window edge, and whether three group headings for seven entries is one
+  heading too many at this size. All three are a line each to change.
 
 - **The examples picker has never been opened**, and the two examples in it
   have never been loaded. The store, the parse and both examples' arithmetic

@@ -31,6 +31,36 @@ export const HELP: Record<string, HelpEntry> = {
     body: "Shows or hides this area. Remembered on this machine.",
   },
 
+  // ---- the section rail ----
+  "tabs.play": {
+    title: "Play",
+    body: "What sounds: the click's rhythm and volume, the drum parts, and the practice cycle that mutes them in turn.",
+  },
+  "tabs.file": {
+    title: "File",
+    body: "A song or a backing track to play along with -- how many beats long it is, where its downbeat sits, and whether it follows the tempo. Recording a session to disk is here too.",
+  },
+  "tabs.loop": {
+    title: "Loop",
+    body: "The looper: how long a phrase is, how many times it comes back, and whether it records continuously or in cycles. The live monitor is here as well.",
+  },
+  "tabs.display": {
+    title: "Display",
+    body: "The panes and what each one draws: which channels, how many beats a row holds, the grids over it, and where each pane sits.",
+  },
+  "tabs.layout": {
+    title: "Layout",
+    body: "What the panes sit on -- background, the gap between them, and how heavy a grid line is drawn.",
+  },
+  "tabs.setup": {
+    title: "Setup",
+    body: "This machine rather than this music: which devices are used, the measured latency, the input gain, and playing on speakers. None of it travels in a preset.",
+  },
+  "tabs.analysis": {
+    title: "Analysis",
+    body: "What the app works out about the sound: the high pass that shows note starts, the spectrum behind a spectrogram pane, and where it thinks each attack is.",
+  },
+
   "examples.list": {
     title: "Examples",
     body: "Settings that come with the app, each one showing off one idea. Loading one replaces everything except your latency measurement -- save first if you want to keep what you have.",

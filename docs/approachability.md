@@ -190,10 +190,17 @@ Anything marked **moved** comes from a different tab than today.
 | Parameters | section, collapsed by default, shows count | parameters | Parameters (3) | `parameters` |
 | | reroll all | 🎲 | Reroll all (⌘R) | — |
 
-The tab bar reads **Play · File · Loop · Display · Layout · Setup · Analysis**
-(was sound · signal · visual · views). Revised 2026-09-13 after seeing the
-first rearrangement: the file and the layout chrome got tabs of their own,
-"See" became "Display", and presets collapse like parameters.
+The section rail reads **Play · File · Loop · Display · Layout · Setup ·
+Analysis** (was sound · signal · visual · views). Revised 2026-09-13 after
+seeing the first rearrangement: the file and the layout chrome got tabs of
+their own, "See" became "Display", and presets collapse like parameters.
+
+**A column down the right-hand edge rather than a row of tabs, 2026-09-19.**
+A row divides one panel width between however many sections there are -- at
+seven each tab was already 85px and the next few would have truncated their own
+labels, so the layout got worse exactly as the app grew. The column is grouped
+under *sound*, *picture* and *machine*, stays put while the settings beside it
+scroll, and each entry has a help entry of its own.
 
 #### Play
 

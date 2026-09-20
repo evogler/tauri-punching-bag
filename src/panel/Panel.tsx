@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { HelpArea, HelpProvider } from "../help";
 import { AnalysisTab } from "./AnalysisTab";
-import { PanelTab, TabBar, TabPanel } from "./chrome";
+import { PanelTab, TabPanel, TabRail } from "./chrome";
 import { DisplayTab } from "./DisplayTab";
 import { FileTab } from "./FileTab";
 import { LayoutTab } from "./LayoutTab";
@@ -23,9 +23,9 @@ const readHelpVisible = () => {
   }
 };
 
-// The settings panel: the pinned header and the tabs scroll, and the help area
-// stays put beneath them. Which tab is open is held by App rather than here, so
-// it survives the panel being hidden.
+// The settings panel: the settings scroll, the section rail down the right and
+// the help area along the bottom stay put. Which section is open is held by App
+// rather than here, so it survives the panel being hidden.
 export const Panel = (
   p: PanelProps & { panelTab: PanelTab; setPanelTab: (tab: PanelTab) => void }
 ) => {
@@ -62,46 +62,52 @@ export const Panel = (
           boxSizing: "border-box",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            padding: "1px",
-            gap: "2px",
-            // Its own scrollbar against the canvas next to it -- the sections
-            // outgrew the window a while ago. The help area does not scroll
-            // with it, so it is always where you look for it.
-            flex: 1,
-            minHeight: 0,
-            overflowY: "auto",
-            overflowX: "hidden",
-          }}
-        >
-          <PanelHeader {...p} helpVisible={helpVisible} toggleHelp={toggleHelp} />
+        {/* The rail is a sibling of the scrolling settings, not inside them,
+            which is the whole point of the column: the list of sections stays
+            where you left it however far down the open one you are. */}
+        <div style={{ display: "flex", flexDirection: "row", flex: 1, minHeight: 0 }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              padding: "1px",
+              gap: "2px",
+              // Its own scrollbar against the canvas next to it -- the sections
+              // outgrew the window a while ago. Neither the rail nor the help
+              // area scrolls with it, so both are always where you look.
+              flex: 1,
+              minWidth: 0,
+              minHeight: 0,
+              overflowY: "auto",
+              overflowX: "hidden",
+            }}
+          >
+            <PanelHeader {...p} helpVisible={helpVisible} toggleHelp={toggleHelp} />
 
-          <TabBar active={p.panelTab} onSelect={p.setPanelTab} />
+            <TabPanel active={p.panelTab === "play"}>
+              <PlayTab {...p} />
+            </TabPanel>
+            <TabPanel active={p.panelTab === "file"}>
+              <FileTab {...p} />
+            </TabPanel>
+            <TabPanel active={p.panelTab === "loop"}>
+              <LoopTab {...p} />
+            </TabPanel>
+            <TabPanel active={p.panelTab === "display"}>
+              <DisplayTab {...p} />
+            </TabPanel>
+            <TabPanel active={p.panelTab === "layout"}>
+              <LayoutTab {...p} />
+            </TabPanel>
+            <TabPanel active={p.panelTab === "setup"}>
+              <SetupTab {...p} />
+            </TabPanel>
+            <TabPanel active={p.panelTab === "analysis"}>
+              <AnalysisTab {...p} />
+            </TabPanel>
+          </div>
 
-          <TabPanel active={p.panelTab === "play"}>
-            <PlayTab {...p} />
-          </TabPanel>
-          <TabPanel active={p.panelTab === "file"}>
-            <FileTab {...p} />
-          </TabPanel>
-          <TabPanel active={p.panelTab === "loop"}>
-            <LoopTab {...p} />
-          </TabPanel>
-          <TabPanel active={p.panelTab === "display"}>
-            <DisplayTab {...p} />
-          </TabPanel>
-          <TabPanel active={p.panelTab === "layout"}>
-            <LayoutTab {...p} />
-          </TabPanel>
-          <TabPanel active={p.panelTab === "setup"}>
-            <SetupTab {...p} />
-          </TabPanel>
-          <TabPanel active={p.panelTab === "analysis"}>
-            <AnalysisTab {...p} />
-          </TabPanel>
+          <TabRail active={p.panelTab} onSelect={p.setPanelTab} />
         </div>
         {helpVisible && <HelpArea register={register} />}
       </div>
