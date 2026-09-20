@@ -349,7 +349,14 @@ fn main() -> Result<(), coreaudio::Error> {
     let should_reset_beat_state = BeatResetState(should_reset_beat_arc.clone());
 
     let mut beat: f64 = 0.0;
-    let mut last_beat: isize = 0;
+    // The subdivision *before* the first, so a click written on beat 0 sounds
+    // at launch. At 0 it equalled `beat_bisect`'s answer for beat 0 and the
+    // first click was swallowed -- the same bug as the drums' first-sighting
+    // seeding, and inaudible for the same reason: Rust used to be sounding its
+    // own defaults by the time anyone's real config arrived. Unlike a drum
+    // voice the click is never added mid-phrase, so there is no case this
+    // fires spuriously.
+    let mut last_beat: isize = -1;
 
     start_input_audio_unit(&mut input_audio_unit, buffers.producers).unwrap();
 
@@ -649,6 +656,13 @@ fn main() -> Result<(), coreaudio::Error> {
             offset_frames: config.onset_offset / 1000.0 * sample_rate(),
         };
 
+        // Whether the transport is still sitting on beat 0 as this callback
+        // begins -- true on the first callback after launch, after `reset_beat`
+        // and after a practice-cycle wrap, since `beat` only leaves 0 by
+        // accumulating. It is what tells a voice being seen for the first time
+        // apart from a voice that has simply not moved yet; see the seeding
+        // below.
+        let at_transport_start = beat == 0.0;
         let loop_spacing = get_loop_spacing(&config);
         // Once per callback, next to the tap gains: the cycle only moves when
         // the config does, and the frame loop just asks which phase it is in.
@@ -1024,9 +1038,20 @@ fn main() -> Result<(), coreaudio::Error> {
                         // the cycle, which is what puts the part later. Negative
                         // beats are fine -- beat_bisect floors into the cycle.
                         let hit = beat_bisect(&voice_times[v], beat + offset_beats - voice.shift);
+                        // A voice seen for the first time records where the
+                        // beat already is rather than firing, so adding a part
+                        // half way through a phrase doesn't sound it instantly.
+                        // At the *start* of the transport that rule is wrong:
+                        // nothing has been missed, and a hit written on beat 0
+                        // is one you asked to hear. Seeding one hit earlier
+                        // makes the comparison below fire it. This was
+                        // inaudible while Rust sounded its own defaults during
+                        // launch -- the drums were already mid-phrase by the
+                        // time the saved config arrived.
                         if drum_last_beats[v] == isize::MIN {
-                            drum_last_beats[v] = hit;
-                        } else if hit != drum_last_beats[v] {
+                            drum_last_beats[v] = if at_transport_start { hit - 1 } else { hit };
+                        }
+                        if hit != drum_last_beats[v] {
                             // Indexed by hit rather than by position in the
                             // cycle, so a list that doesn't divide evenly into
                             // the rhythm keeps drifting instead of resetting

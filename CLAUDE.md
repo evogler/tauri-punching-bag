@@ -2371,6 +2371,33 @@ same `rem_euclid` indexing, so the two read the same entry as each other.
 transient lands on the beat. Seeking into the file would chop the front off a
 slow attack. `offset_beats = offset_ms / 1000 * bpm / 60`.
 
+**A hit written on beat 0 sounds at launch.** Two separate swallows had to go,
+and both were inaudible for the same reason -- Rust used to be sounding its own
+defaults while the window came up, so by the time anyone's real config arrived
+the parts were already mid-phrase and nobody could tell the first hit had been
+eaten. Making the transport start silent is what exposed them.
+
+- **The drums.** A voice seen for the first time (`drum_last_beats[v] ==
+  isize::MIN`) records where the beat already is rather than firing, so adding a
+  part half way through a phrase doesn't sound it instantly. At the *start* of
+  the transport that rule is wrong: nothing has been missed, and a hit on beat 0
+  is one you asked to hear. The seed is `hit - 1` when the callback began with
+  `beat == 0.0`, which makes the ordinary change test fire it. `beat` only
+  leaves 0 by accumulating, so that condition is also true after `reset_beat`
+  and after a practice-cycle wrap, which is what you want in all three cases.
+- **The click.** `last_beat` started at 0, which is exactly `beat_bisect`'s
+  answer for beat 0, so the first click was compared equal and dropped. It
+  starts at -1 -- the subdivision before the first. Unlike a drum voice the
+  click is never added mid-phrase, so there is no case this fires spuriously.
+- **The samples have to be there too.** A voice whose file is still decoding has
+  no entry in the map and the callback skips it outright, so its hit on beat 0
+  goes missing however the trigger is seeded. The first config push now waits on
+  `load_drum_sample` for every voice before it goes -- `allSettled`, so a
+  missing file delays nothing, and raced against `FIRST_PUSH_WAIT_MS` so a file
+  on a volume that never answers costs a moment of silence rather than the
+  whole session. That timeout is load-bearing: the silence gate is what would
+  otherwise make a wedged decode permanent.
+
 **A voice is gated on the section a hit will *sound* in, not the one its trigger
 fires in.** Those are `offset_beats` apart by construction -- the offset is a
 look-ahead so the transient lands on the beat -- so testing at the trigger

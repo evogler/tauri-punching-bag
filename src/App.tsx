@@ -94,6 +94,12 @@ type PaneSize = { width: number; height: number; scale: number };
 // nothing is laid out to these numbers.
 const UNMEASURED_PANE: PaneSize = { width: 300, height: 150, scale: 1 };
 
+// How long the first config push will wait for the drum samples to decode
+// before going ahead without them. Long enough for a local kit, short enough
+// that a file on a volume that never answers costs a moment of silence rather
+// than the whole session.
+const FIRST_PUSH_WAIT_MS = 2000;
+
 // A pane's own label: modest, in a corner, and no more. Both numbers are in CSS
 // pixels and are multiplied by the pane's measured ratio at draw time, the way
 // `gridWidth` is -- text sized in surface pixels would come out half-height on
@@ -894,14 +900,18 @@ const App = () => {
     {}
   );
   const requestedSamples = useRef(new Set<string>());
-  const loadDrumSample = (path: string) => {
+  // Answers with a promise so the first config push can wait for the kit: a
+  // voice whose file is still decoding has no sample in the map, and the
+  // callback skips it entirely -- so its hit on beat 0 goes missing however
+  // the trigger is seeded.
+  const loadDrumSample = (path: string): Promise<void> => {
     // Nothing behind `yarn start` to ask. Kit sounds need no special case:
     // Rust answers for anything already loaded, built-ins included.
-    if (BROWSER_DEBUG_MODE) return;
-    if (requestedSamples.current.has(path)) return;
+    if (BROWSER_DEBUG_MODE) return Promise.resolve();
+    if (requestedSamples.current.has(path)) return Promise.resolve();
     requestedSamples.current.add(path);
     setSampleStatus((s) => ({ ...s, [path]: "loading" }));
-    invoke("load_drum_sample", { path })
+    return invoke("load_drum_sample", { path })
       .then(() => setSampleStatus((s) => ({ ...s, [path]: "ok" })))
       .catch(() => setSampleStatus((s) => ({ ...s, [path]: "error" })));
   };
@@ -1136,7 +1146,20 @@ const App = () => {
   useEffect(() => {
     if (sentFirstConfig.current) return;
     sentFirstConfig.current = true;
-    invoke("set_config", { newConfig: snakeCaseKeys(unwrapValues(rustConfig)) });
+    // The kit first, because the push is what starts the sound: a voice whose
+    // file has not decoded yet is skipped by the callback, so its hit on beat
+    // 0 is lost even though the trigger is seeded to fire it. `allSettled`, so
+    // one missing file delays nothing and still starts the rest -- and a race
+    // against a timeout, so a file on a wedged network volume cannot leave the
+    // app silent for ever, which is the one failure the gate could otherwise
+    // turn permanent.
+    const kit = Promise.allSettled(
+      rustConfig.drums.map((voice) => loadDrumSample(voice.path))
+    );
+    const capped = new Promise((done) => setTimeout(done, FIRST_PUSH_WAIT_MS));
+    Promise.race([kit, capped]).then(() =>
+      invoke("set_config", { newConfig: snakeCaseKeys(unwrapValues(rustConfig)) })
+    );
   });
 
   // Remember what's in use, so the next launch comes back to it.
