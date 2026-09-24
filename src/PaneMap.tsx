@@ -2,6 +2,7 @@ import { Help } from "./help";
 import { ViewConfig } from "./config";
 import { PaneOps } from "./panel/types";
 import { paneLabel } from "./paneLayout";
+import { ui } from "./theme";
 
 // The arrangement as a picture: one cell per cell of the real grid, each pane
 // drawn over the cells it actually occupies. A row of numbered buttons said
@@ -94,7 +95,7 @@ export const PaneMap = ({
               gridColumn: `${v.col + 1} / span ${v.colSpan}`,
               gridRow: `${v.row + 1} / span ${v.rowSpan}`,
               fontWeight: i === activeView ? "bold" : "normal",
-              backgroundColor: i === activeView ? "#666" : undefined,
+              backgroundColor: i === activeView ? ui.surface.selected : undefined,
             }}
           >
             {paneLabel(views, i)}
@@ -109,8 +110,8 @@ export const PaneMap = ({
               ...buttonStyle,
               gridColumn: `${h.col + 1}`,
               gridRow: `${h.row + 1}`,
-              color: "#999",
-              backgroundColor: "#3a3a3a",
+              color: ui.text.dim,
+              backgroundColor: ui.surface.inset,
               border: "1px dashed #777",
             }}
           >

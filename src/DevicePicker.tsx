@@ -1,5 +1,6 @@
 import React from "react";
 import { useHelp } from "./help";
+import { ui } from "./theme";
 
 /** Matches DEVICES_CHANGED_EVENT in src-tauri/src/io_channels.rs. */
 export const DEVICES_CHANGED_EVENT = "devices-changed";
@@ -170,13 +171,13 @@ export const DevicePicker = ({
           mic. Say so loudly -- that failure is indistinguishable from a broken
           app until you notice which device is lit. */}
       {active?.inputFellBack && (
-        <div style={{ ...noteStyle, color: "#e08" }}>
+        <div style={{ ...noteStyle, color: ui.error }}>
           {active.inputFallbackReason || "Saved input device not found"} — using
           the system default
         </div>
       )}
       {active?.outputFellBack && (
-        <div style={{ ...noteStyle, color: "#e08" }}>
+        <div style={{ ...noteStyle, color: ui.error }}>
           {active.outputFallbackReason || "Saved output device not found"} —
           using the system default
         </div>

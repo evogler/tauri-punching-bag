@@ -84,6 +84,7 @@ import { Panel } from "./panel/Panel";
 import { SetupWizard, shouldOpenSetup } from "./SetupWizard";
 import { PanelTab, tabForDigit, tabStep } from "./panel/chrome";
 import { FileInfo, PanelProps } from "./panel/types";
+import { ui } from "./theme";
 
 // A pane's backing store, in device pixels, and the ratio it was measured at --
 // the one number that converts a width in CSS pixels into surface pixels.
@@ -2207,7 +2208,7 @@ const App = () => {
             // the panel.
             pointerEvents: "none",
             font: "11px ui-monospace, Menlo, monospace",
-            color: "#9c9",
+            color: ui.overlayInk,
             backgroundColor: "rgba(0, 0, 0, 0.55)",
             padding: "2px 6px",
             borderRadius: "3px",

@@ -1,4 +1,5 @@
 import { ROW_COLORS } from "./config";
+import { ui } from "./theme";
 
 const rowStyle: React.CSSProperties = {
   display: "flex",
@@ -27,7 +28,7 @@ export const RowColorList = ({
     <label>Row colors</label>
     {colors.map((color, i) => (
       <span key={i} style={{ ...rowStyle, gap: "1px" }}>
-        <span style={{ color: "#aaa", fontSize: "0.8em" }}>{i + 1}</span>
+        <span style={{ color: ui.text.muted, fontSize: "0.8em" }}>{i + 1}</span>
         <input
           type="color"
           value={color}
@@ -59,7 +60,7 @@ export const RowColorList = ({
       Add color
     </button>
     {!colors.length && (
-      <span style={{ color: "#aaa", fontSize: "0.8em" }}>
+      <span style={{ color: ui.text.muted, fontSize: "0.8em" }}>
         None -- rows use the channel's own color.
       </span>
     )}

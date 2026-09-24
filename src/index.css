@@ -1,11 +1,88 @@
+/* The palette, in one place.
+
+   The panel used to be styled in ~240 inline style objects across 30 files
+   with ~130 hex literals among them -- `#aaa` forty times, `#e86` eleven --
+   so changing a colour meant a hundred and thirty hand edits, and the next
+   change meant another hundred and thirty. These are the single source:
+   `src/theme.ts` is a typed accessor that hands back `var(--x)` strings, so
+   there is no second copy anywhere to drift from this one.
+
+   Named by *role*, never by value -- `--surface-panel`, not `--grey-444` --
+   or the rename is only a second spelling of the hex it replaced.
+
+   The data colours are deliberately absent. `channelStyles`, `rowColors`, the
+   grid colours and `waveformBackground` are config: chosen per pane and
+   carried in presets. Folding them in here would make somebody's palette a
+   build-time constant. */
+:root {
+  /* Dark native widgets -- scrollbars especially, since the settings column
+     is a 600px scroller. The custom checkbox and select below predate this
+     and may no longer be needed; not deleted until that is checked in the
+     real webview rather than assumed. */
+  color-scheme: dark;
+
+  /* A face is a token too, so bundling Instrument Sans and JetBrains Mono is
+     one line here rather than a sweep. They are NOT webfont-linked: the
+     mockups pull them from fonts.googleapis.com because an artboard is a web
+     page, and a bundle that cannot reach Google would fall back silently with
+     nothing in any log. macOS gives us SF Pro and SF Mono meanwhile, which is
+     most of the effect -- the important half is that a number is monospaced
+     and tabular, not which monospace it is. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto",
+    "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco,
+    Consolas, monospace;
+
+  /* Surfaces, darkest to lightest. */
+  --surface-app: #333;
+  --surface-well: #222;
+  --surface-sunken: #2a2a2a;
+  --surface-field: #2b2b2b;
+  --surface-panel: #444;
+  --surface-inset: #3a3a3a;
+  --surface-raised: #3f3f3f;
+  --surface-raised-hi: #4a4a4a;
+  --surface-raised-lo: #353535;
+  --surface-selected: #666;
+
+  /* Lines. */
+  --line-hairline: #525252;
+  --line-field: #5a5a5a;
+  --line-divider: #777;
+
+  /* Text, brightest to faintest. */
+  --text-bright: #fff;
+  --text-primary: #ddd;
+  --text-body: #ccc;
+  --text-muted: #aaa;
+  --text-dim: #999;
+  --text-faint: #8d8d8d;
+  --text-caption: #a5a5a5;
+  --text-disabled: #777;
+  --text-on-accent: #111;
+
+  /* One accent, and the statuses. */
+  --accent: #4a86d8;
+  --accent-edge: #6a9bd8;
+  --ok: #6c6;
+  --warn: #cc8;
+  --bad: #e86;
+  --notice: #fc8;
+  --info: #8cf;
+  --error: #fbb;
+  --danger: #c44;
+  --danger-fill: #4a2a2a;
+  --hint-fill: #2f3a2f;
+  --hint-text: #cfc;
+  --overlay-ink: #9c9;
+  --drop-line: #0af;
+}
+
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
-    "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
-    sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #333;
-  /* color: #ccc; */
+  background-color: var(--surface-app);
 
   height: 100%;
   overflow: hidden;
@@ -14,8 +91,7 @@ body {
 }
 
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, "Courier New",
-    monospace;
+  font-family: var(--font-mono);
 }
 
 html {
@@ -40,7 +116,7 @@ select,
 button,
 textarea {
   font: inherit;
-  color: #ddd;
+  color: var(--text-primary);
 }
 
 /* A field has to look like a field. These had `border: 0` over the same #444
@@ -57,8 +133,8 @@ input[type="text"],
 input[type="number"],
 textarea,
 select {
-  background-color: #2b2b2b;
-  border: 1px solid #5a5a5a;
+  background-color: var(--surface-field);
+  border: 1px solid var(--line-field);
   border-radius: 4px;
   padding: 2px 5px;
 }
@@ -68,7 +144,7 @@ input[type="text"]:focus,
 input[type="number"]:focus,
 textarea:focus,
 select:focus {
-  border-color: #6a9bd8;
+  border-color: var(--accent-edge);
   outline: none;
 }
 
@@ -99,8 +175,8 @@ input[type="checkbox"] {
   width: 13px;
   height: 13px;
   margin: 0 2px;
-  background-color: #2b2b2b;
-  border: 1px solid #5a5a5a;
+  background-color: var(--surface-field);
+  border: 1px solid var(--line-field);
   border-radius: 3px;
   vertical-align: -2px;
   position: relative;
@@ -108,8 +184,8 @@ input[type="checkbox"] {
 }
 
 input[type="checkbox"]:checked {
-  background-color: #4a86d8;
-  border-color: #4a86d8;
+  background-color: var(--accent);
+  border-color: var(--accent);
 }
 
 input[type="checkbox"]:checked::after {
@@ -119,13 +195,13 @@ input[type="checkbox"]:checked::after {
   top: 0;
   width: 3px;
   height: 7px;
-  border: solid #fff;
+  border: solid var(--text-bright);
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }
 
 input[type="checkbox"]:focus-visible {
-  border-color: #6a9bd8;
+  border-color: var(--accent-edge);
   outline: none;
 }
 
@@ -135,29 +211,29 @@ input[type="checkbox"]:focus-visible {
    read as raised against them. Inline styles still win, which is how the
    paused transport stays red and the section rail keeps its own shape. */
 button {
-  background-color: #3f3f3f;
-  border: 1px solid #5a5a5a;
+  background-color: var(--surface-raised);
+  border: 1px solid var(--line-field);
   border-radius: 5px;
   padding: 3px 9px;
   cursor: pointer;
 }
 
 button:hover:not(:disabled) {
-  background-color: #4a4a4a;
+  background-color: var(--surface-raised-hi);
 }
 
 button:active:not(:disabled) {
-  background-color: #353535;
+  background-color: var(--surface-raised-lo);
 }
 
 button:disabled {
-  color: #777;
-  border-color: #454545;
+  color: var(--text-disabled);
+  border-color: var(--line-hairline);
   cursor: default;
 }
 
 label {
-  color: #ccc;
+  color: var(--text-body);
 }
 
 .container {

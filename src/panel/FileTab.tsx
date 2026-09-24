@@ -4,6 +4,7 @@ import { Input } from "../Input";
 import { Recorder } from "../Recorder";
 import { Divider, Section } from "./chrome";
 import { FileInfo, PanelProps } from "./types";
+import { ui } from "../theme";
 
 // Rate and channel count are only mentioned when the loader actually had to do
 // something about them, so the usual case stays short. The beat figure is the
@@ -69,7 +70,7 @@ export const FileTab = (p: PanelProps) => {
               {get("filePath") || "No file"}
             </span>
           </div>
-          {fileError && <div style={{ color: "#e86" }}>{fileError}</div>}
+          {fileError && <div style={{ color: ui.bad }}>{fileError}</div>}
           {fileInfo && (
             <div style={{ opacity: 0.7, fontSize: "0.9em" }}>
               {fileDescription(fileInfo, exprNumber(get("bpm")))}
@@ -126,7 +127,7 @@ export const FileTab = (p: PanelProps) => {
             );
             if (!st)
               return (
-                <div style={{ color: "#e86", fontSize: "0.9em" }}>
+                <div style={{ color: ui.bad, fontSize: "0.9em" }}>
                   ⚠ Needs a length in beats — playing at its own speed
                 </div>
               );
@@ -137,7 +138,7 @@ export const FileTab = (p: PanelProps) => {
                 style={{
                   fontSize: "0.9em",
                   opacity: 0.8,
-                  color: rough ? "#e86" : undefined,
+                  color: rough ? ui.bad : undefined,
                 }}
               >
                 {st.ratio.toFixed(3)}× — {st.naturalBpm.toFixed(2)} bpm

@@ -11,6 +11,7 @@ import {
 import { Params, evaluate, parseNumberList } from "./expression";
 import { useHelp } from "./help";
 import { accepts, invalidBorder, useFocusedValue } from "./Input";
+import { ui } from "./theme";
 
 const rowStyle: React.CSSProperties = {
   display: "flex",
@@ -74,7 +75,7 @@ const SectionRow = ({
         {...help("sections.on")}
       />
       <span
-        style={{ width: "2em", color: "#aaa", fontSize: "0.8em" }}
+        style={{ width: "2em", color: ui.text.muted, fontSize: "0.8em" }}
         {...help("sections.number")}
       >
         {number}
@@ -180,7 +181,7 @@ export const SectionList = ({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
       {sections.length > 0 && (
-        <div style={{ ...rowStyle, color: "#aaa", fontSize: "0.8em" }}>
+        <div style={{ ...rowStyle, color: ui.text.muted, fontSize: "0.8em" }}>
           <span style={{ width: "1.2em" }} />
           <span style={{ width: "2em" }} {...help("sections.number")}>#</span>
           <span style={{ width: "5em" }} {...help("sections.beats")}>Beats</span>
@@ -224,13 +225,13 @@ export const SectionList = ({
           Add section
         </button>
         {sections.length ? (
-          <span style={{ color: "#aaa", fontSize: "0.8em" }}>
+          <span style={{ color: ui.text.muted, fontSize: "0.8em" }}>
             {steps.map((s) => s.section + 1).join(" ") || "nothing"} --{" "}
             {Number(cycle.toPrecision(6))} beats, then it starts again: every
             random parameter rerolled, the beat back to one, the looper cleared.
           </span>
         ) : (
-          <span style={{ color: "#aaa", fontSize: "0.8em" }}>
+          <span style={{ color: ui.text.muted, fontSize: "0.8em" }}>
             None -- everything sounds continuously. A count-off is a section with
             only a count-off voice on and "Show" unticked; a pause is a section
             with nothing on.

@@ -6,6 +6,7 @@ import {
   installUpdate,
   onUpdaterEvent,
 } from "@tauri-apps/api/updater";
+import { ui } from "./theme";
 
 // The manual half of the updater. `dialog: true` in tauri.conf.json already
 // gives a native prompt at launch, which is the whole interaction for anyone
@@ -127,7 +128,7 @@ export const Updater = () => {
       )}
 
       {state.kind === "error" && (
-        <div style={{ color: "#fbb", fontSize: "0.85em" }}>
+        <div style={{ color: ui.error, fontSize: "0.85em" }}>
           Update check failed: {state.message}
         </div>
       )}

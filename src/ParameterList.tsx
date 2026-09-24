@@ -8,6 +8,7 @@ import {
 import { formatNumberList, isValidParameterName } from "./expression";
 import { useHelp } from "./help";
 import { invalidBorder, useFocusedValue } from "./Input";
+import { ui } from "./theme";
 
 const rowStyle: React.CSSProperties = {
   display: "flex",
@@ -92,7 +93,7 @@ const ParameterRow = ({
         {...help("parameters.name")}
         style={{ width: "5em", ...invalidBorder(!nameOk(nameProps.value)) }}
       />
-      <span style={{ color: "#aaa" }}>=</span>
+      <span style={{ color: ui.text.muted }}>=</span>
       <input
         {...valueProps}
         onChange={(e) => {
@@ -120,7 +121,7 @@ const ParameterRow = ({
       )}
       {showsValue && (
         <span
-          style={{ color: "#aaa" }}
+          style={{ color: ui.text.muted }}
           title={`What ${parameter.name} currently resolves to`}
         >
           = {resolved}
@@ -130,7 +131,7 @@ const ParameterRow = ({
         ✕
       </button>
       {failure && (
-        <span style={{ color: "#e86", fontSize: "0.8em" }}>{failure}</span>
+        <span style={{ color: ui.bad, fontSize: "0.8em" }}>{failure}</span>
       )}
     </div>
   );
@@ -206,7 +207,7 @@ export const ParameterList = ({
         </button>
       )}
       {!parameters.length && (
-        <span style={{ color: "#aaa", fontSize: "0.8em" }}>
+        <span style={{ color: ui.text.muted, fontSize: "0.8em" }}>
           None -- fields hold plain numbers. With n = 16, bar = 4, rows can say
           "bar/n x n" and a grid "&#123;n/bar&#125;:1".
         </span>

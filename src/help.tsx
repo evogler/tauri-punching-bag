@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { HELP } from "./helpText";
+import { ui } from "./theme";
 
 // Pointing at anything that carries a help id shows its entry in the help area
 // at the foot of the panel. A context rather than props, so a cell deep inside
@@ -46,7 +47,7 @@ const renderBody = (text: string) =>
         key={i}
         style={{
           fontFamily: "ui-monospace, Menlo, monospace",
-          backgroundColor: "#2a2a2a",
+          backgroundColor: ui.surface.sunken,
           padding: "0 3px",
           borderRadius: 3,
         }}
@@ -81,11 +82,11 @@ export const HelpArea = ({
         overflowY: "auto",
         boxSizing: "border-box",
         borderTop: "1px solid #777",
-        backgroundColor: "#383838",
+        backgroundColor: ui.surface.inset,
         padding: "6px 10px",
         fontSize: "0.9em",
         lineHeight: 1.4,
-        color: "#ddd",
+        color: ui.text.primary,
       }}
     >
       {entry ? (
@@ -94,7 +95,7 @@ export const HelpArea = ({
           <div>{renderBody(entry.body)}</div>
         </>
       ) : (
-        <div style={{ color: "#999" }}>
+        <div style={{ color: ui.text.dim }}>
           Point at any setting to see what it does. Click a pane to hide this
           panel, and click again to bring it back.
         </div>

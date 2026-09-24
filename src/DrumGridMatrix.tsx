@@ -15,6 +15,7 @@ import { MAX_LIST_LENGTH, Params, parseNumberList } from "./expression";
 import { useHelp } from "./help";
 import { accepts, invalidBorder, useFocusedValue } from "./Input";
 import { Slider } from "./Slider";
+import { ui } from "./theme";
 
 // Not a possible sample id or voice index, so they can share one menu.
 const FROM_FILE = "\0file";
@@ -75,7 +76,7 @@ const LENS_RGB: Record<Lens, string> = {
   chances: "110,170,230",
 };
 
-const OFF = "#2b2b2b";
+const OFF = ui.surface.field;
 
 const short = (n: number) =>
   String(Number(n.toPrecision(2))).replace(/^0\./, ".").replace(/^-0\./, "-.");
@@ -107,7 +108,7 @@ const overlayStyle: React.CSSProperties = {
 };
 
 const panelStyle: React.CSSProperties = {
-  backgroundColor: "#444",
+  backgroundColor: ui.surface.panel,
   border: "1px solid #777",
   borderRadius: "8px",
   padding: "8px",
@@ -277,7 +278,7 @@ export const DrumGridMatrix = ({
       borderRight: "1px solid #555",
       borderBottom: "1px solid #555",
       backgroundColor: on ? `rgba(${rgb},${alpha})` : OFF,
-      color: "#111",
+      color: ui.text.onAccent,
       fontSize: "0.65em",
       lineHeight: `${CELL_H}px`,
       textAlign: "center",
@@ -313,7 +314,7 @@ export const DrumGridMatrix = ({
     >
       <div style={panelStyle} onClick={(e) => e.stopPropagation()}>
         <div style={rowStyle}>
-          <h4 style={{ color: "#ccc", margin: 0, flex: 1 }}>Grid {index + 1}</h4>
+          <h4 style={{ color: ui.text.body, margin: 0, flex: 1 }}>Grid {index + 1}</h4>
           <button onClick={onClose}>done</button>
         </div>
 
@@ -379,7 +380,7 @@ export const DrumGridMatrix = ({
               {l}
             </button>
           ))}
-          <span style={{ color: "#aaa", fontSize: "0.8em", flex: 1 }}>
+          <span style={{ color: ui.text.muted, fontSize: "0.8em", flex: 1 }}>
             {lens === "hits"
               ? "Click or drag across the cells."
               : "Only cells that already sound."}
@@ -421,7 +422,7 @@ export const DrumGridMatrix = ({
                 style={{
                   width: LABEL_W,
                   flex: `0 0 ${LABEL_W}px`,
-                  color: "#aaa",
+                  color: ui.text.muted,
                   fontSize: "0.75em",
                 }}
               >
@@ -435,7 +436,7 @@ export const DrumGridMatrix = ({
                       position: "absolute",
                       left: `${m.x}%`,
                       transform: "translateX(-50%)",
-                      color: "#ddd",
+                      color: ui.text.primary,
                       fontSize: "0.75em",
                     }}
                   >
@@ -443,7 +444,7 @@ export const DrumGridMatrix = ({
                   </span>
                 ))}
                 {!restart && (
-                  <span style={{ color: "#aaa", fontSize: "0.75em" }}>
+                  <span style={{ color: ui.text.muted, fontSize: "0.75em" }}>
                     a beat lands in a different column on every pass -- the
                     period is below
                   </span>
@@ -458,7 +459,7 @@ export const DrumGridMatrix = ({
                 style={{
                   width: LABEL_W,
                   flex: `0 0 ${LABEL_W}px`,
-                  color: "#aaa",
+                  color: ui.text.muted,
                   fontSize: "0.75em",
                 }}
               >
@@ -472,7 +473,7 @@ export const DrumGridMatrix = ({
                       flex: "1 1 0",
                       minWidth: 0,
                       textAlign: "center",
-                      color: "#aaa",
+                      color: ui.text.muted,
                       fontSize: "0.7em",
                       overflow: "hidden",
                     }}
@@ -485,7 +486,7 @@ export const DrumGridMatrix = ({
             </div>
 
             {!grid.rows.length && (
-              <div style={{ color: "#aaa", fontSize: "0.8em", padding: "4px 0" }}>
+              <div style={{ color: ui.text.muted, fontSize: "0.8em", padding: "4px 0" }}>
                 No parts yet -- add one below, then click the cells it should
                 sound on.
               </div>
@@ -513,7 +514,7 @@ export const DrumGridMatrix = ({
                         textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
                         fontSize: "0.85em",
-                        color: voice ? undefined : "#f88",
+                        color: voice ? undefined : ui.error,
                       }}
                       title={voice ? drumLabel(voice.path) : undefined}
                     >
@@ -622,7 +623,7 @@ export const DrumGridMatrix = ({
             )}
           </select>
           <span
-            style={{ color: error ? "#f88" : "#aaa", fontSize: "0.8em", flex: 1 }}
+            style={{ color: error ? ui.error : ui.text.muted, fontSize: "0.8em", flex: 1 }}
             {...help("drumGrids.cycle")}
           >
             {error || readout}

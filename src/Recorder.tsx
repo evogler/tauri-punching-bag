@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api";
 import { save as saveFileDialog } from "@tauri-apps/api/dialog";
 import { useHelp } from "./help";
+import { ui } from "./theme";
 
 // Writing the session to a WAV file.
 //
@@ -145,12 +146,12 @@ export const Recorder = () => {
           rather than waiting, which is the only choice it has -- but a gap in a
           take must never be silent about itself. */}
       {status && status.droppedFrames > 0 && (
-        <div style={{ color: "#e86", fontSize: "0.9em" }}>
+        <div style={{ color: ui.bad, fontSize: "0.9em" }}>
           ⚠ {status.droppedFrames} frames dropped — the disk is not keeping up.
         </div>
       )}
       {status?.error && (
-        <div style={{ color: "#e86", fontSize: "0.9em" }}>⚠ {status.error}</div>
+        <div style={{ color: ui.bad, fontSize: "0.9em" }}>⚠ {status.error}</div>
       )}
       {note && !status?.error && (
         <div style={{ opacity: 0.8, fontSize: "0.9em" }}>{note}</div>

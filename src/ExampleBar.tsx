@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { EXAMPLES } from "./examples";
 import { Preset, presetHash } from "./presets";
 import { useHelp } from "./help";
+import { ui } from "./theme";
 
 const rowStyle: React.CSSProperties = {
   display: "flex",
@@ -65,10 +66,10 @@ export const ExampleHint = ({
       borderRadius: 8,
       margin: 4,
       padding: "5px 7px",
-      backgroundColor: "#2f3a2f",
+      backgroundColor: ui.hintFill,
     }}
   >
-    <div style={{ flex: 1, minWidth: 0, color: "#cfc", fontSize: "0.9em" }}>
+    <div style={{ flex: 1, minWidth: 0, color: ui.hintText, fontSize: "0.9em" }}>
       <b>Try this:</b> {example.tryThis}
     </div>
     <button onClick={onDismiss} title="Dismiss">
@@ -125,7 +126,7 @@ export const ExampleBar = ({
           Load
         </button>
       </div>
-      <div style={{ color: "#aaa", fontSize: "0.85em" }}>
+      <div style={{ color: ui.text.muted, fontSize: "0.85em" }}>
         {chosen
           ? chosen.description
           : "Each one is a working setup that shows off one idea. Loading one replaces your settings, so save them first if you want them back."}

@@ -1,5 +1,6 @@
 import { ChannelStyle, channelGain, channelPan, channelStyle } from "./config";
 import { useHelp } from "./help";
+import { ui } from "./theme";
 
 const rowStyle: React.CSSProperties = {
   display: "flex",
@@ -158,7 +159,7 @@ export const ChannelList = ({
         style={{
           ...rowStyle,
           fontSize: "10px",
-          color: "#999",
+          color: ui.text.dim,
           textTransform: "uppercase",
           letterSpacing: "0.5px",
         }}

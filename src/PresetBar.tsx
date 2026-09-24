@@ -20,6 +20,7 @@ import {
 } from "./presets";
 import { DialogRow, PresetDialog } from "./PresetDialog";
 import { useHelp } from "./help";
+import { ui } from "./theme";
 
 const rowStyle: React.CSSProperties = {
   display: "flex",
@@ -67,7 +68,7 @@ export const planImport = (incoming: StoredPreset[], store: StoredPreset[]): Pla
           key,
           name: preset.name,
           note: `updates "${updates.name}"`,
-          noteColor: "#8cf",
+          noteColor: ui.info,
         },
       };
     const same = byHash.get(presetHash(preset));
@@ -89,7 +90,7 @@ export const planImport = (incoming: StoredPreset[], store: StoredPreset[]): Pla
           key,
           name: preset.name,
           note: `saved as "${renamed}"`,
-          noteColor: "#fc8",
+          noteColor: ui.notice,
         },
       };
     }
@@ -371,12 +372,12 @@ export const PresetBar = ({
         </button>
       </div>
       {!presets.length && (
-        <div style={{ color: "#aaa", fontSize: "0.8em" }}>
+        <div style={{ color: ui.text.muted, fontSize: "0.8em" }}>
           Name your current settings and click Save.
         </div>
       )}
       {note && (
-        <div style={{ color: "#fbb", fontSize: "0.8em" }}>{note}</div>
+        <div style={{ color: ui.error, fontSize: "0.8em" }}>{note}</div>
       )}
 
       {dialog?.kind === "import" && (

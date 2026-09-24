@@ -2,6 +2,7 @@ import { useHelp } from "../help";
 import { Input } from "../Input";
 import { Section } from "./chrome";
 import { PanelProps } from "./types";
+import { ui } from "../theme";
 
 export const PanelHeader = (
   p: PanelProps & { helpVisible: boolean; toggleHelp: () => void }
@@ -17,8 +18,8 @@ export const PanelHeader = (
           style={{
             flex: 1,
             fontWeight: "bold",
-            backgroundColor: get("paused") ? "#c44" : undefined,
-            color: get("paused") ? "#fff" : undefined,
+            backgroundColor: get("paused") ? ui.danger : undefined,
+            color: get("paused") ? ui.text.bright : undefined,
           }}
         >
           {get("paused") ? "▶ Resume" : "⏸ Pause"}
@@ -35,7 +36,7 @@ export const PanelHeader = (
           style={{
             width: "2.2em",
             fontWeight: "bold",
-            backgroundColor: helpVisible ? "#666" : undefined,
+            backgroundColor: helpVisible ? ui.surface.selected : undefined,
           }}
         >
           ?
@@ -70,8 +71,8 @@ export const PanelHeader = (
             borderRadius: 8,
             margin: 4,
             padding: 8,
-            backgroundColor: "#4a2a2a",
-            color: "#fbb",
+            backgroundColor: ui.dangerFill,
+            color: ui.error,
           }}
         >
           <b>A setting couldn't be applied, so what's playing doesn't match the

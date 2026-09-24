@@ -4,6 +4,7 @@ import {
   unregister,
 } from "@tauri-apps/api/globalShortcut";
 import { BROWSER_DEBUG_MODE } from "./env";
+import { ui } from "./theme";
 
 // One system-wide key for pause/play, so the transport can be reached from
 // whatever window is in front -- a DAW, a score, a video.
@@ -158,12 +159,12 @@ export const GlobalShortcut = ({ onTrigger }: { onTrigger: () => void }) => {
           onChange={(e) => setText(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => e.key === "Enter" && commit()}
-          style={{ borderColor: error ? "#c66" : undefined }}
+          style={{ borderColor: error ? ui.danger : undefined }}
         />
         <span style={{ opacity: 0.8 }}>{glyphs(accel)}</span>
       </div>
       {error && (
-        <div style={{ color: "#fbb", fontSize: "0.85em" }}>{error}</div>
+        <div style={{ color: ui.error, fontSize: "0.85em" }}>{error}</div>
       )}
       {/* macOS does not tell an application that another one already owns a
           combination -- the registration succeeds and the press simply goes

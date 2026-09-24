@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
+import { ui } from "./theme";
 
 export type CalibrationResult = {
   phase: "idle" | "running" | "done" | "failed";
@@ -52,7 +53,7 @@ const Meter = ({
     <div style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
       <div style={{ ...noteStyle, display: "flex", gap: "4px" }}>
         <span style={{ minWidth: "72px" }}>{label}</span>
-        <span style={{ color: ok ? "#6c6" : "#e86" }}>
+        <span style={{ color: ok ? ui.ok : ui.bad }}>
           {value.toFixed(1)}
           {suffix}
         </span>
@@ -61,12 +62,12 @@ const Meter = ({
           {suffix})
         </span>
       </div>
-      <div style={{ height: "3px", background: "#333", width: "180px" }}>
+      <div style={{ height: "3px", background: ui.surface.well, width: "180px" }}>
         <div
           style={{
             height: "100%",
             width: `${clamped * 100}%`,
-            background: ok ? "#6c6" : "#e86",
+            background: ok ? ui.ok : ui.bad,
           }}
         />
       </div>
@@ -175,7 +176,7 @@ export const Calibration = ({
           <div
             style={{
               ...noteStyle,
-              color: result.phase === "done" ? "#6c6" : "#e86",
+              color: result.phase === "done" ? ui.ok : ui.bad,
             }}
           >
             {result.message}

@@ -1,3 +1,4 @@
+import { ui } from "./theme";
 // A modal list of presets with checkboxes, a note column and whatever action
 // buttons the caller wants. Import and manage both use it, and loading only
 // *part* of a preset is meant to be the third -- which is the whole reason it
@@ -32,7 +33,7 @@ const overlay: React.CSSProperties = {
 };
 
 const panel: React.CSSProperties = {
-  backgroundColor: "#444",
+  backgroundColor: ui.surface.panel,
   border: "1px solid #777",
   borderRadius: "8px",
   padding: "8px",
@@ -74,9 +75,9 @@ export const PresetDialog = ({
   return (
     <div style={overlay} onClick={onClose}>
       <div style={panel} onClick={(e) => e.stopPropagation()}>
-        <h4 style={{ color: "#ccc", margin: 0 }}>{title}</h4>
+        <h4 style={{ color: ui.text.body, margin: 0 }}>{title}</h4>
         {hint && (
-          <div style={{ color: "#aaa", fontSize: "0.8em" }}>{hint}</div>
+          <div style={{ color: ui.text.muted, fontSize: "0.8em" }}>{hint}</div>
         )}
 
         <label
@@ -84,7 +85,7 @@ export const PresetDialog = ({
             display: "flex",
             gap: "6px",
             alignItems: "center",
-            color: "#aaa",
+            color: ui.text.muted,
             fontSize: "0.8em",
             borderBottom: "1px solid #666",
             paddingBottom: "4px",
@@ -121,7 +122,7 @@ export const PresetDialog = ({
               {row.note && (
                 <span
                   style={{
-                    color: row.noteColor ?? "#aaa",
+                    color: row.noteColor ?? ui.text.muted,
                     fontSize: "0.8em",
                     textAlign: "right",
                   }}
@@ -132,7 +133,7 @@ export const PresetDialog = ({
             </label>
           ))}
           {!rows.length && (
-            <div style={{ color: "#aaa", fontSize: "0.8em" }}>nothing here</div>
+            <div style={{ color: ui.text.muted, fontSize: "0.8em" }}>nothing here</div>
           )}
         </div>
 

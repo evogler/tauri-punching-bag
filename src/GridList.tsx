@@ -5,6 +5,7 @@ import { accepts, invalidBorder, useFocusedValue } from "./Input";
 import { Params, evaluate, resolveRhythmText } from "./expression";
 import parser1 from "./parser1";
 import parser2 from "./parser2";
+import { ui } from "./theme";
 
 const parserFor = (rhythm: Rhythm) =>
   rhythm.type === "parser1" ? parser1 : parser2;
@@ -12,7 +13,7 @@ const parserFor = (rhythm: Rhythm) =>
 // One line per beat -- the least surprising thing for a grid you just added.
 const NEW_GRID_TEXT = "1:1";
 
-const DROP_LINE = "#0af";
+const DROP_LINE = ui.dropLine;
 
 // Picks the first palette color not already on screen so a new grid doesn't
 // land invisibly on top of an existing one.
@@ -85,7 +86,7 @@ const GridRow = ({
         {...help("grids.drag")}
         style={{
           cursor: "grab",
-          color: "#aaa",
+          color: ui.text.muted,
           // Keep the gesture from turning into text selection or a pan.
           userSelect: "none",
           touchAction: "none",
@@ -252,7 +253,7 @@ export const GridList = ({
           Add grid
         </button>
         {!grids.length && (
-          <span style={{ color: "#aaa", fontSize: "0.8em" }}>
+          <span style={{ color: ui.text.muted, fontSize: "0.8em" }}>
             No grids -- the waveform draws with no overlay.
           </span>
         )}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api";
+import { ui } from "./theme";
 
 // Measuring the speaker's bleed, and saying what it managed.
 //
@@ -86,7 +87,7 @@ export const BleedMeter = ({
       )
       .catch(() => {});
 
-  const note = (text: string, color = "#aaa") => (
+  const note = (text: string, color = ui.text.muted) => (
     <div style={{ color, fontSize: "0.8em" }}>{text}</div>
   );
 
@@ -106,8 +107,8 @@ export const BleedMeter = ({
       )}
 
       {result?.phase === "done" &&
-        note(result.message, result.db >= 12 ? "#8c8" : "#cc8")}
-      {result?.phase === "failed" && note(result.message, "#fbb")}
+        note(result.message, result.db >= 12 ? ui.ok : ui.warn)}
+      {result?.phase === "failed" && note(result.message, ui.error)}
       {result?.phase === "failed" &&
         note(
           `heard ${result.inputPeakDb.toFixed(1)} dB back ` +
@@ -118,7 +119,7 @@ export const BleedMeter = ({
       {enabled && result?.phase !== "done" &&
         note(
           "Switched on, but nothing has been measured yet -- press Measure speaker bleed.",
-          "#cc8"
+          ui.warn
         )}
       {enabled && result?.phase === "done" && !running &&
         note(
@@ -131,7 +132,7 @@ export const BleedMeter = ({
                   ).toFixed(0)}% of frames).`
                 : ". Holding the measured filter -- it only learns from moments it " +
                   "can already explain, so it stops while you play."),
-          result.liveDb >= 6 ? "#8c8" : result.liveDb > 0 ? "#cc8" : "#aaa"
+          result.liveDb >= 6 ? ui.ok : result.liveDb > 0 ? ui.warn : ui.text.muted
         )}
       {enabled && result?.phase === "done" &&
         note("Picture only -- the looper still records what the microphone heard.")}

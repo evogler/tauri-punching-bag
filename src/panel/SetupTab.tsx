@@ -11,6 +11,7 @@ import { Input } from "../Input";
 import { Updater } from "../Updater";
 import { Section } from "./chrome";
 import { PanelProps } from "./types";
+import { ui } from "../theme";
 
 // What belongs to this machine rather than to the music: the devices, the
 // latency between them, the inputs, the room on speakers, and updates. Mostly
@@ -53,7 +54,7 @@ export const SetupTab = (p: PanelProps) => {
         />
         {/* Frames are the unit the key has always been in, and a device implies
             its own rate -- but milliseconds are what a person can picture. */}
-        <div style={{ color: "#aaa", fontSize: "0.8em" }}>
+        <div style={{ color: ui.text.muted, fontSize: "0.8em" }}>
           ≈{" "}
           {(
             (exprNumber(get("bufferCompensation")) / sampleRate) *

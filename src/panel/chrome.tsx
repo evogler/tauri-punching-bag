@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useHelp } from "../help";
+import { ui } from "../theme";
 
 // A section's name, as a caption rather than a title. It used to be an
 // unstyled `h4` -- bold, and at the same size as the labels underneath it, so
@@ -9,7 +10,7 @@ import { useHelp } from "../help";
 // letter-spaced so it still reads as a heading at that size, which is the same
 // treatment the section rail's group names get.
 const headingStyle: React.CSSProperties = {
-  color: "#a5a5a5",
+  color: ui.text.caption,
   fontSize: "0.8em",
   fontWeight: 600,
   textTransform: "uppercase",
@@ -46,7 +47,7 @@ export const Section = ({
         margin: "4px",
         padding: "5px 7px",
         borderRadius: "8px",
-        backgroundColor: "#444",
+        backgroundColor: ui.surface.panel,
       }}
     >
       {label &&
@@ -156,8 +157,8 @@ const railButton = (active: boolean): React.CSSProperties => ({
   border: "1px solid #777",
   borderRight: active ? "none" : "1px solid #777",
   paddingRight: active ? "9px" : "8px",
-  backgroundColor: active ? "#444" : "#333",
-  color: active ? "#fff" : "#aaa",
+  backgroundColor: active ? ui.surface.panel : ui.surface.app,
+  color: active ? ui.text.bright : ui.text.muted,
   fontWeight: active ? "bold" : undefined,
   cursor: "pointer",
 });
@@ -198,7 +199,7 @@ export const TabRail = ({
       <div key={group.label} style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
         <span
           style={{
-            color: "#999",
+            color: ui.text.dim,
             fontSize: "10px",
             textTransform: "uppercase",
             letterSpacing: "0.5px",
@@ -264,8 +265,8 @@ export const Divider = ({ label }: { label?: string }) => (
     {/* Not uppercase, unlike the section caption above it -- the two are one
         level apart and would otherwise read as the same thing twice. */}
     {label && (
-      <span style={{ color: "#8d8d8d", fontSize: "0.78em" }}>{label}</span>
+      <span style={{ color: ui.text.faint, fontSize: "0.78em" }}>{label}</span>
     )}
-    <div style={{ flex: 1, height: "1px", backgroundColor: "#777" }} />
+    <div style={{ flex: 1, height: "1px", backgroundColor: ui.line.divider }} />
   </div>
 );

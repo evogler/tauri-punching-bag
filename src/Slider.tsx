@@ -1,4 +1,5 @@
 import { useHelp } from "./help";
+import { ui } from "./theme";
 
 // A labelled range input, with the current value beside it. Shared by the
 // per-view controls that are plain numbers rather than expressions -- a slider
@@ -41,7 +42,7 @@ export const Slider = ({
         onChange={(e) => onChange(parseFloat(e.target.value))}
         style={{ flex: 1, minWidth: 0 }}
       />
-      <span style={{ color: "#aaa", fontSize: "0.8em", width: "3em" }}>
+      <span style={{ color: ui.text.muted, fontSize: "0.8em", width: "3em" }}>
         {value}
       </span>
     </div>

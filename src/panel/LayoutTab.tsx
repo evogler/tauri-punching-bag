@@ -2,6 +2,7 @@ import { ColorInput } from "../Input";
 import { Slider } from "../Slider";
 import { Divider, Section } from "./chrome";
 import { PanelProps } from "./types";
+import { ui } from "../theme";
 
 export const LayoutTab = (p: PanelProps) => {
   const { get, set, gridWidth, paneScale, viewCols, viewRows } = p;
@@ -34,7 +35,7 @@ export const LayoutTab = (p: PanelProps) => {
           onChange={(n) => set("gridWidth", n)}
           help="gridWidth"
         />
-        <div style={{ color: "#aaa", fontSize: "0.8em" }}>
+        <div style={{ color: ui.text.muted, fontSize: "0.8em" }}>
           {Math.max(1, Math.round(gridWidth * paneScale)) === 1
             ? "1 device pixel -- as thin as this display draws"
             : `${Math.max(
@@ -62,7 +63,7 @@ export const LayoutTab = (p: PanelProps) => {
             color over its whole area, so a 2x2 arrangement holding one pane
             has plenty to see even at a gap of 0. */}
         {viewCols * viewRows < 2 && get("paneGap") === 0 && (
-          <div style={{ color: "#aaa", fontSize: "0.8em" }}>
+          <div style={{ color: ui.text.muted, fontSize: "0.8em" }}>
             No gutter to see -- needs more than one cell, or a gap above 0.
           </div>
         )}

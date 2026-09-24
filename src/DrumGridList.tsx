@@ -11,6 +11,7 @@ import {
 import { DrumGridMatrix } from "./DrumGridMatrix";
 import { Params } from "./expression";
 import { useHelp } from "./help";
+import { ui } from "./theme";
 
 const rowStyle: React.CSSProperties = {
   display: "flex",
@@ -71,7 +72,7 @@ const GridRow = ({
       }}
     >
       <div style={rowStyle}>
-        <span style={{ width: "2em", color: "#aaa", fontSize: "0.8em" }}>
+        <span style={{ width: "2em", color: ui.text.muted, fontSize: "0.8em" }}>
           {index + 1}
         </span>
         <span
@@ -85,7 +86,7 @@ const GridRow = ({
         >
           {parts || "no parts yet"}
         </span>
-        <span style={{ color: "#aaa", fontSize: "0.8em" }}>
+        <span style={{ color: ui.text.muted, fontSize: "0.8em" }}>
           {gridPulseText(grid)} x {grid.columns}
           {gridRestart(grid) ? "" : " (carried over)"}
         </span>
@@ -100,7 +101,7 @@ const GridRow = ({
         style={{ ...rowStyle, paddingLeft: "2em" }}
         {...help("drumGrids.cycle")}
       >
-        <span style={{ color: error ? "#f88" : "#aaa", fontSize: "0.8em" }}>
+        <span style={{ color: error ? ui.error : ui.text.muted, fontSize: "0.8em" }}>
           {error || readout}
         </span>
       </div>
@@ -163,7 +164,7 @@ export const DrumGridList = ({
           New grid
         </button>
         {!grids.length && (
-          <span style={{ color: "#aaa", fontSize: "0.8em" }}>
+          <span style={{ color: ui.text.muted, fontSize: "0.8em" }}>
             None -- every part above is written as a rhythm.
           </span>
         )}

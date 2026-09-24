@@ -10,6 +10,7 @@ import {
 } from "./expression";
 import parser1 from "./parser1";
 import parser2 from "./parser2";
+import { ui } from "./theme";
 
 // While the field has focus it shows exactly what was typed, so half-finished
 // text that doesn't parse yet survives instead of being overwritten by the last
@@ -284,7 +285,7 @@ export const ColorInput = ({
           background: "none",
         }}
       />
-      <span style={{ color: "#aaa", fontSize: "0.8em" }}>{value}</span>
+      <span style={{ color: ui.text.muted, fontSize: "0.8em" }}>{value}</span>
     </div>
   );
 };

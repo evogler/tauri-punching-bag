@@ -3,6 +3,7 @@ import { Help } from "../help";
 import { Input } from "../Input";
 import { Section } from "./chrome";
 import { PanelProps } from "./types";
+import { ui } from "../theme";
 
 // The expert knobs: filtering the input so attacks stand out, the spectrum
 // analysis, tuning where note starts are detected, and a diagnostic. None of it
@@ -26,7 +27,7 @@ export const AnalysisTab = (p: PanelProps) => {
           set={set}
           get={get}
         />
-        <div style={{ color: "#aaa", fontSize: "0.8em" }}>
+        <div style={{ color: ui.text.muted, fontSize: "0.8em" }}>
           {!get("highPassOn")
             ? "Off -- the picture is drawn from the input as it arrives."
             : get("highPassAudio")

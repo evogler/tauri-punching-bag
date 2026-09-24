@@ -11,6 +11,7 @@ import {
   resolveRhythmText,
 } from "./expression";
 import parser2 from "./parser2";
+import { ui } from "./theme";
 
 // One row per note you are aiming at, with the target and the point exactly out
 // of phase with it marked. Every field this writes is an ordinary per-view
@@ -26,6 +27,9 @@ import parser2 from "./parser2";
 
 // From GRID_COLORS, but named for what they mean here: where the note goes,
 // and how far off it is possible to be.
+// Not theme tokens, deliberately: these are written into the pane's own
+// `grids` as config, so they travel in a preset and can be edited per pane
+// afterwards. A colour the user owns is not chrome.
 const TARGET_COLOR = "#33cc66";
 const ANTIPODE_COLOR = "#ff5533";
 
@@ -334,7 +338,7 @@ export const RowPerNote = ({
           Apply
         </button>
         <button onClick={() => setOpen(false)}>Cancel</button>
-        <span style={{ color: error ? "#fbb" : "#aaa", fontSize: "0.8em" }}>
+        <span style={{ color: error ? ui.error : ui.text.muted, fontSize: "0.8em" }}>
           {error || `${rows.length} rows, ${num(beats)} beats`}
         </span>
       </div>

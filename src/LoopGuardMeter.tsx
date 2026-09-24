@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api";
+import { ui } from "./theme";
 
 // What the loop guard is holding down, if anything.
 //
@@ -28,7 +29,7 @@ export const LoopGuardMeter = ({ active }: { active: boolean }) => {
   if (!active) return null;
   const [hz, db] = state ?? [0, 0];
   return (
-    <div style={{ color: db >= 1 ? "#cc8" : "#aaa", fontSize: "0.8em" }}>
+    <div style={{ color: db >= 1 ? ui.warn : ui.text.muted, fontSize: "0.8em" }}>
       {db < 0.5
         ? "Nothing running away. Bands it is not holding are an exact pass-through."
         : `Holding ${hz.toFixed(0)} Hz down ${db.toFixed(1)} dB.`}

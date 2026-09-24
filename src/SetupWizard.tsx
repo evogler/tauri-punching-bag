@@ -9,6 +9,7 @@ import {
   AudioPrefs,
   DevicePicker,
 } from "./DevicePicker";
+import { ui } from "./theme";
 
 // A first-launch walk through the few things that have to be right before the
 // app is any use: it hears you, it is listening to the right device, it knows
@@ -67,7 +68,7 @@ export const shouldOpenSetup = (hasSession: boolean) => {
 };
 
 const text: React.CSSProperties = { lineHeight: 1.45, margin: "0 0 10px" };
-const note: React.CSSProperties = { color: "#aaa", fontSize: "0.85em", lineHeight: 1.4 };
+const note: React.CSSProperties = { color: ui.text.muted, fontSize: "0.85em", lineHeight: 1.4 };
 
 // Anything above about -60 dB proves sound is arriving at all, which is the
 // question: the failure this exists to catch is an input of exact zeroes, which
@@ -105,13 +106,13 @@ const MicCheck = ({ labels }: { labels: string[] }) => {
         return (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0" }}>
             <span style={{ width: "3.5em" }}>{labels[i] ?? `ch ${i + 1}`}</span>
-            <div style={{ flex: 1, height: 8, background: "#222", borderRadius: 4 }}>
+            <div style={{ flex: 1, height: 8, background: ui.surface.well, borderRadius: 4 }}>
               <div
                 style={{
                   width: `${fraction * 100}%`,
                   height: "100%",
                   borderRadius: 4,
-                  background: db > -6 ? "#e86" : "#6c6",
+                  background: db > -6 ? ui.bad : ui.ok,
                 }}
               />
             </div>
@@ -122,12 +123,12 @@ const MicCheck = ({ labels }: { labels: string[] }) => {
         );
       })}
       {heard ? (
-        <p style={{ ...text, color: "#8c8", margin: "10px 0" }}>
+        <p style={{ ...text, color: ui.ok, margin: "10px 0" }}>
           Sound is coming in. If your playing barely moves the bar, turn up the
           gain on your interface or move closer to the microphone.
         </p>
       ) : ticks > SILENT_TICKS ? (
-        <div style={{ ...note, marginTop: 10, color: "#fc8" }}>
+        <div style={{ ...note, marginTop: 10, color: ui.notice }}>
           <p style={{ margin: "0 0 6px" }}>Still silent. The usual reasons, most likely first:</p>
           <ol style={{ margin: 0, paddingLeft: "1.3em" }}>
             <li>
@@ -249,8 +250,8 @@ export const SetupWizard = ({
           maxHeight: "90vh",
           overflowY: "auto",
           boxSizing: "border-box",
-          backgroundColor: "#3a3a3a",
-          color: "#eee",
+          backgroundColor: ui.surface.inset,
+          color: ui.text.primary,
           border: "1px solid #777",
           borderRadius: 10,
           padding: "18px 22px",
@@ -325,7 +326,7 @@ export const SetupWizard = ({
                     flex: 1,
                     padding: "10px",
                     fontWeight: room === choice ? "bold" : undefined,
-                    backgroundColor: room === choice ? "#666" : undefined,
+                    backgroundColor: room === choice ? ui.surface.selected : undefined,
                   }}
                 >
                   {choice === "headphones" ? "Headphones" : "Speakers"}
@@ -360,7 +361,7 @@ export const SetupWizard = ({
               played them, not a little late.
             </p>
             {get("paused") && (
-              <div style={{ ...note, color: "#fc8", display: "flex", gap: 8, alignItems: "center" }}>
+              <div style={{ ...note, color: ui.notice, display: "flex", gap: 8, alignItems: "center" }}>
                 The measurement can't run while paused.
                 <button onClick={() => set("paused", false)}>Resume</button>
               </div>
@@ -373,7 +374,7 @@ export const SetupWizard = ({
               }}
             />
             {applied !== null ? (
-              <p style={{ ...text, color: "#8c8" }}>
+              <p style={{ ...text, color: ui.ok }}>
                 Applied: {applied} frames, about{" "}
                 {((applied / sampleRate) * 1000).toFixed(1)} ms. Saved for this
                 input and output.
