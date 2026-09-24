@@ -34,48 +34,49 @@
     Consolas, monospace;
 
   /* Surfaces, darkest to lightest. */
-  --surface-app: #333;
-  --surface-well: #222;
-  --surface-sunken: #2a2a2a;
-  --surface-field: #2b2b2b;
-  --surface-panel: #444;
-  --surface-inset: #3a3a3a;
-  --surface-raised: #3f3f3f;
-  --surface-raised-hi: #4a4a4a;
-  --surface-raised-lo: #353535;
-  --surface-selected: #666;
+  --surface-app: #0F1214;
+  --surface-well: #0B0E10;
+  --surface-sunken: #131719;
+  --surface-field: #111417;
+  --surface-panel: #171B1E;
+  --surface-inset: #1F2428;
+  --surface-raised: #1F2428;
+  --surface-raised-hi: #262C31;
+  --surface-raised-lo: #171B1E;
+  --surface-selected: #2F363B;
 
   /* Lines. */
-  --line-hairline: #525252;
-  --line-field: #5a5a5a;
-  --line-divider: #777;
+  --line-hairline: #2A3035;
+  --line-field: #2A3035;
+  --line-divider: #22282C;
 
   /* Text, brightest to faintest. */
-  --text-bright: #fff;
-  --text-primary: #ddd;
-  --text-body: #ccc;
-  --text-muted: #aaa;
-  --text-dim: #999;
-  --text-faint: #8d8d8d;
-  --text-caption: #a5a5a5;
-  --text-disabled: #777;
-  --text-on-accent: #111;
+  --text-bright: #F2F5F6;
+  --text-primary: #E7EAEC;
+  --text-body: #C7CED3;
+  --text-muted: #A3ACB2;
+  --text-dim: #868F96;
+  --text-faint: #868F96;
+  --text-caption: #868F96;
+  --text-disabled: #6E777D;
+  --text-on-accent: #1A1204;
 
   /* One accent, and the statuses. */
-  --accent: #4a86d8;
-  --accent-edge: #6a9bd8;
-  --ok: #6c6;
-  --warn: #cc8;
-  --bad: #e86;
-  --notice: #fc8;
-  --info: #8cf;
-  --error: #fbb;
-  --danger: #c44;
-  --danger-fill: #4a2a2a;
-  --hint-fill: #2f3a2f;
-  --hint-text: #cfc;
-  --overlay-ink: #9c9;
-  --drop-line: #0af;
+  --accent: #F5A524;
+  --accent-edge: #F5A524;
+  --ok: #6FCF97;
+  --warn: #E2C062;
+  --bad: #F0806F;
+  --notice: #F5C064;
+  --info: #9FC3FF;
+  --error: #FF6B5B;
+  --danger: #C0473A;
+  --danger-fill: #2A1512;
+  --hint-edge: #5A4418;
+  --hint-fill: #2A2112;
+  --hint-text: #F5C064;
+  --overlay-ink: #868F96;
+  --drop-line: #F5A524;
 }
 
 body {
@@ -109,6 +110,10 @@ html {
    panel is a fixed 600px and the density has to come from somewhere. */
 body {
   font-size: 14px;
+  color: var(--text-primary);
+  /* Readouts are spans rather than fields -- latency, dB, the beat -- and they
+     change every frame, so they get tabular figures too. */
+  font-variant-numeric: tabular-nums;
 }
 
 input,
@@ -131,12 +136,25 @@ textarea {
 input:not([type]),
 input[type="text"],
 input[type="number"],
+textarea {
+  /* Every text field in this panel holds a number, an expression or a rhythm,
+     so the whole class is monospace. `select` is left out: a device name is
+     prose. Size is unchanged on purpose -- shrinking it to win back the width
+     mono costs would undo the one-size rule above, which exists because a
+     value smaller than its own label is the wrong way round. */
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+input:not([type]),
+input[type="text"],
+input[type="number"],
 textarea,
 select {
   background-color: var(--surface-field);
   border: 1px solid var(--line-field);
-  border-radius: 4px;
-  padding: 2px 5px;
+  border-radius: 5px;
+  padding: 2px 6px;
 }
 
 input:not([type]):focus,
@@ -157,7 +175,7 @@ select {
   -webkit-appearance: none;
   appearance: none;
   padding-right: 20px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 12'%3E%3Cpath fill='%23999' d='M5 0.5L8.5 4.5H1.5z M5 11.5L8.5 7.5H1.5z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 12'%3E%3Cpath fill='%23868F96' d='M5 0.5L8.5 4.5H1.5z M5 11.5L8.5 7.5H1.5z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 6px center;
   background-size: 7px 9px;
@@ -169,6 +187,13 @@ select {
    field and a ticked one is the only blue in the row. `appearance: none` means
    the tick has to be drawn: a rotated corner of a border, which stays sharp at
    any size where a glyph would not. */
+/* The one native widget kept native. `accent-color` tints its filled track,
+   which is all it needed -- unlike the checkbox and the select, it was never
+   a white slab. */
+input[type="range"] {
+  accent-color: var(--accent);
+}
+
 input[type="checkbox"] {
   -webkit-appearance: none;
   appearance: none;
@@ -213,8 +238,8 @@ input[type="checkbox"]:focus-visible {
 button {
   background-color: var(--surface-raised);
   border: 1px solid var(--line-field);
-  border-radius: 5px;
-  padding: 3px 9px;
+  border-radius: 7px;
+  padding: 3px 10px;
   cursor: pointer;
 }
 

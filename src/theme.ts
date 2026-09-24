@@ -53,6 +53,7 @@ export const ui = {
   error: v("error"),
   danger: v("danger"),
   dangerFill: v("danger-fill"),
+  hintEdge: v("hint-edge"),
   hintFill: v("hint-fill"),
   hintText: v("hint-text"),
   overlayInk: v("overlay-ink"),

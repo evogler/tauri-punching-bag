@@ -67,7 +67,7 @@ export const PanelHeader = (
       {configError && (
         <div
           style={{
-            border: "1px solid #e86",
+            border: `1px solid ${ui.bad}`,
             borderRadius: 8,
             margin: 4,
             padding: 8,

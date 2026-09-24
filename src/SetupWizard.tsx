@@ -252,7 +252,7 @@ export const SetupWizard = ({
           boxSizing: "border-box",
           backgroundColor: ui.surface.inset,
           color: ui.text.primary,
-          border: "1px solid #777",
+          border: `1px solid ${ui.line.divider}`,
           borderRadius: 10,
           padding: "18px 22px",
           display: "flex",

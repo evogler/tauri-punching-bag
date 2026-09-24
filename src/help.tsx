@@ -81,7 +81,7 @@ export const HelpArea = ({
         height: "7.5em",
         overflowY: "auto",
         boxSizing: "border-box",
-        borderTop: "1px solid #777",
+        borderTop: `1px solid ${ui.line.divider}`,
         backgroundColor: ui.surface.inset,
         padding: "6px 10px",
         fontSize: "0.9em",

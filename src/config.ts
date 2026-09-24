@@ -1046,7 +1046,7 @@ export const defaultJsConfig = {
   // What a pane is erased to. The sweep never clears the canvas, it repaints
   // one column at a time, so this is the color of every part of a pane nothing
   // has been drawn over.
-  waveformBackground: "#222222",
+  waveformBackground: "#0F1214",
   // The gutter between panes, in CSS pixels. Zero butts them together; the
   // canvas backing store is unaffected, so this only moves where the panes sit,
   // never what is drawn in them.
@@ -1055,7 +1055,7 @@ export const defaultJsConfig = {
   // all, what an empty cell is. Invisible only when a single pane covers every
   // cell and the gap is 0, because then there is nothing behind the panes to
   // see.
-  paneGapColor: "#333333",
+  paneGapColor: "#1C2225",
   // Grid line thickness, in **CSS** pixels, so a line is the same weight on a
   // Retina display and an external monitor -- the draw code multiplies by the
   // pane's device pixel ratio. 0.5 is therefore one device pixel on a 2x

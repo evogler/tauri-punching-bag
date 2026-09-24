@@ -325,13 +325,32 @@ const normalizeView = (
   };
 };
 
+// The two colours that are config but describe the *frame* rather than the
+// signal. Both moved when the panel went dark, and restore merges saved values
+// over the defaults -- so without this every existing install would keep a
+// mid-grey canvas and a mid-grey gutter beside a near-black panel, which does
+// not read as a preference, it reads as a half-finished repaint. Exactly the
+// `onsetThreshold` argument, and exactly its cost: a deliberate `#222222` is
+// indistinguishable from an untouched one and moves too.
+//
+// They are migrated and not simply made theme tokens because they are chosen
+// per config and travel in presets, which the rest of the palette does not.
+const migratedChromeColors = (js: Record<string, unknown>) => {
+  const out = { ...js };
+  if (out.waveformBackground === "#222222")
+    out.waveformBackground = defaultJsConfig.waveformBackground;
+  if (out.paneGapColor === "#333333")
+    out.paneGapColor = defaultJsConfig.paneGapColor;
+  return out;
+};
+
 // Folds a pre-views js config into one view, gives every pane a placement, and
 // puts the result through the one function that enforces the layout invariant.
 const migrateViews = (
   js: Record<string, unknown>,
   legacyChannels: number[]
 ): Record<string, unknown> => {
-  const out = { ...js };
+  const out = migratedChromeColors(js);
 
   if (!Array.isArray(out.views)) {
     const legacy: Partial<ViewConfig> = {};

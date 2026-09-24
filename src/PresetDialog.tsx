@@ -34,7 +34,7 @@ const overlay: React.CSSProperties = {
 
 const panel: React.CSSProperties = {
   backgroundColor: ui.surface.panel,
-  border: "1px solid #777",
+  border: `1px solid ${ui.line.divider}`,
   borderRadius: "8px",
   padding: "8px",
   minWidth: "26em",
@@ -87,7 +87,7 @@ export const PresetDialog = ({
             alignItems: "center",
             color: ui.text.muted,
             fontSize: "0.8em",
-            borderBottom: "1px solid #666",
+            borderBottom: `1px solid ${ui.line.field}`,
             paddingBottom: "4px",
           }}
         >

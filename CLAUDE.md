@@ -202,6 +202,51 @@ Rules that will bite you:
   - **Each rail button carries its own help entry**, so pointing down the list
     is a tour of what the app can do -- the one place where hovering the
     *navigation* is worth explaining rather than only the controls.
+- **Every colour in the app is a custom property on `:root` in
+  `src/index.css`, and nowhere else.** `src/theme.ts` exports `ui`, a typed
+  accessor handing back `var(--x)` strings rather than a second copy of the
+  values -- React passes a `var()` through to the style attribute unchanged,
+  so an inline style is as good a consumer as a stylesheet rule. Before this
+  the panel held ~130 hex literals across 30 files (`#aaa` forty times), so a
+  palette change was a hundred and thirty hand edits and the next one was
+  another hundred and thirty.
+  - **Named by role, never by value** -- `--surface-panel`, not `--grey-444`
+    -- or the rename is only a second spelling of the hex it replaced.
+  - **The data colours are deliberately outside it.** `channelStyles`,
+    `rowColors`, a grid's colour, `waveformBackground`, `paneGapColor` and
+    `RowPerNote`'s target and antipode are *config*: chosen per pane, carried
+    in presets, edited afterwards. A token would make somebody's palette a
+    build-time constant. Canvas drawing could not read a `var()` anyway
+    (`ctx.fillStyle = "var(--x)"` is not a colour), and needs to read none of
+    these -- every colour in the draw path is config or derived from one.
+  - **Near-identical shades doing one job were collapsed onto it** rather than
+    preserved as two tokens: an error message was `#fbb`, `#f88` or `#e08`
+    depending on the file, and a passing measurement `#6c6` or `#8c8`. Tokens
+    named for their spelling would defeat the point.
+  - **The two config colours were migrated, not just redefaulted.** Restore
+    merges saved values over the defaults, so exactly `#222222` and `#333333`
+    -- the old defaults, indistinguishable from an untouched install -- move
+    to the new ones in `migratedChromeColors`. Without it every existing
+    install keeps a mid-grey canvas beside a near-black panel. The
+    `onsetThreshold` argument, and the same cost: a deliberate `#222222` moves
+    too.
+  - **Faces are tokens as well** (`--font-sans`, `--font-mono`), so bundling
+    Instrument Sans and JetBrains Mono later is one line rather than a sweep.
+    They are **not** webfont-linked: the mockups pull them from
+    `fonts.googleapis.com` because an artboard is a web page, and a bundle
+    that cannot reach Google would fall back silently with nothing in any log.
+    macOS gives SF Pro and SF Mono meanwhile, and the important half is that a
+    number is monospaced and tabular rather than which monospace it is.
+  - **Every text field is monospace and tabular**, because every one of them
+    holds a number, an expression or a rhythm. `select` is excluded -- a
+    device name is prose. The size is deliberately unchanged: shrinking it to
+    win back the width mono costs would undo the one-size rule below.
+  - **Three colours failed contrast and were fixed in the token file** rather
+    than discovered later in thirty places. The mockups' `#5E686F` rail digits
+    are 3.16:1 and `#6B757C` tick labels 3.93:1, where 4.5:1 is the bar;
+    `#7D878E` is 4.27:1 on a raised surface, which is why the dim text token
+    is `#868F96` (4.76) instead. Disabled text is exempt and left below the
+    bar on purpose.
 - **The panel's controls are styled in `src/index.css`, not inline**, because
   what was wrong with them was systematic rather than per-component. Measured
   against Audacity's preferences window, which is the same kind of surface done
@@ -230,7 +275,8 @@ Rules that will bite you:
     until it is ticked, and the drum list stacks half a dozen of them.
   - **Inline styles still win**, which is how the paused transport stays red,
     the section rail keeps its own shape, and `invalidBorder` still turns a
-    field red.
+    field red. They read their colours from `ui` now rather than writing
+    hexes, so winning costs nothing in consistency.
 - **A section's name is a caption, not a title.** An unstyled `h4` is bold and
   the same size as the labels under it, so the name of a group competed with
   the settings inside it. Smaller and quieter than its own contents is the
@@ -238,7 +284,12 @@ Rules that will bite you:
   names get. `Divider`'s label then had to stop being uppercase, or the two
   levels read as one thing twice. The card's border went `#777` to `#525252`
   for the same reason: a dozen bright outlines stacked were the loudest
-  structure in the panel, and it is the *fill* that groups.
+  structure in the panel, and it is the *fill* that groups. **It has since
+  gone entirely**, along with the rail buttons' -- the line kept getting
+  quieter because the honest answer was that it was never doing the work. The
+  rail's shape survived the loss: the open button is filled with the
+  *settings'* colour and the closed ones with the ground behind the panel, so
+  the join that used to be a missing border segment is made by the fill.
 - **The help area** is the fixed strip under the panel that describes whatever
   is pointed at. `src/help.tsx` is the mechanism (`useHelp`, `<Help id>`,
   `HelpArea`), `src/helpText.ts` is every description in one place, keyed by

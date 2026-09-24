@@ -63,7 +63,7 @@ const GridRow = ({
   return (
     <div
       style={{
-        border: "1px solid #666",
+        border: `1px solid ${ui.line.field}`,
         borderRadius: "6px",
         padding: "3px",
         display: "flex",

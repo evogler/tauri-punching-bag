@@ -2194,6 +2194,14 @@ const App = () => {
             gridRow: `${v.cfg.row + 1} / span ${v.cfg.rowSpan}`,
             minWidth: 0,
             minHeight: 0,
+            // Cosmetic only, and deliberately not a border: `border-radius`
+            // leaves the box alone, so the `ResizeObserver` that sizes the
+            // backing store from this element measures exactly what it did
+            // before. A border would shrink the content box and quietly
+            // change every pane's resolution. What separates the panes is the
+            // gutter -- the grid container showing through -- which is what
+            // `paneGapColor` has always been.
+            borderRadius: "6px",
           }}
         />
       ))}

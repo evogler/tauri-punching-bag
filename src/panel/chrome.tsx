@@ -39,11 +39,11 @@ export const Section = ({
   return (
     <div
       style={{
-        // A hairline barely above the fill it encloses. It used to be #777 on
-        // #444, which put a bright outline around every group -- a dozen of
-        // them stacked, and between them the loudest structure in the panel.
-        // The fill is what groups; the line only says where the group ends.
-        border: "1px solid #525252",
+        // No outline at all now. The line kept getting quieter -- #777, then
+        // #525252 -- because the honest answer was that it was never doing
+        // the work: a dozen outlined cards stacked were the loudest structure
+        // in the panel, and it is the *fill* that groups. The fill is a real
+        // step above the ground behind it, which is all a group needs.
         margin: "4px",
         padding: "5px 7px",
         borderRadius: "8px",
@@ -154,10 +154,13 @@ const railButton = (active: boolean): React.CSSProperties => ({
   // open section reads as one piece with what it opened. The row of tabs did
   // the same thing upwards.
   borderRadius: "8px 0 0 8px",
-  border: "1px solid #777",
-  borderRight: active ? "none" : "1px solid #777",
-  paddingRight: active ? "9px" : "8px",
-  backgroundColor: active ? ui.surface.panel : ui.surface.app,
+  // The outline went the way the sections' did, and the shape survives it:
+  // the open button is filled with the *settings'* colour and the inactive
+  // ones with the ground behind the panel, so the join is made by the fill
+  // rather than by a missing border segment.
+  border: "none",
+  paddingRight: "8px",
+  backgroundColor: active ? ui.surface.panel : "transparent",
   color: active ? ui.text.bright : ui.text.muted,
   fontWeight: active ? "bold" : undefined,
   cursor: "pointer",

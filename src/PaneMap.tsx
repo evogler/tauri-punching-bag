@@ -112,7 +112,7 @@ export const PaneMap = ({
               gridRow: `${h.row + 1}`,
               color: ui.text.dim,
               backgroundColor: ui.surface.inset,
-              border: "1px dashed #777",
+              border: `1px dashed ${ui.line.divider}`,
             }}
           >
             +

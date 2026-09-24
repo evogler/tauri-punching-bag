@@ -50,7 +50,7 @@ export const accepts = (parse: () => unknown) => {
 // Silently keeping the last good value reads as the field ignoring you, so an
 // unparseable field says so. The last good value does stay in effect.
 export const invalidBorder = (invalid: boolean): React.CSSProperties =>
-  invalid ? { border: "1px solid #f55", outline: "none" } : {};
+  invalid ? { border: `1px solid ${ui.error}`, outline: "none" } : {};
 
 const asText = { toString: (x: unknown) => x as string };
 

@@ -62,7 +62,7 @@ export const ExampleHint = ({
     style={{
       ...rowStyle,
       alignItems: "baseline",
-      border: "1px solid #4a6a4a",
+      border: `1px solid ${ui.hintEdge}`,
       borderRadius: 8,
       margin: 4,
       padding: "5px 7px",

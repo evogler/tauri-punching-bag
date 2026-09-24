@@ -109,7 +109,7 @@ const overlayStyle: React.CSSProperties = {
 
 const panelStyle: React.CSSProperties = {
   backgroundColor: ui.surface.panel,
-  border: "1px solid #777",
+  border: `1px solid ${ui.line.divider}`,
   borderRadius: "8px",
   padding: "8px",
   minWidth: "30em",
@@ -275,8 +275,8 @@ export const DrumGridMatrix = ({
       minWidth: 0,
       height: CELL_H,
       boxSizing: "border-box",
-      borderRight: "1px solid #555",
-      borderBottom: "1px solid #555",
+      borderRight: `1px solid ${ui.line.hairline}`,
+      borderBottom: `1px solid ${ui.line.hairline}`,
       backgroundColor: on ? `rgba(${rgb},${alpha})` : OFF,
       color: ui.text.onAccent,
       fontSize: "0.65em",
