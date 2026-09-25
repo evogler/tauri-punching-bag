@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { NumberExpr, Rhythm, ViewConfig, VisualGrid } from "./config";
 import { useHelp } from "./help";
-import { accepts, invalidBorder } from "./Input";
+import { accepts, invalidBorder, labelStyle} from "./Input";
 import {
   MAX_LIST_LENGTH,
   Params,
@@ -243,7 +243,7 @@ const Field = ({
   const showHelp = useHelp();
   return (
     <div style={rowStyle} {...showHelp(help)}>
-      <label>{label}</label>
+      <label style={labelStyle}>{label}</label>
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}

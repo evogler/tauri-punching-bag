@@ -5,6 +5,7 @@ import {
 } from "@tauri-apps/api/globalShortcut";
 import { BROWSER_DEBUG_MODE } from "./env";
 import { ui } from "./theme";
+import { labelStyle } from "./Input";
 
 // One system-wide key for pause/play, so the transport can be reached from
 // whatever window is in front -- a DAW, a score, a video.
@@ -149,11 +150,11 @@ export const GlobalShortcut = ({ onTrigger }: { onTrigger: () => void }) => {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ display: "flex", flexDirection: "row", gap: 4 }}>
-        <label>Pause from anywhere</label>
+        <label style={labelStyle}>Pause from anywhere</label>
         <input type="checkbox" checked={on} onChange={toggle} />
       </div>
       <div style={{ display: "flex", flexDirection: "row", gap: 4 }}>
-        <label>Key</label>
+        <label style={labelStyle}>Key</label>
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}

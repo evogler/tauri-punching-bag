@@ -10,7 +10,7 @@ import {
 } from "./config";
 import { Params, evaluate, parseNumberList } from "./expression";
 import { useHelp } from "./help";
-import { accepts, invalidBorder, useFocusedValue } from "./Input";
+import { accepts, invalidBorder, useFocusedValue, labelStyle} from "./Input";
 import { ui } from "./theme";
 
 const rowStyle: React.CSSProperties = {
@@ -203,7 +203,7 @@ export const SectionList = ({
       ))}
       {sections.length > 1 && (
         <div style={{ ...rowStyle, marginTop: "2px" }} {...help("sectionOrder")}>
-          <label>Order</label>
+          <label style={labelStyle}>Order</label>
           <input
             {...orderProps}
             onChange={(e) => {

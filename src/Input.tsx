@@ -126,6 +126,71 @@ const Resolved = ({ text, value }: { text: string; value: string }) => {
   );
 };
 
+// The left half of every row. A shared axis is the whole point: rows used to
+// put their control wherever the label happened to end, so a column of
+// settings had a ragged left edge down the middle of it.
+export const labelStyle: React.CSSProperties = {
+  flex: "0 0 var(--label-col)",
+  minWidth: 0,
+};
+
+/// A boolean setting, as a switch rather than a tick.
+///
+/// **A checkbox says "include this", a switch says "this is on".** Everything
+/// `Input` renders is a setting that takes effect the moment it changes, which
+/// is a switch; the ticks left in the app are the ones that really are
+/// selections -- which drum voices a section sounds, which channels a pane
+/// draws, whether a voice is muted in the list.
+///
+/// A `button` with `role="switch"`, not a restyled `input`: the thing being
+/// drawn is not a checkbox any more, and a screen reader should not be told
+/// that it is.
+export const Switch = ({
+  on,
+  onChange,
+  label,
+  ...rest
+}: {
+  on: boolean;
+  onChange: () => void;
+  label?: string;
+} & React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+  <button
+    {...rest}
+    role="switch"
+    aria-checked={on}
+    aria-label={label}
+    onClick={onChange}
+    style={{
+      width: "30px",
+      height: "17px",
+      flexShrink: 0,
+      padding: 0,
+      borderRadius: "9px",
+      border: `1px solid ${on ? ui.accent : ui.line.field}`,
+      backgroundColor: on ? ui.accent : ui.surface.field,
+      position: "relative",
+      cursor: "pointer",
+      transition: "background-color 80ms linear",
+      ...rest.style,
+    }}
+  >
+    <span
+      aria-hidden="true"
+      style={{
+        position: "absolute",
+        top: "2px",
+        left: on ? "15px" : "2px",
+        width: "11px",
+        height: "11px",
+        borderRadius: "50%",
+        backgroundColor: on ? ui.text.onAccent : ui.text.dim,
+        transition: "left 80ms linear",
+      }}
+    />
+  </button>
+);
+
 const rowStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "row",
@@ -143,7 +208,7 @@ const NumberArrayInput = ({ label, _key, get, set }: II<number[]>) => {
   const invalid = !accepts(() => parseNumberList(props.value));
   return (
     <div style={rowStyle}>
-      <label>{label}</label>
+      <label style={labelStyle}>{label}</label>
       <input
         {...props}
         onChange={(e) => {
@@ -179,7 +244,7 @@ const ExprListInput = ({
   const invalid = !accepts(() => parseNumberList(props.value, params));
   return (
     <div style={rowStyle}>
-      <label>{label}</label>
+      <label style={labelStyle}>{label}</label>
       <input
         {...props}
         onChange={(e) => {
@@ -223,7 +288,7 @@ const ExprNumberInput = ({
   const invalid = !accepts(() => parse(props.value));
   return (
     <div style={rowStyle}>
-      <label>{label}</label>
+      <label style={labelStyle}>{label}</label>
       <input
         {...props}
         onChange={(e) => {
@@ -267,7 +332,7 @@ const ParserArrayInput = ({
 
   return (
     <div style={rowStyle}>
-      <label>{label}</label>
+      <label style={labelStyle}>{label}</label>
       <RhythmField
         rhythm={val.val}
         invalid={invalid}
@@ -289,11 +354,11 @@ const ParserArrayInput = ({
 
 const BooleanInput = ({ label, _key, get, set }: II<boolean>) => (
   <div style={rowStyle}>
-    <label>{label}</label>
-    <input
-      onChange={(e) => set(_key, !get(_key))}
-      type="checkbox"
-      checked={Boolean(get(_key))}
+    <label style={labelStyle}>{label}</label>
+    <Switch
+      on={Boolean(get(_key))}
+      onChange={() => set(_key, !get(_key))}
+      label={label}
     />
   </div>
 );
@@ -303,7 +368,7 @@ const NumberInput = ({ label, _key, get, set, validate }: II<number>) => {
 
   return (
     <div style={rowStyle}>
-      <label>{label}</label>
+      <label style={labelStyle}>{label}</label>
       <input
         {...props}
         onChange={(e) => {
@@ -337,7 +402,7 @@ export const ColorInput = ({
   const showHelp = useHelp();
   return (
     <div style={{ ...rowStyle, alignItems: "center" }} {...showHelp(help)}>
-      <label>{label}</label>
+      <label style={labelStyle}>{label}</label>
       <input
         type="color"
         value={value}
@@ -375,7 +440,7 @@ export const TextInput = ({
   const showHelp = useHelp();
   return (
     <div style={rowStyle} {...showHelp(help)}>
-      <label>{label}</label>
+      <label style={labelStyle}>{label}</label>
       <input
         value={value}
         placeholder={placeholder}

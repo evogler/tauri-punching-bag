@@ -9,7 +9,7 @@ import {
 import { ChannelPicker } from "../ChannelPicker";
 import { GridList } from "../GridList";
 import { Help } from "../help";
-import { Input, TextInput } from "../Input";
+import { Input, TextInput, labelStyle} from "../Input";
 import { RowColorList } from "../RowColorList";
 import { RowPerNote } from "../RowPerNote";
 import { Slider } from "../Slider";
@@ -74,7 +74,7 @@ export const DisplayTab = (p: PanelProps) => {
     <>
       <Section label="Panes">
         <Help id="arrangement" style={rowStyle}>
-          <label>Arrangement</label>
+          <label style={labelStyle}>Arrangement</label>
           <select
             value={`${viewCols}x${viewRows}`}
             onChange={(e) => {
@@ -124,7 +124,7 @@ export const DisplayTab = (p: PanelProps) => {
         />
         <Divider label="What it shows" />
         <Help id="channels" style={{ ...rowStyle, alignItems: "center" }}>
-          <label>Channels</label>
+          <label style={labelStyle}>Channels</label>
           <ChannelPicker
             labels={channelLabels}
             styles={get("channelStyles")}
@@ -133,7 +133,7 @@ export const DisplayTab = (p: PanelProps) => {
           />
         </Help>
         <Help id="kind" style={rowStyle}>
-          <label>Display</label>
+          <label style={labelStyle}>Display</label>
           <select
             value={activeCfg?.kind ?? "waveform"}
             onChange={(e) => viewIO.set("kind", e.target.value as ViewKind)}
@@ -176,7 +176,7 @@ export const DisplayTab = (p: PanelProps) => {
             out rather than about what a row is. A dropdown: it is a small
             integer with an upper bound, and there is nothing to type. */}
         <Help id="rowColumns" style={rowStyle}>
-          <label>Columns of rows</label>
+          <label style={labelStyle}>Columns of rows</label>
           <select
             value={activeCfg?.rowColumns ?? 1}
             onChange={(e) =>
@@ -285,7 +285,7 @@ export const DisplayTab = (p: PanelProps) => {
         <Divider label="Start over" />
         {paneCount > 1 && (
           <Help id="paneCopy" style={{ ...rowStyle, alignItems: "center" }}>
-            <label>Copy settings from</label>
+            <label style={labelStyle}>Copy settings from</label>
             <select
               value=""
               onChange={(e) => {

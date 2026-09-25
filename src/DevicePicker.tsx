@@ -1,6 +1,7 @@
 import React from "react";
 import { useHelp } from "./help";
 import { ui } from "./theme";
+import { labelStyle } from "./Input";
 
 /** Matches DEVICES_CHANGED_EVENT in src-tauri/src/io_channels.rs. */
 export const DEVICES_CHANGED_EVENT = "devices-changed";
@@ -132,7 +133,7 @@ export const DevicePicker = ({
     onPick: (uid: string) => void
   ) => (
     <div style={rowStyle} {...help(helpId)}>
-      <label>{label}</label>
+      <label style={labelStyle}>{label}</label>
       {/* mousedown fires before the popup opens, so a device plugged in while
           the app was frontmost is picked up on the click that goes looking for
           it. The Core Audio listener normally beats this to it. */}

@@ -1,4 +1,5 @@
 import { useHelp } from "./help";
+import { labelStyle } from "./Input";
 import { ui } from "./theme";
 
 // A labelled range input, with the current value beside it. Shared by the
@@ -32,7 +33,7 @@ export const Slider = ({
   const showHelp = useHelp();
   return (
     <div style={sliderRowStyle} {...showHelp(help)}>
-      <label style={{ width: "9em" }}>{label}</label>
+      <label style={labelStyle}>{label}</label>
       <input
         type="range"
         min={min}

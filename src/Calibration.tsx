@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { ui } from "./theme";
+import { labelStyle } from "./Input";
 
 export type CalibrationResult = {
   phase: "idle" | "running" | "done" | "failed";
@@ -141,7 +142,7 @@ export const Calibration = ({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
       <div style={rowStyle}>
-        <label>Channel</label>
+        <label style={labelStyle}>Channel</label>
         <select
           value={channel}
           disabled={running}

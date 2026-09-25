@@ -3,6 +3,7 @@ import { ViewConfig } from "./config";
 import { PaneOps } from "./panel/types";
 import { paneLabel } from "./paneLayout";
 import { ui } from "./theme";
+import { labelStyle } from "./Input";
 
 // The arrangement as a picture: one cell per cell of the real grid, each pane
 // drawn over the cells it actually occupies. A row of numbered buttons said
@@ -149,7 +150,7 @@ export const PaneMap = ({
       </div>
       {views.length > 1 && (
         <Help id="paneSwap" style={{ ...rowStyle, alignItems: "center" }}>
-          <label>Swap with</label>
+          <label style={labelStyle}>Swap with</label>
           {/* Resets to its prompt after each pick, so it reads as an action
               rather than as a setting -- the same idiom as adding a drum. */}
           <select

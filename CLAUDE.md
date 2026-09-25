@@ -273,6 +273,23 @@ Rules that will bite you:
     which means drawing the chevron -- an inline SVG, so it sits where it is
     put at any size. Checkboxes went the same way: a white square says nothing
     until it is ticked, and the drum list stacks half a dozen of them.
+  - **Every label-and-control row shares one axis**, `--label-col` in
+    `index.css` and `labelStyle` in `Input.tsx`. Rows used to put their control
+    wherever the label happened to end, so a column of settings had a ragged
+    edge running down the middle of it -- *Beats per row*, *Columns of rows*
+    and *Waveform size* each started somewhere different. One value, because
+    the alignment only holds while every row agrees: a row that picks its own
+    width is the thing this replaces, and `Slider`'s hard-coded `9em` was the
+    first of them. A long label wraps inside its column rather than pushing
+    the control out of line.
+  - **A boolean setting is a switch, not a tick** (`Switch`, also in
+    `Input.tsx`). **A checkbox says "include this"; a switch says "this is
+    on".** Everything `Input` renders is a setting that takes effect the
+    moment it changes. The ticks left in the app are the ones that really are
+    selections: which drum voices a section sounds, which channels a pane
+    draws, whether a voice is muted in a list. A `button` with `role="switch"`
+    rather than a restyled `input`, because what is drawn is no longer a
+    checkbox and a screen reader should not be told that it is.
   - **Inline styles still win**, which is how the paused transport stays red,
     the section rail keeps its own shape, and `invalidBorder` still turns a
     field red. They read their colours from `ui` now rather than writing

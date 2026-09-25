@@ -1,6 +1,6 @@
 import { analysisNyquist, ANALYSIS_WINDOWS } from "../config";
 import { Help } from "../help";
-import { Input } from "../Input";
+import { Input, labelStyle} from "../Input";
 import { Section } from "./chrome";
 import { PanelProps } from "./types";
 import { ui } from "../theme";
@@ -46,7 +46,7 @@ export const AnalysisTab = (p: PanelProps) => {
           id="analysisWindow"
           style={{ display: "flex", flexDirection: "row", gap: "4px" }}
         >
-          <label>Analysis window</label>
+          <label style={labelStyle}>Analysis window</label>
           <select
             value={get("analysisWindow")}
             onChange={(e) => set("analysisWindow", Number(e.target.value))}

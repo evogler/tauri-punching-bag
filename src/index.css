@@ -33,6 +33,12 @@
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco,
     Consolas, monospace;
 
+  /* Every label-and-control row starts its control at the same x. One value,
+     because the alignment only holds while every row agrees -- a row that
+     picks its own width is the thing this replaces. A long label wraps inside
+     its column rather than pushing the control out of line. */
+  --label-col: 12em;
+
   /* Surfaces, darkest to lightest. */
   --surface-app: #0F1214;
   --surface-well: #0B0E10;

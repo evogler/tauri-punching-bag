@@ -1,5 +1,6 @@
 import { ROW_COLORS } from "./config";
 import { ui } from "./theme";
+import { labelStyle } from "./Input";
 
 const rowStyle: React.CSSProperties = {
   display: "flex",
@@ -25,7 +26,7 @@ export const RowColorList = ({
   setColors: (colors: string[]) => void;
 }) => (
   <div style={rowStyle}>
-    <label>Row colors</label>
+    <label style={labelStyle}>Row colors</label>
     {colors.map((color, i) => (
       <span key={i} style={{ ...rowStyle, gap: "1px" }}>
         <span style={{ color: ui.text.muted, fontSize: "0.8em" }}>{i + 1}</span>
