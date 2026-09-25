@@ -24,6 +24,15 @@ import { ui } from "./theme";
 // print `bufferCompensation` back, which is set in Setup and never moves on
 // its own: a live-looking number that is not live.
 
+// `--label-col` is overridden here, and this is the one place it should be.
+// The shared axis exists because the panel is a *column* of label-and-control
+// rows and a ragged edge runs down the middle of it. The top bar is a row:
+// there is no second row for Tempo to line up with, so a 12em label column
+// only takes the width the field needs -- which is exactly what it did, the
+// tempo field collapsing to nothing and the beat readout sliding over the
+// looper. Scoped rather than opted out of with a prop, so the rows in here
+// are still rows and the token is still the only thing that says how wide a
+// label is.
 const barStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "row",
@@ -35,6 +44,7 @@ const barStyle: React.CSSProperties = {
   boxSizing: "border-box",
   backgroundColor: ui.surface.panel,
   borderBottom: `1px solid ${ui.line.divider}`,
+  ["--label-col" as any]: "auto",
 };
 
 export const TopBar = ({
@@ -105,12 +115,20 @@ export const TopBar = ({
         Looper <span style={{ opacity: 0.7, fontSize: "0.85em" }}>⌘L</span>
       </button>
 
+      {/* The readout is what gives when the window is too narrow for all of
+          this, because it is the only thing here that can be read from the
+          canvas instead. Truncated rather than allowed to overflow -- it sat
+          across the looper button before, which reads as a broken bar rather
+          than as a full one. */}
       <span
         ref={statusRef}
         style={{
           fontSize: "0.85em",
           color: ui.text.muted,
           whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          minWidth: 0,
         }}
         {...help("topbar.status")}
       />

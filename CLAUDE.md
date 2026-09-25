@@ -282,6 +282,15 @@ Rules that will bite you:
     width is the thing this replaces, and `Slider`'s hard-coded `9em` was the
     first of them. A long label wraps inside its column rather than pushing
     the control out of line.
+    - **It is a rule about a *column*, and the top bar is a row.** There is
+      nothing under Tempo for it to line up with, so twelve em of label column
+      there only took the width the field needed -- the tempo field collapsed
+      to nothing and the beat readout slid across the looper button. Reported
+      from the app. `TopBar` overrides `--label-col` to `auto` in its own
+      scope rather than `Input` gaining a prop, so the rows in it are still
+      rows and the token is still the only thing that says how wide a label
+      is. The readout also truncates now instead of overflowing, since it is
+      the one thing in the bar that can be read off the canvas instead.
   - **A boolean setting is a switch, not a tick** (`Switch`, also in
     `Input.tsx`). **A checkbox says "include this"; a switch says "this is
     on".** Everything `Input` renders is a setting that takes effect the

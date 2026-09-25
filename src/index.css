@@ -36,7 +36,10 @@
   /* Every label-and-control row starts its control at the same x. One value,
      because the alignment only holds while every row agrees -- a row that
      picks its own width is the thing this replaces. A long label wraps inside
-     its column rather than pushing the control out of line. */
+     its column rather than pushing the control out of line.
+
+     It is a *column* rule, so a row of controls with nothing under it to line
+     up with overrides it to `auto` in its own scope. TopBar is the only one. */
   --label-col: 12em;
 
   /* Surfaces, darkest to lightest. */
