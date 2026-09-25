@@ -2294,7 +2294,6 @@ const App = () => {
           params={params}
           resetBeat={resetBeat}
           statusRef={statusRef}
-          meterPaused={setupOpen}
           clearHelp={clearHelp}
         />
         <div

@@ -310,24 +310,23 @@ Rules that will bite you:
     Clicking a pane hides the panel; while the transport lived in
     `PanelHeader` that meant asking for more picture also took away the
     ability to stop.
-  - **An empty meter and a broken meter look identical**, which is why the
-    level is a figure in dB beside the bar and not only a bar. A trough that
-    has not moved says nothing about whether anything is arriving; a readout
-    that says `silent` after three seconds under -54 dB, `-22 dB` when you
-    clap, and `no input` in red when the command itself fails, says which of
-    those it is. Reported as a bug -- "I don't think the input meter does
-    anything" -- against a meter that was in fact working. *Failing loudly*
-    applied to a thing that was not failing at all.
-  - **There is no latency readout**, though the mockups draw one. It could
-    only ever print `bufferCompensation` back, which is a number you set in
-    Setup and which never moves on its own -- a live-looking figure that is
-    not live is worse than not showing it. Removed on the owner's own
-    objection.
-  - **The beat readout and the level meter are written straight into the DOM**,
-    the rule `showFrameTime` already follows: the beat moves a hundred times a
-    second and the level fifteen, and a readout re-rendering `App` at either
-    rate would cost more than what it reports. Both are flushed about four
-    times a second, because a number changing every frame is not a readout.
+  - **No input meter, and no latency figure**, though the mockups draw both.
+    The meter was built and then removed on the owner's question: what is the
+    point of it, when the input is already drawn across the whole canvas? A
+    meter earns its place where nothing else shows you the signal, and the
+    premise here is the opposite -- it was a worse copy of the thing filling
+    the window, reasoned from generic audio-app convention rather than from
+    this app. The one thing it could say that the canvas cannot is that input
+    is arriving **while paused**, when no visual samples are produced; the
+    setup wizard's microphone check already answers that, per channel. The
+    latency figure could only ever print `bufferCompensation` back -- set in
+    Setup, never moving on its own -- so it read as live among readouts that
+    are.
+  - **The beat readout is written straight into the DOM**, the rule
+    `showFrameTime` already follows: it moves a hundred times a second, and a
+    readout re-rendering `App` at that rate would cost more than what it
+    reports. Flushed about four times a second, because a number changing
+    every frame is not a readout.
   - **It reads the cycle through `cycleSteps`**, which already existed and
     already said it was the one place the order is read -- so the readout and
     the section list cannot disagree about what is going to play. `stepAt` is
@@ -339,10 +338,11 @@ Rules that will bite you:
     has to know what to add, and the field may hold `t` or `bar*20`; there is
     no honest answer for incrementing one of those, and rounding to a number
     would throw away the parameter the tempo was written against.
-  - **The meter stops polling while the setup wizard is up.**
-    `get_input_levels` reports the peak *since the last call*, so two pollers
-    split the peaks between them and both read low -- and during setup the
-    wizard's microphone check is the one that matters.
+  - **`get_input_levels` reports the peak *since the last call***, so two
+    pollers split the peaks between them and both read low. Worth knowing
+    before anything else starts reading it: the wizard's microphone check is
+    the only caller now, and should stay that way unless a second one can be
+    made exclusive with it.
   - **Tooltips (`title=`) were replaced by help** wherever they explained
     something. The ones left name a value or a glyph ("Volume 70%", "Remove
     kick", the ✕ and ⠿ buttons) and the ? toggle, which has to explain itself

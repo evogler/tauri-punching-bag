@@ -166,14 +166,6 @@ export const HELP: Record<string, HelpEntry> = {
       "With the practice cycle on it also says which section is sounding and " +
       "which step of the written order you are on.",
   },
-  "topbar.level": {
-    title: "Input level",
-    body:
-      "The loudest thing any input has heard in the last moment, as a bar " +
-      "and in decibels. It reads `silent` when nothing has arrived for a few " +
-      "seconds, so a quiet room and a microphone that is not working do not " +
-      "look the same. Check the input in Setup.",
-  },
   "drums.on": { title: "On", body: "Mutes or unmutes this one part." },
   "drums.sound": {
     title: "Sound",
