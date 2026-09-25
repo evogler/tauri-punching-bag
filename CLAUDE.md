@@ -793,11 +793,23 @@ legacy (it returns a flat array of times rather than `{notes, start, end}`).
   glance, so the only way to see what a rhythm did used to be to play it and
   watch the pane. The rhythm field's version of what `Resolved` does for a
   number.
-  - **Every note is drawn, rests included, because every note sounds.** The
-    grammar parses `r`, the Rust `Note` carries only `time`, and serde drops
-    unknown fields -- so a rest plays, exactly as `sounds` is discarded.
-    Drawing it as a gap would make the preview disagree with the sound, which
-    is worse than not showing rests at all. See *Known issues*.
+  - **It draws what *sounds*, which is not what the rhythm contains.** A drum
+    grid writes a note for every column and says which are silent in
+    `chances` -- an unchecked cell is a chance of 0 -- so a strip reading the
+    notes alone drew a grid's silent columns as hits, claiming to show what
+    you would hear and showing the opposite. `chances` and `gains` are read
+    beside the notes, indexed by hit count with the same wrap the audio thread
+    uses, and a hit with a chance or a gain of 0 is simply not there. Reported
+    from the running app: *the hits of a grid don't affect the dots*.
+  - **A chance between 0 and 1 is drawn fainter**, floored at 0.3 so a
+    one-in-ten hit is visible rather than effectively absent, and **a gain is
+    drawn as the size of the dot**, over a deliberately narrow range: enough
+    to say two hits differ, not enough to pretend to be a meter.
+  - **A rest is still drawn, because a rest still sounds.** The grammar parses
+    `r`, the Rust `Note` carries only `time`, and serde drops unknown fields
+    -- so a rest plays, exactly as `sounds` is discarded. Drawing it as a gap
+    would make the preview disagree with the sound, which is the very failure
+    above. See *Known issues*.
   - **It dims rather than emptying when the text stops parsing.** What is on
     the strip is still what is playing; it is just no longer what is written
     above it. Same contract as the red border it sits inside.

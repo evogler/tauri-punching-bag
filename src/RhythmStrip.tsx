@@ -9,11 +9,19 @@ import { ui } from "./theme";
 // the rhythm field's version of what `Resolved` does for a number: the field
 // shows what you wrote, and the thing beside it shows what it means.
 //
-// **Every note is drawn, rests included, because every note sounds.** The
-// grammar parses `r` and the Rust `Note` struct carries only `time`, so serde
-// drops the flag and the note plays -- the same fate as `sounds`. Drawing a
-// rest as a gap would make the preview disagree with the sound, which is worse
-// than not showing rests at all. See *Known issues*.
+// **It draws what sounds, which is not the same as what the rhythm contains.**
+// A drum grid writes a note for *every column* and says which ones are silent
+// in `chances` -- an unchecked cell is a chance of 0, because parser2 has no
+// rests and writing the gaps between hits instead would move the first hit to
+// time 0 wherever it was drawn. So a strip reading the rhythm alone drew a
+// grid's silent columns as hits: it claimed to show what you would hear and
+// showed the opposite. `chances` and `gains` are read beside the notes, both
+// indexed by hit count with the wrap the audio thread uses.
+//
+// **A rest is still drawn, because a rest still sounds.** The grammar parses
+// `r`, the Rust `Note` struct carries only `time`, and serde drops the flag --
+// the same fate as `sounds`. Drawing it as a gap would make the preview
+// disagree with the sound, which is the very thing above. See *Known issues*.
 
 export type ParsedRhythm = {
   notes: { time: number }[];
@@ -22,12 +30,26 @@ export type ParsedRhythm = {
 };
 
 const HEIGHT = 13;
+const DOT = 5;
+
+/// Both lists are indexed by *hit count* and wrap, never by position in the
+/// bar -- so a list that does not divide the rhythm drifts against it, which
+/// is deliberate and is what the audio thread does with `rem_euclid`. Empty
+/// means no modulation at all.
+const at = (list: number[] | undefined, i: number) =>
+  list && list.length ? list[i % list.length] : 1;
 
 export const RhythmStrip = ({
   rhythm,
+  chances,
+  gains,
   stale,
 }: {
   rhythm?: ParsedRhythm;
+  /** Per-hit probabilities. A 0 does not sound, so it is not drawn. */
+  chances?: number[];
+  /** Per-hit volumes, drawn as the size of the dot. */
+  gains?: number[];
   /** The text no longer parses, so this is the last rhythm that did. */
   stale?: boolean;
 }) => {
@@ -66,9 +88,22 @@ export const RhythmStrip = ({
       />
       {usable &&
         rhythm!.notes.map((note, i) => {
-          const at = ((note.time - rhythm!.start) / span) * 100;
-          if (!Number.isFinite(at)) return null;
-          const w = dense ? 2 : 5;
+          const where = ((note.time - rhythm!.start) / span) * 100;
+          if (!Number.isFinite(where)) return null;
+          const chance = at(chances, i);
+          const gain = at(gains, i);
+          // Neither sounds, so neither is drawn. A gain of 0 still costs the
+          // audio thread a silent sample where a chance of 0 costs nothing,
+          // but from here they are the same thing: you hear nothing.
+          if (!(chance > 0) || !(gain > 0)) return null;
+          // A hit that only sometimes sounds is drawn fainter, floored so that
+          // a one-in-ten hit is still visible rather than effectively absent.
+          const opacity = Math.max(0.3, Math.min(1, chance));
+          // Loudness as size, over a deliberately narrow range: this says
+          // "these two are not the same" without pretending to be a meter.
+          const w = dense
+            ? 2
+            : Math.round(DOT * Math.max(0.6, Math.min(1.3, Math.sqrt(gain))));
           return (
             <div
               key={i}
@@ -77,12 +112,13 @@ export const RhythmStrip = ({
                 // The first and last dots would otherwise hang half outside
                 // the box; the strip is inset instead of the dots being
                 // clamped, so the spacing between them stays true.
-                left: `calc(${Math.max(0, Math.min(100, at))}% - ${w / 2}px)`,
+                left: `calc(${Math.max(0, Math.min(100, where))}% - ${w / 2}px)`,
                 top: `${(HEIGHT - w) / 2}px`,
                 width: `${w}px`,
                 height: `${w}px`,
                 borderRadius: dense ? "1px" : "50%",
                 backgroundColor: ui.accent,
+                opacity,
               }}
             />
           );
@@ -98,6 +134,8 @@ export const RhythmStrip = ({
 export const RhythmField = ({
   inputProps,
   rhythm,
+  chances,
+  gains,
   invalid,
   readOnly,
   style,
@@ -105,6 +143,8 @@ export const RhythmField = ({
   /** Everything to spread on the input: the focused value, onChange, help. */
   inputProps: React.InputHTMLAttributes<HTMLInputElement>;
   rhythm?: ParsedRhythm;
+  chances?: number[];
+  gains?: number[];
   invalid?: boolean;
   /** A rhythm a grid owns: shown, not editable. */
   readOnly?: boolean;
@@ -138,6 +178,11 @@ export const RhythmField = ({
         ...inputProps.style,
       }}
     />
-    <RhythmStrip rhythm={rhythm} stale={invalid} />
+    <RhythmStrip
+      rhythm={rhythm}
+      chances={chances}
+      gains={gains}
+      stale={invalid}
+    />
   </div>
 );
