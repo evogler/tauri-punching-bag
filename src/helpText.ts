@@ -169,15 +169,10 @@ export const HELP: Record<string, HelpEntry> = {
   "topbar.level": {
     title: "Input level",
     body:
-      "The loudest thing any input has heard in the last moment. If this " +
-      "never moves, nothing is arriving -- check the microphone in Setup.",
-  },
-  "topbar.latency": {
-    title: "Latency",
-    body:
-      "`bufferCompensation` in milliseconds at this device's rate: how far " +
-      "behind the sound the picture is drawn, so what you played appears " +
-      "where you played it. Measure it in Setup.",
+      "The loudest thing any input has heard in the last moment, as a bar " +
+      "and in decibels. It reads `silent` when nothing has arrived for a few " +
+      "seconds, so a quiet room and a microphone that is not working do not " +
+      "look the same. Check the input in Setup.",
   },
   "drums.on": { title: "On", body: "Mutes or unmutes this one part." },
   "drums.sound": {

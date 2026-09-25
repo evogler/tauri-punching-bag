@@ -2293,7 +2293,6 @@ const App = () => {
           set={set}
           params={params}
           resetBeat={resetBeat}
-          sampleRate={sampleRate}
           statusRef={statusRef}
           meterPaused={setupOpen}
           clearHelp={clearHelp}

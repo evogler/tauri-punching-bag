@@ -310,6 +310,19 @@ Rules that will bite you:
     Clicking a pane hides the panel; while the transport lived in
     `PanelHeader` that meant asking for more picture also took away the
     ability to stop.
+  - **An empty meter and a broken meter look identical**, which is why the
+    level is a figure in dB beside the bar and not only a bar. A trough that
+    has not moved says nothing about whether anything is arriving; a readout
+    that says `silent` after three seconds under -54 dB, `-22 dB` when you
+    clap, and `no input` in red when the command itself fails, says which of
+    those it is. Reported as a bug -- "I don't think the input meter does
+    anything" -- against a meter that was in fact working. *Failing loudly*
+    applied to a thing that was not failing at all.
+  - **There is no latency readout**, though the mockups draw one. It could
+    only ever print `bufferCompensation` back, which is a number you set in
+    Setup and which never moves on its own -- a live-looking figure that is
+    not live is worse than not showing it. Removed on the owner's own
+    objection.
   - **The beat readout and the level meter are written straight into the DOM**,
     the rule `showFrameTime` already follows: the beat moves a hundred times a
     second and the level fifteen, and a readout re-rendering `App` at either
