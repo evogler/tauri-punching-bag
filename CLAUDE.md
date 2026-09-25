@@ -2486,6 +2486,43 @@ takes which, 1-based, in the same `parseNumberList` syntax as `beatsPerRow`.
   upper pattern is the equivalent, and turning `splitChannels` off ignores it
   entirely.
 
+#### Grid chips
+
+Each grid's offset, written at the top of the pane against its own first line
+and in its own colour -- `+0`, `+.125`. `chipLabel` in `config.ts`,
+`drawGridChips` in `App.tsx`.
+
+- **This is what makes an odd grid describable rather than approximated.** A
+  pane ruled at `bar/n` and another ruled at `bar/n` shifted half a pulse are
+  indistinguishable at the top of the screen, and the whole argument for
+  keeping the text notation is that the app says exactly where a line is
+  instead of rounding it to a subdivision somebody would recognise.
+- **It replaces the mockups' colour legend rather than joining it.** That
+  legend named the same two lines by judgement -- "on the note", "furthest
+  off" -- which frames distance from the grid as error and is the one thing
+  the app is not for. A chip stating the offset is both neutral and strictly
+  more informative, so the legend was dropped instead of reworded.
+- **Only when it says something.** One grid at no offset is the default pane,
+  and a chip reading `+0` over it is the `Resolved` rule again: a label that
+  repeats what is already obvious is noise. So chips appear when there is more
+  than one grid, or when the only grid is shifted.
+- **Four decimals, not the twelve significant figures other readouts use.**
+  `+.333333333333` is a chip wider than the pane. But a small offset must
+  never round to `+0` -- a label stating the opposite of the truth is worse
+  than a long one -- so anything that would gets two significant figures
+  instead.
+- **A chip that would overlap one already drawn is dropped, not nudged.** Two
+  grids whose first lines coincide is a true thing about the pane, and
+  stacking labels to hide it would be the worse picture. The pane's name seeds
+  the same list, because a grid at no offset puts its first line exactly where
+  the name is.
+- **It labels the grid's first line, skipping margins.** A line in a margin is
+  a duplicate of one that appears somewhere else, so it is the wrong copy to
+  name.
+- Painted on the visible canvas after the layer blit, like the pane name and
+  for the same two reasons: the sweep eats the layer a column at a time, and
+  anything composited onto it repeatedly climbs to full opacity.
+
 ### Grid and click offsets
 
 Both are the *musical* half of the drum pair -- a `shift` in beats, positive

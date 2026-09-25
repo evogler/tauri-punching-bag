@@ -16,6 +16,7 @@ import {
   ConfigKey,
   gridAlpha,
   gridShift,
+  chipLabel,
   ChannelStyle,
   channelStyle,
   channelGain,
@@ -116,6 +117,12 @@ const PANE_NAME_INSET = 6;
 // Drawn well below full opacity so it reads as a label on the surface rather
 // than as something the app measured.
 const PANE_NAME_ALPHA = 0.5;
+
+// A grid's own label, at the top of the pane against its first line. In CSS
+// pixels like the pane name and for the same reason.
+const GRID_CHIP_SIZE = 10;
+const GRID_CHIP_PAD = 4;
+
 
 // Black or white, whichever reads against the background, rather than a config
 // key of its own: a label has one job, and a second colour picker for it is a
@@ -1623,6 +1630,86 @@ const App = () => {
     ctx.restore();
   };
 
+  // Each grid's offset, written at the top of the pane against its own first
+  // line and in its own colour.
+  //
+  // **This is what makes an odd grid describable rather than approximated.**
+  // A pane ruled at `bar/n` and another at `bar/n` shifted half a pulse look
+  // identical at the top of the screen, and the whole argument for keeping the
+  // text notation is that the app should say exactly where a line is instead
+  // of rounding it to a subdivision somebody would recognise. It also replaces
+  // the mockups' colour legend, which named the same two lines by judgement
+  // ("on the note", "furthest off") rather than by offset.
+  //
+  // **Only when it says something.** One grid at no offset is the default
+  // pane, and a chip reading `+0` over it is the `Resolved` rule again: a
+  // label that only repeats what is already obvious is noise.
+  //
+  // Painted on the visible canvas after the layer blit, like the pane name,
+  // and for the same two reasons -- the sweep eats the layer a column at a
+  // time, and anything composited onto it repeatedly climbs to full opacity.
+  const drawGridChips = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
+    const grids = v.cfg.grids;
+    if (!grids.length) return;
+    const only = grids.length === 1;
+    if (only && !gridShift(grids[0])) return;
+
+    const scale = v.scale;
+    const size = GRID_CHIP_SIZE * scale;
+    const pad = GRID_CHIP_PAD * scale;
+    const inset = PANE_NAME_INSET * scale;
+    ctx.save();
+    ctx.font = `${size}px ui-monospace, Menlo, monospace`;
+    ctx.textBaseline = "top";
+
+    // What is already spoken for along the top edge. Seeded with the pane's
+    // name, which shares this strip: a grid at no offset puts its first line
+    // at the very left, which is exactly where the name is.
+    const taken: [number, number][] = [];
+    const name = v.cfg.name?.trim();
+    if (name) {
+      ctx.font = `${PANE_NAME_SIZE * scale}px system-ui, -apple-system, sans-serif`;
+      taken.push([0, inset + ctx.measureText(name).width + pad]);
+      ctx.font = `${size}px ui-monospace, Menlo, monospace`;
+    }
+
+    for (const grid of grids) {
+      const { notes, end } = grid.subdivisions.val;
+      if (!(end > 0) || !notes.length) continue;
+      const shift = (((gridShift(grid) % end) + end) % end) || 0;
+      // The chip belongs to the grid's *first* line, which is the one whose
+      // offset it is naming. Anything in a margin is a duplicate of a line
+      // that appears somewhere else, so it is the wrong one to label.
+      const first = getCanvasPositions(v.layout, notes[0].time + shift).find(
+        (pos) => !pos.isMargin && pos.rowInColumn === 0
+      );
+      if (!first) continue;
+
+      const label = chipLabel(gridShift(grid));
+      const w = ctx.measureText(label).width + pad * 2;
+      let left = Math.round(first.x - w / 2);
+      left = Math.max(0, Math.min(v.width - w, left));
+      const right = left + w;
+      // A chip that would sit on top of one already drawn is dropped rather
+      // than nudged: two grids whose first lines coincide is a true thing
+      // about the pane, and stacking labels to hide it would be a worse
+      // picture than one label.
+      if (taken.some(([l, r]) => left < r && right > l)) continue;
+      taken.push([left, right]);
+
+      drawOps.current++;
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = background;
+      ctx.fillRect(left, inset, w, size + pad);
+      ctx.strokeStyle = grid.color;
+      ctx.lineWidth = Math.max(1, Math.round(scale));
+      ctx.strokeRect(left + 0.5, inset + 0.5, w - 1, size + pad - 1);
+      ctx.fillStyle = grid.color;
+      ctx.fillText(label, left + pad, inset + pad / 2);
+    }
+    ctx.restore();
+  };
+
   // The default: each column is erased and redrawn as the cursor reaches it, so
   // the newest sample always sits right at the sweep.
   const drawSweep = (ctx: CanvasRenderingContext2D, v: ViewCtx) => {
@@ -1900,6 +1987,7 @@ const App = () => {
     ctx.globalAlpha = 1;
     ctx.drawImage(layer.canvas, 0, 0);
     drawGrids(ctx, v);
+    drawGridChips(ctx, v);
     drawPaneName(ctx, v);
   };
 

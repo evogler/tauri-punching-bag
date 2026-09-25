@@ -418,6 +418,23 @@ export const cycleBeatsOf = (
     0
   );
 
+// A shift as you would type it: `+0`, `+.125`, `-.05`. The leading zero goes
+// because the field it came from does not have one either.
+//
+// Four decimals, not the twelve significant figures the other readouts round
+// to: `+.333333333333` is a chip wider than the pane, and a grid offset a
+// ten-thousandth of a beat from another one is not a thing anybody is reading
+// off the top of a canvas. **But a small offset must not round to `+0`** --
+// that would be a label stating the opposite of the truth, which is worse than
+// a long one -- so anything that would is given two significant figures
+// instead.
+export const chipLabel = (shift: number) => {
+  const rounded = Number(shift.toFixed(4));
+  const n = rounded === 0 && shift !== 0 ? Number(shift.toPrecision(2)) : rounded;
+  const text = String(Math.abs(n)).replace(/^0\./, ".");
+  return `${n < 0 ? "-" : "+"}${text}`;
+};
+
 export const drumShift = (voice: DrumVoice) =>
   typeof voice.shift === "number" ? voice.shift : 0;
 

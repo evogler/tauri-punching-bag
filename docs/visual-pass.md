@@ -4,10 +4,13 @@ Working plan for moving the app toward the design canvas of 2026-09-23.
 `temp-claude-convo/ui-redesign-handoff.md` is the direction and the palette;
 the artboards are in `ui-mockups.zip` beside it.
 
-**Phases 1-5 are built**, plus the drum lanes out of the later list. Phase 6
-is not, and neither are the two halves of phase 5 that need span information
-from the parser: hovering a bracket group to highlight its hits, and the
-suggested fix on a parse error. Two things the mockups draw were built and then removed on the
+**Every phase is built.** What is left is the later list -- collapsed row
+summaries, rail status dots, the parameter usage index, the step grid's
+swing-width columns -- plus the two halves of phase 5 that need span
+information from the parser: hovering a bracket group to highlight its hits,
+and the suggested fix on a parse error. Two things the mockups draw were built
+and then removed on the owner's objection: the top bar's input meter and its
+latency figure. Two things the mockups draw were built and then removed on the
 owner's objection: the top bar's input meter and its latency figure -- see the
 top-bar notes in `CLAUDE.md` for why.
 
