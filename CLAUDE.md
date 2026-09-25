@@ -786,6 +786,31 @@ legacy (it returns a flat array of times rather than `{notes, start, end}`).
   `"0:1"` and `"1/0"` used to parse into notes at NaN, which is `null` over IPC
   and unloadable by serde -- see *Failing loudly*. Same treatment as a repeat
   count below 1, and for the same stated reason.
+- **A rhythm field draws the hits it produces, under the text and inside the
+  same box** (`src/RhythmStrip.tsx`, used by the click rhythm, every drum lane
+  and every visual grid). The text is the notation and the strip is the
+  picture: `8:4` and `[.6,.4]x2` are precise and neither is legible at a
+  glance, so the only way to see what a rhythm did used to be to play it and
+  watch the pane. The rhythm field's version of what `Resolved` does for a
+  number.
+  - **Every note is drawn, rests included, because every note sounds.** The
+    grammar parses `r`, the Rust `Note` carries only `time`, and serde drops
+    unknown fields -- so a rest plays, exactly as `sounds` is discarded.
+    Drawing it as a gap would make the preview disagree with the sound, which
+    is worse than not showing rests at all. See *Known issues*.
+  - **It dims rather than emptying when the text stops parsing.** What is on
+    the strip is still what is playing; it is just no longer what is written
+    above it. Same contract as the red border it sits inside.
+  - **No inline error message, though the mockups draw one.** An expression is
+    invalid for most of the time it takes to type one -- the reason `TabPanel`
+    hides rather than unmounts -- so a message appearing and vanishing per
+    keystroke would make every lane jump in height while you work. The help
+    area is the right home for it if it is ever built: fixed height, and
+    already showing context for whatever is pointed at.
+  - **Past 48 notes the dots become ticks** rather than growing into one slab.
+    A dense rhythm should look dense.
+  - The input gives up its own chrome to the box around it, which inline
+    styles beating `index.css` is the documented way to do.
 - **`parser2.js` is generated and regenerating it is now a one-liner.**
   `yarn build:parser` runs `scripts/build-parser.mjs`, which uses `peggy`
   (a devDependency as of this change) with `format: "bare"` -- that is why the
@@ -3365,6 +3390,13 @@ exactly as before.
   **fixed 2026-09-19.** The kit was decoded before the device was opened, so
   both the samples and the input stream format were at the wrong rate. See
   *Input capture*.
+- **A rest is parsed and then sounds anyway.** `1 r, 1` marks its first note
+  `rest: true`, the Rust `Note` struct carries only `time`, and serde drops
+  unknown fields without complaint -- so the note plays like any other. The
+  same fate as `sounds`, but worse, because `r` looks like it does something.
+  Either honour it in the callback or take it out of the grammar; the rhythm
+  strip draws rests as ordinary notes meanwhile, which is at least honest
+  about what you will hear.
 - **`describe()` in the device picker prints the input channel count in both
   lists**, so a 4-in/4-out interface under *Output* reads "4 ch" meaning its
   inputs. Cosmetic.

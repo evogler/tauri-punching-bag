@@ -10,6 +10,7 @@ import {
 } from "./expression";
 import parser1 from "./parser1";
 import parser2 from "./parser2";
+import { RhythmField } from "./RhythmStrip";
 import { ui } from "./theme";
 
 // While the field has focus it shows exactly what was typed, so half-finished
@@ -267,17 +268,21 @@ const ParserArrayInput = ({
   return (
     <div style={rowStyle}>
       <label>{label}</label>
-      <input
-        {...props}
-        onChange={(e) => {
-          const v = e.target.value;
-          setFocusedVal(v);
-          try {
-            set(_key, { ...val, val: parse(v), inputText: v });
-          } catch (e) {}
+      <RhythmField
+        rhythm={val.val}
+        invalid={invalid}
+        style={{ width: "11em" }}
+        inputProps={{
+          ...props,
+          onChange: (e) => {
+            const v = e.target.value;
+            setFocusedVal(v);
+            try {
+              set(_key, { ...val, val: parse(v), inputText: v });
+            } catch (e) {}
+          },
         }}
-        style={{ width: "8em", ...invalidBorder(invalid) }}
-      ></input>
+      />
     </div>
   );
 };

@@ -5,6 +5,7 @@ import { accepts, invalidBorder, useFocusedValue } from "./Input";
 import { Params, evaluate, resolveRhythmText } from "./expression";
 import parser1 from "./parser1";
 import parser2 from "./parser2";
+import { RhythmField } from "./RhythmStrip";
 import { ui } from "./theme";
 
 const parserFor = (rhythm: Rhythm) =>
@@ -107,24 +108,28 @@ const GridRow = ({
           background: "none",
         }}
       />
-      <input
-        {...props}
-        onChange={(e) => {
-          const v = e.target.value;
-          setFocusedVal(v);
-          try {
-            onChange({
-              ...grid,
-              subdivisions: {
-                ...grid.subdivisions,
-                val: parse(v),
-                inputText: v,
-              },
-            });
-          } catch (e) {}
+      <RhythmField
+        rhythm={grid.subdivisions.val}
+        invalid={invalid}
+        style={{ flex: 1, minWidth: 0 }}
+        inputProps={{
+          ...props,
+          onChange: (e) => {
+            const v = e.target.value;
+            setFocusedVal(v);
+            try {
+              onChange({
+                ...grid,
+                subdivisions: {
+                  ...grid.subdivisions,
+                  val: parse(v),
+                  inputText: v,
+                },
+              });
+            } catch (e) {}
+          },
+          ...help("grids.rhythm"),
         }}
-        {...help("grids.rhythm")}
-        style={{ flex: 1, minWidth: 0, ...invalidBorder(invalid) }}
       />
       <input
         {...shiftProps}
