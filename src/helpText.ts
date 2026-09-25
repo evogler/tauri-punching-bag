@@ -185,6 +185,12 @@ export const HELP: Record<string, HelpEntry> = {
     body: "Starts the sample this many milliseconds early, so a sample whose attack comes a little way in still lands on the beat. Mechanical alignment, independent of tempo.",
   },
   "drums.volume": { title: "Volume", body: "This part's volume, up to double." },
+  "drums.more": {
+    title: "More settings",
+    body:
+      "Accents, chance, shift and offset for this part. The dot means there " +
+      "is something set behind here; hover to see what.",
+  },
   "drums.add": {
     title: "Add sound…",
     body: "Adds a drum part: a sound from the built-in kit, or any audio file. Kit sounds travel with a preset to someone else's machine; a file only does if they have the same file in the same place.",

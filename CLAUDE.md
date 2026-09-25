@@ -2525,6 +2525,32 @@ from the beat before bisecting; `offset` is *mechanical* alignment for the file'
 attack and is added. A shift of a whole cycle length is a no-op, since the rhythm
 repeats.
 
+#### One lane per voice
+
+**A voice is one row -- on, name, rhythm, volume -- and everything else is
+behind a chevron.** It had grown to seven controls sharing a 600px panel, four
+of them `flex: 1` over whatever was left after the name and the slider, so
+each got about 50px. Monospace made that acute rather than causing it: a
+fixed advance costs roughly a fifth of the characters a proportional face
+fits, which is the difference between reading `[0.6,0.4]` and reading `[0.`.
+
+- **Folding a field away must not hide that it holds something.** A voice with
+  a chance list and one without would otherwise read identically while
+  sounding completely differently, which is the whole hazard of a disclosure.
+  The chevron carries a dot when there is anything behind it and names it in
+  the tooltip -- a mark as well as a colour, so it does not rest on hue. `1`
+  is the unset gains text and does not count as something set.
+- **Hidden, not unmounted**, exactly as `TabPanel` is and for the same reason:
+  these fields hold half-typed text, an expression is invalid for most of the
+  time it takes to type one, and folding a lane shut must not be a way to lose
+  what you were in the middle of writing.
+- **The hidden fields gained labels**, which the columns had been standing in
+  for. A column header four controls away from its field was the weakest part
+  of the old row even when it fitted.
+- Remove stays on the lane rather than moving inside. It is the one control
+  whose *absence* would be surprising, and hiding a delete does not make it
+  safer, only harder to find.
+
 `gains` is a list of per-hit multipliers on top of `volume`, using the same
 `parseNumberList` "1,0.5x3" syntax as `beatsPerRow`. It is indexed by *hit count*
 (`hit.rem_euclid(gains.len())`), not by position in the bar, so a list whose
@@ -3474,8 +3500,10 @@ and several of them have since been confirmed. What is genuinely open is here:
     and whether ⌘⌥P is free, cannot be known without pressing it. macOS does
     not report a combination already owned by somebody else, which is why the
     panel counts presses instead.
-  - **`chances` in the drum row**, which now has six controls and may be
-    cramped, and whether a dropped hit being invisible is a problem.
+  - **Whether a dropped hit being invisible is a problem.** The row being
+    cramped at six controls was the other half of this and is settled -- see
+    *One lane per voice*; it got worse before it got better, because
+    monospace fields cost about a fifth of their characters.
   - **The pane name's corner, size and opacity**, all chosen without seeing
     them.
 
