@@ -508,7 +508,11 @@ keeping the last good value. Deliberately not a scripting language.
   `bar` and never the field being edited.
   - **Shown only when it adds something.** A literal `4` resolves to 4, and
     printing that beside it is noise, so the readout is hidden whenever the
-    text already *is* the value.
+    text already *is* the value -- **compared with the whitespace taken out**,
+    because `formatNumberList` writes `0.25x16` and `RowPerNote` writes
+    `0.25 x 16`, so a plain string compare left every pane the button laid out
+    reading `0.25 x 16 = 0.25x16`. A number typed another way (`96.0`, or `4`
+    as a one-element list) counts as the same number too.
   - **Shown while the field is red, on purpose**, because that is when it
     matters most: the last good value is still what is playing, and the whole
     contract of an invalid field is that it goes on working. Red border, and

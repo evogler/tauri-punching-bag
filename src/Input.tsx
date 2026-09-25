@@ -89,8 +89,22 @@ const tidy = (n: number) => String(Number(n.toPrecision(12)));
 // purpose, because that is when it matters most -- the last good value is
 // still what is playing, and the whole contract of an invalid field is that it
 // keeps working.
+//
+// **"Adds something" is decided with the whitespace taken out**, which a plain
+// string compare got wrong: `formatNumberList` writes `0.25x16` with no spaces
+// while `RowPerNote` writes `0.25 x 16` with them, so a pane laid out by the
+// button read `0.25 x 16 = 0.25x16` -- the readout repeating the field back at
+// it, which is exactly the noise it is supposed to avoid. Reported from the
+// running app.
+const bare = (s: string) => s.replace(/\s+/g, "");
+
 const Resolved = ({ text, value }: { text: string; value: string }) => {
-  if (!value || text.trim() === value) return null;
+  if (!value) return null;
+  // A number typed a different way is still that number: `96.0`, or `4` in a
+  // one-element list. Inert for a list, where `Number` of it is NaN.
+  const literal = Number(text.trim());
+  if (Number.isFinite(literal) && tidy(literal) === value) return null;
+  if (bare(text) === bare(value)) return null;
   // Long lists get an ellipsis and the whole thing in the tooltip: a hundred
   // and twenty-eight numbers would push the field off its own row.
   const short = value.length > 20 ? `${value.slice(0, 19)}…` : value;
