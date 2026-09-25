@@ -323,10 +323,29 @@ Rules that will bite you:
     Setup, never moving on its own -- so it read as live among readouts that
     are.
   - **The beat readout is written straight into the DOM**, the rule
-    `showFrameTime` already follows: it moves a hundred times a second, and a
-    readout re-rendering `App` at that rate would cost more than what it
-    reports. Flushed about four times a second, because a number changing
-    every frame is not a readout.
+    `showFrameTime` already follows: a readout re-rendering `App` at frame
+    rate would cost more than what it reports.
+  - **Written every frame**, unlike the frame stats it sits next to. It was
+    flushed with them at four times a second at first, on their argument that
+    a number changing every frame is a blur -- and that argument does not
+    carry across. The frame stats are *noisy*: a draw time bouncing between
+    0.4 and 30 ms says nothing at sixty samples a second. A beat is monotonic,
+    so it reads like a tape counter. What 250 ms actually bought was a readout
+    up to a quarter of a second behind the picture beside it. Asked for by the
+    owner.
+  - **It cannot be smoother than the audio callback, and does not need to be.**
+    The stamp only moves when a batch arrives and the callback hands over 2048
+    frames at a time -- ~46 ms at 44.1 kHz, so about 21 distinct values a
+    second whatever the frame rate. At 96 bpm that is a step of 0.07 of a
+    beat: the hundredths jump and the tenths advance smoothly, which is the
+    digit being read. Drawing every frame buys freshness, not smoothness, and
+    interpolating between batches was rejected -- it would be predicting a
+    number the app already knows exactly, and snapping back whenever the
+    prediction ran ahead.
+  - **The cycle is walked once per render, not per frame.** `cycleSteps`
+    allocates, and the steps only change when the sections or the order do --
+    which is a render by definition. The frame indexes and formats, and skips
+    the DOM write when the string has not changed.
   - **It reads the cycle through `cycleSteps`**, which already existed and
     already said it was the one place the order is read -- so the readout and
     the section list cannot disagree about what is going to play. `stepAt` is

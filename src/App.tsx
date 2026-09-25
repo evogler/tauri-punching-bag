@@ -1936,18 +1936,41 @@ const App = () => {
   const drawAllRef = useRef(drawAll);
   drawAllRef.current = drawAll;
 
-  // Where the cycle has got to, as one line. Through a ref for the same reason
-  // `drawAll` is: this closure is new on every render, and the loop that calls
-  // it is registered once. Flushed with the frame stats a few times a second,
-  // because a beat changing a hundred times a second is not a readout, it is a
-  // blur.
+  // Where the cycle has got to, as one line, **written every frame**. Through
+  // a ref for the same reason `drawAll` is: this closure is new on every
+  // render, and the loop that calls it is registered once.
+  //
+  // It was flushed with the frame stats four times a second at first, on the
+  // frame-time readout's argument that a number changing every frame is a
+  // blur. That argument does not carry: the frame stats are *noisy* -- a draw
+  // time bouncing between 0.4 and 30 ms says nothing at sixty samples a second
+  // -- and a beat is monotonic, so it reads like a tape counter instead. What
+  // 250 ms actually bought was a readout up to a quarter of a second behind
+  // the picture beside it.
+  //
+  // **The cycle is walked per render, not per frame.** `cycleSteps` allocates,
+  // and the steps only change when the sections or the order do -- which is a
+  // render, by definition. All the frame does is index and format.
   const statusRef = useRef<HTMLSpanElement>(null);
+  const cyclePlan = useRef<{ steps: ReturnType<typeof cycleSteps> }>({ steps: [] });
+  cyclePlan.current = {
+    steps: get("sectionsOn")
+      ? cycleSteps(get("sections"), get("sectionOrder"))
+      : [],
+  };
   const statusTextRef = useRef<() => string>(() => "");
   statusTextRef.current = () => {
     const beat = latestBeat.current;
+    // **It cannot be smoother than the audio callback, and does not need to
+    // be.** The stamp only moves when a batch of samples arrives, and the
+    // callback hands over 2048 frames at a time -- about 46 ms at 44.1 kHz, so
+    // roughly 21 distinct values a second whatever the frame rate. At 96 bpm
+    // that is a step of 0.07 of a beat: the hundredths jump rather than count,
+    // and the tenths advance smoothly, which is the digit you read. What
+    // drawing every frame buys is freshness, not smoothness -- the readout was
+    // up to a quarter of a second behind the picture beside it.
     const at = `beat ${beat.toFixed(2)}`;
-    if (!get("sectionsOn")) return at;
-    const steps = cycleSteps(get("sections"), get("sectionOrder"));
+    const { steps } = cyclePlan.current;
     if (!steps.length) return at;
     const i = stepAt(steps, beat);
     // The section's own number, 1-based to match the list and the order field.
@@ -1978,11 +2001,26 @@ const App = () => {
     let opsTotal = 0;
     let spanStart = performance.now();
 
+    // What was last written, so an unchanged string costs no DOM work at all.
+    // The beat moves most frames; the section and the step do not.
+    let shownStatus = "";
+
     const render = () => {
       drawOps.current = 0;
       const before = performance.now();
       drawAllRef.current();
       const after = performance.now();
+
+      // Every frame, not on the stats flush: this is the one readout that is
+      // worth being current, since it is read against a picture that is.
+      const status = statusRef.current;
+      if (status) {
+        const text = statusTextRef.current();
+        if (text !== shownStatus) {
+          status.textContent = text;
+          shownStatus = text;
+        }
+      }
 
       const draw = after - before;
       frames++;
@@ -1991,8 +2029,6 @@ const App = () => {
       if (draw > drawMax) drawMax = draw;
 
       if (after - spanStart >= FLUSH_MS) {
-        const status = statusRef.current;
-        if (status) status.textContent = statusTextRef.current();
         const node = frameStatsRef.current;
         if (node) {
           const interval = (after - spanStart) / frames;
