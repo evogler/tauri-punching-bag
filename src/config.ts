@@ -395,6 +395,20 @@ export const cycleSteps = (
   return steps;
 };
 
+/// Which step of the expanded cycle a beat falls in. The beat restarts at
+/// every wrap -- the audio thread does that itself -- so what arrives on the
+/// sample stream is already cycle-relative and needs no reduction here. Reads
+/// `cycleSteps` like everything else, so the readout cannot disagree with the
+/// section list about what is playing.
+export const stepAt = (
+  steps: { section: number; from: number }[],
+  beat: number
+): number => {
+  for (let i = steps.length - 1; i >= 0; i--)
+    if (beat >= steps[i].from) return i;
+  return 0;
+};
+
 export const cycleBeatsOf = (
   sections: Section[],
   order: NumberListExpr | number[] = []

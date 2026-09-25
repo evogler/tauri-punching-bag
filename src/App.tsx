@@ -38,6 +38,8 @@ import {
   numExpr,
   setSampleRateHz,
   ANALYSIS_BINS,
+  cycleSteps,
+  stepAt,
 } from "./config";
 import {
   Rect,
@@ -81,6 +83,8 @@ import { SampleStatus, makeDrumVoice } from "./DrumList";
 import { open as openFileDialog } from "@tauri-apps/api/dialog";
 import { BROWSER_DEBUG_MODE } from "./env";
 import { Panel } from "./panel/Panel";
+import { HelpProvider } from "./help";
+import { TopBar } from "./TopBar";
 import { SetupWizard, shouldOpenSetup } from "./SetupWizard";
 import { PanelTab, tabForDigit, tabStep } from "./panel/chrome";
 import { FileInfo, PanelProps } from "./panel/types";
@@ -762,6 +766,7 @@ const App = () => {
     beats: number[];
     values: number[];
   };
+  const latestBeat = useRef(0);
   const samples = useRef<VisualSamples>({
     cycle: 0,
     channels: 1,
@@ -785,6 +790,9 @@ const App = () => {
       samples.current = batch;
       return;
     }
+    // The newest beat drawn, for the top bar's readout. A ref, because it
+    // moves a hundred times a second and nothing may re-render at that rate.
+    if (batch.beats.length) latestBeat.current = batch.beats[batch.beats.length - 1];
     // Appended one at a time: a spread of a long backlog can blow the stack.
     for (let i = 0; i < batch.beats.length; i++) held.beats.push(batch.beats[i]);
     for (let i = 0; i < batch.values.length; i++)
@@ -1927,6 +1935,25 @@ const App = () => {
   // on every render, since that closure was new each time.
   const drawAllRef = useRef(drawAll);
   drawAllRef.current = drawAll;
+
+  // Where the cycle has got to, as one line. Through a ref for the same reason
+  // `drawAll` is: this closure is new on every render, and the loop that calls
+  // it is registered once. Flushed with the frame stats a few times a second,
+  // because a beat changing a hundred times a second is not a readout, it is a
+  // blur.
+  const statusRef = useRef<HTMLSpanElement>(null);
+  const statusTextRef = useRef<() => string>(() => "");
+  statusTextRef.current = () => {
+    const beat = latestBeat.current;
+    const at = `beat ${beat.toFixed(2)}`;
+    if (!get("sectionsOn")) return at;
+    const steps = cycleSteps(get("sections"), get("sectionOrder"));
+    if (!steps.length) return at;
+    const i = stepAt(steps, beat);
+    // The section's own number, 1-based to match the list and the order field.
+    // Sections have no names, so there is nothing more honest to print.
+    return `section ${steps[i].section + 1} · ${at} · step ${i + 1}/${steps.length}`;
+  };
   // Written to by the render loop with `textContent`, never through React: a
   // readout that caused a render 60 times a second would be measuring itself.
   // It exists only while the toggle is on, and the loop skips the write when
@@ -1964,6 +1991,8 @@ const App = () => {
       if (draw > drawMax) drawMax = draw;
 
       if (after - spanStart >= FLUSH_MS) {
+        const status = statusRef.current;
+        if (status) status.textContent = statusTextRef.current();
         const node = frameStatsRef.current;
         if (node) {
           const interval = (after - spanStart) / frames;
@@ -2094,6 +2123,19 @@ const App = () => {
   // );
   const setGet = { set, get };
 
+  // Which entry the help area is showing is the area's own state; these only
+  // forward to it. Up here rather than in `Panel` because the top bar is
+  // outside the panel and its controls carry entries too.
+  const showHelpRef = useRef<((id: string | null) => void) | null>(null);
+  const showHelp = useCallback((id: string | null) => showHelpRef.current?.(id), []);
+  const clearHelp = useCallback(() => showHelpRef.current?.(null), []);
+  const registerHelp = useCallback(
+    (fn: ((id: string | null) => void) | null) => {
+      showHelpRef.current = fn;
+    },
+    []
+  );
+
   const config = hideConfig ? null : (
     <Panel
       panelTab={panelTab}
@@ -2141,6 +2183,8 @@ const App = () => {
       activeCfg={viewCtxs[activeView]?.cfg}
       openSetup={() => setSetupOpen(true)}
       togglePaused={() => toggleRef.current("paused")}
+      registerHelp={registerHelp}
+      clearHelp={clearHelp}
     />
   );
 
@@ -2235,17 +2279,37 @@ const App = () => {
   );
 
   return (
-    <>
+    <HelpProvider value={showHelp}>
       <div
         style={{
           display: "flex",
-          flexDirection: "row",
+          flexDirection: "column",
           height: "100%",
           overflow: "hidden",
         }}
       >
-        {config}
-        {waveform}
+        <TopBar
+          get={get as unknown as PanelProps["get"]}
+          set={set}
+          params={params}
+          resetBeat={resetBeat}
+          sampleRate={sampleRate}
+          statusRef={statusRef}
+          meterPaused={setupOpen}
+          clearHelp={clearHelp}
+        />
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "row",
+            flex: 1,
+            minHeight: 0,
+            overflow: "hidden",
+          }}
+        >
+          {config}
+          {waveform}
+        </div>
         {setupOpen && (
           <SetupWizard
             devices={audioDevices}
@@ -2264,7 +2328,7 @@ const App = () => {
 
         {/* <SlidingDivision panel={config} rest={waveform} /> */}
       </div>
-    </>
+    </HelpProvider>
   );
 };
 

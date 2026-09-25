@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState } from "react";
-import { HelpArea, HelpProvider } from "../help";
+import { useState } from "react";
+import { HelpArea } from "../help";
 import { AnalysisTab } from "./AnalysisTab";
 import { ExampleHint, useExampleHint } from "../ExampleBar";
 import { ExamplesTab } from "./ExamplesTab";
@@ -31,7 +31,15 @@ const readHelpVisible = () => {
 // the help area along the bottom stay put. Which section is open is held by App
 // rather than here, so it survives the panel being hidden.
 export const Panel = (
-  p: PanelProps & { panelTab: PanelTab; setPanelTab: (tab: PanelTab) => void }
+  p: PanelProps & {
+    panelTab: PanelTab;
+    setPanelTab: (tab: PanelTab) => void;
+    // The help area is still the panel's, but *who is pointing at what* is
+    // App's now: the top bar sits outside this component and its controls
+    // have entries too.
+    registerHelp: (show: ((id: string | null) => void) | null) => void;
+    clearHelp: () => void;
+  }
 ) => {
   const [helpVisible, setHelpVisible] = useState(readHelpVisible);
   const toggleHelp = () => {
@@ -49,19 +57,11 @@ export const Panel = (
   // `useExampleHint`.
   const hint = useExampleHint(p.getCurrentPreset);
 
-  const showRef = useRef<((id: string | null) => void) | null>(null);
-  const show = useCallback((id: string | null) => showRef.current?.(id), []);
-  const register = useCallback(
-    (fn: ((id: string | null) => void) | null) => {
-      showRef.current = fn;
-    },
-    []
-  );
 
   return (
-    <HelpProvider value={show}>
+    <>
       <div
-        onMouseLeave={() => show(null)}
+        onMouseLeave={p.clearHelp}
         style={{
           display: "flex",
           flexDirection: "column",
@@ -131,8 +131,8 @@ export const Panel = (
             </TabPanel>
           </div>
         </div>
-        {helpVisible && <HelpArea register={register} />}
+        {helpVisible && <HelpArea register={p.registerHelp} />}
       </div>
-    </HelpProvider>
+    </>
   );
 };

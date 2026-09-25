@@ -159,6 +159,26 @@ export const HELP: Record<string, HelpEntry> = {
     title: "Drums",
     body: "Turns every drum part on or off together. Each part below also has its own switch.",
   },
+  "topbar.status": {
+    title: "Where you are",
+    body:
+      "The beat the picture is drawing, counted from the start of the cycle. " +
+      "With the practice cycle on it also says which section is sounding and " +
+      "which step of the written order you are on.",
+  },
+  "topbar.level": {
+    title: "Input level",
+    body:
+      "The loudest thing any input has heard in the last moment. If this " +
+      "never moves, nothing is arriving -- check the microphone in Setup.",
+  },
+  "topbar.latency": {
+    title: "Latency",
+    body:
+      "`bufferCompensation` in milliseconds at this device's rate: how far " +
+      "behind the sound the picture is drawn, so what you played appears " +
+      "where you played it. Measure it in Setup.",
+  },
   "drums.on": { title: "On", body: "Mutes or unmutes this one part." },
   "drums.sound": {
     title: "Sound",

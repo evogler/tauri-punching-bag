@@ -75,6 +75,10 @@ const rowStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "row",
   gap: "4px",
+  // Centred rather than stretched, so a label sits against the middle of its
+  // own field instead of the top of it. Invisible in a dense list and very
+  // visible in the top bar, which is 42px tall and holds one of these.
+  alignItems: "center",
 };
 
 const NumberArrayInput = ({ label, _key, get, set }: II<number[]>) => {

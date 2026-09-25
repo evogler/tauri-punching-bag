@@ -4,8 +4,8 @@ Working plan for moving the app toward the design canvas of 2026-09-23.
 `temp-claude-convo/ui-redesign-handoff.md` is the direction and the palette;
 the artboards are in `ui-mockups.zip` beside it.
 
-**Phases 1 and 2 are built** -- the token layer and the palette, plus the
-strictly visual parts of the chrome. Everything from phase 3 on is not.
+**Phases 1, 2 and 3 are built**, plus the drum lanes out of the later list.
+Phases 4-6 are not.
 
 The handoff's own rule holds: where the mockups disagree with the code or with
 `CLAUDE.md`, the code wins and the conflict gets written down rather than

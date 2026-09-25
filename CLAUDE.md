@@ -156,10 +156,10 @@ Rules that will bite you:
 
 - **The panel is ten sections, listed down a rail on its left-hand edge** --
   examples, presets, parameters, play, file, loop, display, layout, analysis,
-  setup. **Only the transport, the tempo and the looper switch stay outside
-  it**: those are reached for mid-phrase, and tempo belongs to no one section.
-  `docs/approachability.md` has the exact arrangement and why each control sits
-  where it does.
+  setup. **The transport, the tempo and the looper switch are outside it
+  altogether, in the window's top bar**: those are reached for mid-phrase, and
+  tempo belongs to no one section. `docs/approachability.md` has the exact
+  arrangement and why each control sits where it does.
   - **Examples, presets and parameters were pinned above the tabs** and became
     sections on the owner's call. Three boxes standing open over every tab --
     two of them collapsed to a heading and so saying nothing at all -- was
@@ -300,8 +300,36 @@ Rules that will bite you:
     one spread over it silently breaks editing. `useHelp()` returns the capture
     form for exactly this reason.
   - **Which entry is showing lives inside `HelpArea`**, reached through a
-    stable function `Panel` provides, so pointing at things never re-renders
-    the tabs.
+    stable function, so pointing at things never re-renders the tabs. **`App`
+    provides it, not `Panel`** -- the top bar is outside the panel and its
+    controls carry entries too, so the provider has to sit above both. The
+    area itself is still the panel's, and goes when the panel does.
+- **The top bar** (`src/TopBar.tsx`) is the transport, the tempo, the looper,
+  where the cycle has got to, the input level and the latency.
+  - **Above the panel *and* the canvas, which is the whole reason it exists.**
+    Clicking a pane hides the panel; while the transport lived in
+    `PanelHeader` that meant asking for more picture also took away the
+    ability to stop.
+  - **The beat readout and the level meter are written straight into the DOM**,
+    the rule `showFrameTime` already follows: the beat moves a hundred times a
+    second and the level fifteen, and a readout re-rendering `App` at either
+    rate would cost more than what it reports. Both are flushed about four
+    times a second, because a number changing every frame is not a readout.
+  - **It reads the cycle through `cycleSteps`**, which already existed and
+    already said it was the one place the order is read -- so the readout and
+    the section list cannot disagree about what is going to play. `stepAt` is
+    the only new arithmetic, and the beat needs no reduction because the audio
+    thread restarts it at every wrap.
+  - **A section is named by its number**, because a `Section` has no name. The
+    honest thing to print, rather than inventing one.
+  - **The tempo keeps its expression field and gains no stepper.** A `+`/`-`
+    has to know what to add, and the field may hold `t` or `bar*20`; there is
+    no honest answer for incrementing one of those, and rounding to a number
+    would throw away the parameter the tempo was written against.
+  - **The meter stops polling while the setup wizard is up.**
+    `get_input_levels` reports the peak *since the last call*, so two pollers
+    split the peaks between them and both read low -- and during setup the
+    wizard's microphone check is the one that matters.
   - **Tooltips (`title=`) were replaced by help** wherever they explained
     something. The ones left name a value or a glyph ("Volume 70%", "Remove
     kick", the ✕ and ⠿ buttons) and the ? toggle, which has to explain itself
