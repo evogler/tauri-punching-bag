@@ -10,6 +10,8 @@
    [2:1, 1]:1     a group; entries share the span given after the "]"
    [k 1, h 1]:1   sounds: a letter (h k r s) then a weight
    [h 1>-.1]:1    ">" nudges that note's time -- lands at 0.9, not 0
+   1 r, 1         a trailing "r" is a rest: it takes its beat and is silent
+                  (the *leading* r in "r 1" is the ride, a different thing)
    [k 1, h 1]x4   repeat the group four times
    [k 1, h 1]x4:1 repeat, then squish the whole run into one beat
 
@@ -249,14 +251,35 @@ function peg$parse(input, options) {
         if (!(endTime > 0) || !isFinite(endTime)) {
         	error("a rhythm needs a length above zero");
         }
-        for (let i = 0; i < notes.length; i++) {
-        	notes[i].time = (notes[i].time % endTime + endTime) % endTime;
-            if (!isFinite(notes[i].time)) {
+        // A rest takes its time and then is not there. Removed *here*, after
+        // the span has been accumulated over every note, so `1 r, 1` is a
+        // two-beat cycle with one hit in it rather than a one-beat cycle.
+        //
+        // Removed in the grammar rather than at each call site because there
+        // are five of those and everything downstream then gets it for free:
+        // nothing is sent to Rust (whose `Note` carries only `time`, so serde
+        // dropped the flag and the rest *sounded*), no grid line is drawn at
+        // a rest, and no dot appears on the rhythm strip. The suffix `r` is
+        // not the prefix `r`, which is the ride.
+        const sounded = notes.filter((n) => !n.rest);
+        // Every note a rest is a rhythm with no notes, and `beat_bisect`
+        // answers a list shorter than two with its default one-beat cycle --
+        // so silence would come back as a hit on every beat, which is the
+        // loudest possible way to be wrong. Refused here, like a zero-length
+        // span and a repeat count below one: red field, last good value kept.
+        // Turning the voice off is what silence is for.
+        if (!sounded.length) {
+        	error("a rhythm needs at least one note that is not a rest");
+        }
+        for (let i = 0; i < sounded.length; i++) {
+        	sounded[i].time = (sounded[i].time % endTime + endTime) % endTime;
+            if (!isFinite(sounded[i].time)) {
             	error("a note landed at no time in particular");
             }
+            delete sounded[i].rest;
         }
-        notes.sort((a, b) => a.time - b.time);
-    return { notes, start: 0, end: endTime };
+        sounded.sort((a, b) => a.time - b.time);
+    return { notes: sounded, start: 0, end: endTime };
   }
   function peg$f1(head, tail) {    return [head, ...tail]  }
   function peg$f2(head, tail) {    return [...head, ...tail]  }

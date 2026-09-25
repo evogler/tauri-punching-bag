@@ -785,6 +785,7 @@ legacy (it returns a flat array of times rather than `{notes, start, end}`).
 | `[2:1, 1]:1` | a group; entries share the span given after the `]` |
 | `[k 1, h 1]:1` | sounds: a letter (`h` `k` `r` `s`) then a weight |
 | `[h 1>-.1]:1` | `>` nudges that note's time -- lands at 0.9, not 0 |
+| `1 r, 1` | a **trailing** `r` is a rest: it takes its beat and is silent |
 | `[[k 1>-.1, h 1, s 1]:1, 3:1, 1]:1` | groups nest |
 | `[k 1, h 1]x4` | repeat the group four times |
 | `[k 1, h 1]x4:1` | repeat, *then* squish the whole run into one beat |
@@ -801,6 +802,24 @@ legacy (it returns a flat array of times rather than `{notes, start, end}`).
   nothing downstream is written to survive, and this grammar could not produce
   one before; erroring leaves the field red with its last good value, like any
   other syntax error.
+- **A trailing `r` is a rest, and the grammar removes it.** It takes its beat
+  -- the span is accumulated over every note, so `1 r, 1` is a two-beat cycle
+  with one hit in it -- and then is not there.
+  - **It used to sound.** The flag reached `Result` and went out on the wire,
+    where the Rust `Note` carries only `time` and serde drops unknown fields
+    without complaint, so the note played like any other. The same fate as
+    `sounds`, but worse, because `r` looks like it does something.
+  - **Removed in the grammar rather than at each call site**, of which there
+    are five. Everything downstream gets it for free: nothing is sent to Rust,
+    no grid line is drawn at a rest, and no dot appears on the rhythm strip.
+  - **The suffix `r` is not the prefix `r`.** `r 1` is the ride; `1 r` is a
+    rest. Two letters doing unrelated jobs in one grammar, which is worth
+    knowing before reading either rule.
+  - **A rhythm of nothing but rests is refused.** `beat_bisect` answers a list
+    shorter than two with its default one-beat cycle, so silence would come
+    back as a hit on *every* beat -- the loudest possible way to be wrong.
+    Refused like a zero-length span and a repeat count below one: red field,
+    last good value kept. Turning the voice off is what silence is for.
 - **A zero-length rhythm is a syntax error**, not a value. `"0"`, `"4:0"`,
   `"0:1"` and `"1/0"` used to parse into notes at NaN, which is `null` over IPC
   and unloadable by serde -- see *Failing loudly*. Same treatment as a repeat
@@ -824,11 +843,9 @@ legacy (it returns a flat array of times rather than `{notes, start, end}`).
     one-in-ten hit is visible rather than effectively absent, and **a gain is
     drawn as the size of the dot**, over a deliberately narrow range: enough
     to say two hits differ, not enough to pretend to be a meter.
-  - **A rest is still drawn, because a rest still sounds.** The grammar parses
-    `r`, the Rust `Note` carries only `time`, and serde drops unknown fields
-    -- so a rest plays, exactly as `sounds` is discarded. Drawing it as a gap
-    would make the preview disagree with the sound, which is the very failure
-    above. See *Known issues*.
+  - **Rests need no handling here**, since the grammar takes them out itself.
+    They used to arrive as notes with a flag on them and had to be drawn,
+    because the flag was dropped on the way to Rust and the rest sounded.
   - **It dims rather than emptying when the text stops parsing.** What is on
     the strip is still what is playing; it is just no longer what is written
     above it. Same contract as the red border it sits inside.
@@ -3421,13 +3438,9 @@ exactly as before.
   **fixed 2026-09-19.** The kit was decoded before the device was opened, so
   both the samples and the input stream format were at the wrong rate. See
   *Input capture*.
-- **A rest is parsed and then sounds anyway.** `1 r, 1` marks its first note
-  `rest: true`, the Rust `Note` struct carries only `time`, and serde drops
-  unknown fields without complaint -- so the note plays like any other. The
-  same fate as `sounds`, but worse, because `r` looks like it does something.
-  Either honour it in the callback or take it out of the grammar; the rhythm
-  strip draws rests as ordinary notes meanwhile, which is at least honest
-  about what you will hear.
+- ~~**A rest is parsed and then sounds anyway.**~~ -- **fixed 2026-09-24.**
+  The grammar drops rests itself now, after accumulating the span. See
+  *Rhythm syntax*.
 - **`describe()` in the device picker prints the input channel count in both
   lists**, so a 4-in/4-out interface under *Output* reads "4 ch" meaning its
   inputs. Cosmetic.

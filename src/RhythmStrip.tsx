@@ -18,10 +18,10 @@ import { ui } from "./theme";
 // showed the opposite. `chances` and `gains` are read beside the notes, both
 // indexed by hit count with the wrap the audio thread uses.
 //
-// **A rest is still drawn, because a rest still sounds.** The grammar parses
-// `r`, the Rust `Note` struct carries only `time`, and serde drops the flag --
-// the same fate as `sounds`. Drawing it as a gap would make the preview
-// disagree with the sound, which is the very thing above. See *Known issues*.
+// **Rests need no handling here.** A trailing `r` used to reach this as a note
+// with a flag on it, and it had to be drawn, because the flag was dropped on
+// the way to Rust and the rest sounded. The grammar takes rests out itself
+// now, so what arrives is what plays.
 
 export type ParsedRhythm = {
   notes: { time: number }[];

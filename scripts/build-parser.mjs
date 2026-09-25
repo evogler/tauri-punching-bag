@@ -22,6 +22,8 @@ const HEADER = `/*
    [2:1, 1]:1     a group; entries share the span given after the "]"
    [k 1, h 1]:1   sounds: a letter (h k r s) then a weight
    [h 1>-.1]:1    ">" nudges that note's time -- lands at 0.9, not 0
+   1 r, 1         a trailing "r" is a rest: it takes its beat and is silent
+                  (the *leading* r in "r 1" is the ride, a different thing)
    [k 1, h 1]x4   repeat the group four times
    [k 1, h 1]x4:1 repeat, then squish the whole run into one beat
 
