@@ -380,6 +380,30 @@ Rules that will bite you:
 - **Which tab is open is plain React state, not a config key** -- transient UI,
   kept out of presets and the session on purpose.
 - `Divider` is the labelled hairline that groups settings inside one Section.
+- **`Group` is the same hairline, folding, with a line of what is inside it
+  while it is shut.** Used for the display tab's *Drawing* and *Overlays*,
+  which is where the panel is densest and where most of what is inside is left
+  alone most of the time.
+  - **A collapsed group that says nothing is the thing it exists to avoid.**
+    Examples, presets and parameters were pinned above the tabs with two of
+    them collapsed to a heading and so saying nothing at all -- the argument
+    that put them in the rail. Folding only pays if the shut state still
+    answers the question you would have opened it for, so `summary` is
+    optional in the type and not in practice.
+  - **The summary says the values, not the names of the settings.**
+    `size 3 · redraw live · split` is worth reading; "waveform size, redraw,
+    split channels" is the row you already folded.
+  - **An empty group says `none`**, because a group with nothing switched on
+    and a summary that failed to render must not look the same.
+  - Hidden rather than unmounted, exactly as `TabPanel` is: a half-typed
+    expression inside has to survive the fold shutting.
+  - **Setup's *Global shortcut* and *Updates* are deliberately not folded**,
+    though the mockups fold both. Their summaries live inside the child
+    components -- whether the shortcut is on, which version is installed --
+    and reaching them means lifting that state or reading localStorage behind
+    the component's back, where it would go stale the moment the switch was
+    flipped. A fold whose summary can be wrong is worse than no fold.
+  - `Section` takes a `summary` too, on the same terms; nothing uses it yet.
 - **⌘1..⌘9 then ⌘0 open the sections, counting down the rail**, and ⌘[ / ⌘]
   step through it. Same listener as the three below, and taken the same way:
   none is a text-editing key, and ⌘0 only resets the zoom in a browser, which

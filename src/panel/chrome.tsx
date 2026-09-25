@@ -25,11 +25,14 @@ export const Section = ({
   children,
   label = undefined,
   startCollapsed,
+  summary,
   help,
 }: {
   children: React.ReactNode;
   label?: string;
   startCollapsed?: boolean;
+  /** What is inside, shown while it is collapsed. See `Group`. */
+  summary?: string;
   help?: string;
 }) => {
   const [collapsed, setCollapsed] = useState(startCollapsed ?? false);
@@ -58,6 +61,19 @@ export const Section = ({
             style={{ ...headingStyle, cursor: "pointer", userSelect: "none" }}
           >
             {collapsed ? "▸" : "▾"} {label}
+            {collapsed && summary && (
+              <span
+                style={{
+                  color: ui.text.dim,
+                  fontFamily: ui.mono,
+                  textTransform: "none",
+                  letterSpacing: 0,
+                  marginLeft: "6px",
+                }}
+              >
+                {summary}
+              </span>
+            )}
           </h4>
         ) : (
           <h4 {...headingHelp} style={headingStyle}>
@@ -251,6 +267,74 @@ export const TabPanel = ({
   active: boolean;
   children: React.ReactNode;
 }) => <div style={{ display: active ? "block" : "none" }}>{children}</div>;
+
+// A labelled hairline that folds, with a line of what is inside it when it is
+// shut. `Divider` is the same rule without the folding, and stays that way:
+// most groups are worth having open.
+//
+// **A collapsed group that says nothing is the thing this exists to avoid.**
+// Examples, presets and parameters were pinned above the tabs and two of them
+// sat collapsed to a heading, saying nothing at all -- which is the note in
+// this file that argued them into the rail. Folding only pays if the shut
+// state still answers the question you would have opened it for, so `summary`
+// is not optional in practice even though it is in the type.
+//
+// Hidden rather than unmounted, exactly as `TabPanel` is: a half-typed
+// expression inside must survive the fold shutting.
+export const Group = ({
+  label,
+  summary,
+  startOpen,
+  help,
+  children,
+}: {
+  label: string;
+  /** What is inside, in a few words, shown while it is shut. */
+  summary?: string;
+  startOpen?: boolean;
+  help?: string;
+  children: React.ReactNode;
+}) => {
+  const [open, setOpen] = useState(startOpen ?? false);
+  const showHelp = useHelp();
+  return (
+    <>
+      <div
+        onClick={() => setOpen(!open)}
+        {...(help ? showHelp(help) : {})}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          margin: "8px 0 4px",
+          cursor: "pointer",
+          userSelect: "none",
+        }}
+      >
+        <span style={{ color: ui.text.faint, fontSize: "0.78em" }}>
+          {open ? "▾" : "▸"} {label}
+        </span>
+        {!open && summary && (
+          <span
+            style={{
+              color: ui.text.dim,
+              fontSize: "0.78em",
+              fontFamily: ui.mono,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              minWidth: 0,
+            }}
+          >
+            {summary}
+          </span>
+        )}
+        <div style={{ flex: 1, height: "1px", backgroundColor: ui.line.divider }} />
+      </div>
+      <div style={{ display: open ? "block" : "none" }}>{children}</div>
+    </>
+  );
+};
 
 // A labelled hairline between groups of settings inside one Section. The views
 // pane holds four unrelated kinds of setting -- which pane, how it is ruled,

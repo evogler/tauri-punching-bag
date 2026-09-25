@@ -2,7 +2,9 @@ import {
   MAX_ANALYSIS_CHANNELS,
   MAX_ROW_COLUMNS,
   VIEW_KINDS,
+  ViewConfig,
   ViewKind,
+  exprNumber,
 } from "../config";
 import { ChannelPicker } from "../ChannelPicker";
 import { GridList } from "../GridList";
@@ -14,7 +16,7 @@ import { Slider } from "../Slider";
 import { SpectrogramControls } from "../SpectrogramControls";
 import { PaneMap } from "../PaneMap";
 import { paneLabel } from "../paneLayout";
-import { Divider, Section } from "./chrome";
+import { Divider, Group, Section } from "./chrome";
 import { PanelProps } from "./types";
 
 // The grids of cells the panel offers, as [across, down]. Finer grids earn
@@ -40,6 +42,32 @@ const rowStyle: React.CSSProperties = {
 
 // How it is drawn: how many panes, and the settings of the one being edited.
 // The frame every pane sits in is the layout tab.
+// What a folded group is hiding, in the words the controls inside it use. The
+// point of folding is that the shut state still answers the question you would
+// have opened it for, so these say the *values*, not the names of the
+// settings.
+const drawingSummary = (v?: ViewConfig) => {
+  if (!v) return undefined;
+  const on = [
+    `size ${exprNumber(v.visualGain)}`,
+    v.refreshAtCycleEnd ? "redraw each pass" : "redraw live",
+    v.splitChannels ? "split" : "",
+    v.barColorMode ? "by loudness" : "",
+  ].filter(Boolean);
+  return on.join(" · ");
+};
+
+const overlaySummary = (v?: ViewConfig) => {
+  if (!v) return undefined;
+  const on = [
+    v.showFlux ? "attack strength" : "",
+    v.showOnsets ? "note starts" : "",
+  ].filter(Boolean);
+  // "none" rather than an empty line: a group with nothing in it and a group
+  // whose summary failed to render should not look the same.
+  return on.length ? on.join(" · ") : "none";
+};
+
 export const DisplayTab = (p: PanelProps) => {
   const { get, set, params, viewCols, viewRows, setArrangement, paneCount, activeView, setSelectedView, channelLabels, inputChannelCount, activeCfg, viewIO, patchView, views, paneOps } = p;
   return (
@@ -176,23 +204,27 @@ export const DisplayTab = (p: PanelProps) => {
           params={params}
           {...viewIO}
         />
-        <Divider label="Drawing" />
-        <Input
-          label="Waveform size"
-          _key="visualGain"
-          params={params}
-          {...viewIO}
-        />
-        <Input label="Split channels top/bottom" _key="splitChannels" {...viewIO} />
-        <Input label="Color by loudness" _key="barColorMode" {...viewIO} />
-        <Input
-          label="Redraw once per pass"
-          _key="refreshAtCycleEnd"
-          {...viewIO}
-        />
-        <Divider label="Overlays" />
+        <Group label="Drawing" summary={drawingSummary(activeCfg)}>
+          <Input
+            label="Waveform size"
+            _key="visualGain"
+            params={params}
+            {...viewIO}
+          />
+          <Input
+            label="Split channels top/bottom"
+            _key="splitChannels"
+            {...viewIO}
+          />
+          <Input label="Color by loudness" _key="barColorMode" {...viewIO} />
+          <Input
+            label="Redraw once per pass"
+            _key="refreshAtCycleEnd"
+            {...viewIO}
+          />
+        </Group>
         {activeCfg?.kind === "waveform" && (
-          <>
+          <Group label="Overlays" summary={overlaySummary(activeCfg)}>
             <Input label="Show attack strength" _key="showFlux" {...viewIO} />
             {activeCfg?.showFlux && (
               <Slider
@@ -206,7 +238,7 @@ export const DisplayTab = (p: PanelProps) => {
               />
             )}
             <Input label="Show note starts" _key="showOnsets" {...viewIO} />
-          </>
+          </Group>
         )}
         <Divider label="Colors" />
         <Help id="rowColors">
