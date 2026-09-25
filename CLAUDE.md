@@ -501,6 +501,28 @@ keeping the last good value. Deliberately not a scripting language.
   border, recomputed from what's on screen so it survives a blur) rather than
   blanking the pane. Renaming a parameter does *not* rewrite the expressions
   using it.
+- **An expression field says what it comes to, beside itself** (`Resolved` in
+  `Input.tsx`): `bar/n x n` is followed by a dim `= 0.25x16`. The field shows
+  what you wrote; this shows what it means. Until it existed the only place in
+  the app that resolved anything was the parameters list, which covers `n` and
+  `bar` and never the field being edited.
+  - **Shown only when it adds something.** A literal `4` resolves to 4, and
+    printing that beside it is noise, so the readout is hidden whenever the
+    text already *is* the value.
+  - **Shown while the field is red, on purpose**, because that is when it
+    matters most: the last good value is still what is playing, and the whole
+    contract of an invalid field is that it goes on working. Red border, and
+    beside it the number still in effect.
+  - **In the list's own syntax**, via `formatNumberList`, so `= 0.25x16` is
+    the text you would have typed to get it rather than a second notation to
+    learn. Elided past 20 characters with the whole of it in the tooltip: 128
+    numbers would push the field off its row.
+  - Rounded to twelve significant figures, the same as a rolled parameter and
+    for the same reason -- `= 0.30000000000000004` reads as a bug rather than
+    as floating point.
+  - Rhythm fields get none of this: what a rhythm resolves to is a set of note
+    times, which is a picture rather than a number. That is the dot strip, and
+    it is not built.
 - **`x` is reserved**, and so is `x` followed by digits: `formatNumberList`
   writes `0.25x16` with no spaces, so the tokenizer has to split `x16` rather
   than read it as an identifier. `min`/`max`/`round` are reserved too.

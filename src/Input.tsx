@@ -71,6 +71,46 @@ interface II<T> {
   validate?: (val: T) => boolean;
 }
 
+// `0.1 + 0.2` is 0.30000000000000004, and a readout saying so reads as a bug
+// rather than as floating point. Twelve significant figures is what the random
+// parameters already round to, for the same reason.
+const tidy = (n: number) => String(Number(n.toPrecision(12)));
+
+// What the expression in the field beside this comes to.
+//
+// **The field shows what you wrote; this shows what it means.** Until now the
+// only place in the app that told you what an expression resolved to was the
+// parameters list, which covers `n` and `bar` -- never the field you are
+// actually editing, where `bar/n x n` gave no clue it was sixteen rows of a
+// quarter beat until you looked at the pane.
+//
+// Shown **only when it adds something**: a literal `4` resolves to 4, and
+// printing that beside it is noise. And shown **while the field is red**, on
+// purpose, because that is when it matters most -- the last good value is
+// still what is playing, and the whole contract of an invalid field is that it
+// keeps working.
+const Resolved = ({ text, value }: { text: string; value: string }) => {
+  if (!value || text.trim() === value) return null;
+  // Long lists get an ellipsis and the whole thing in the tooltip: a hundred
+  // and twenty-eight numbers would push the field off its own row.
+  const short = value.length > 20 ? `${value.slice(0, 19)}…` : value;
+  return (
+    <span
+      title={value}
+      style={{
+        color: ui.text.dim,
+        fontFamily: ui.mono,
+        fontSize: "0.85em",
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        minWidth: 0,
+      }}
+    >
+      = {short}
+    </span>
+  );
+};
+
 const rowStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "row",
@@ -136,6 +176,7 @@ const ExprListInput = ({
         }}
         style={{ width: "8em", ...invalidBorder(invalid) }}
       ></input>
+      <Resolved text={props.value} value={formatNumberList(val.val)} />
     </div>
   );
 };
@@ -179,6 +220,7 @@ const ExprNumberInput = ({
         }}
         style={{ width: "6em", ...invalidBorder(invalid) }}
       />
+      <Resolved text={props.value} value={tidy(val.val)} />
     </div>
   );
 };

@@ -4,8 +4,10 @@ Working plan for moving the app toward the design canvas of 2026-09-23.
 `temp-claude-convo/ui-redesign-handoff.md` is the direction and the palette;
 the artboards are in `ui-mockups.zip` beside it.
 
-**Phases 1, 2 and 3 are built**, plus the drum lanes out of the later list.
-Phases 4-6 are not.
+**Phases 1-4 are built**, plus the drum lanes out of the later list. Phases 5
+and 6 are not. Two things the mockups draw were built and then removed on the
+owner's objection: the top bar's input meter and its latency figure -- see the
+top-bar notes in `CLAUDE.md` for why.
 
 The handoff's own rule holds: where the mockups disagree with the code or with
 `CLAUDE.md`, the code wins and the conflict gets written down rather than
