@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api";
+import { invoke } from "@tauri-apps/api/core";
 import { BleedMeter } from "../BleedMeter";
 import { Calibration } from "../Calibration";
 import { GlobalShortcut } from "../GlobalShortcut";

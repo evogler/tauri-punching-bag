@@ -1,74 +1,74 @@
 {
-  "$schema": "../node_modules/@tauri-apps/cli/schema.json",
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "build": {
     "beforeBuildCommand": "yarn build",
     "beforeDevCommand": "yarn start",
-    "devPath": "http://localhost:3000",
-    "distDir": "../build"
+    "frontendDist": "../build",
+    "devUrl": "http://localhost:3000"
   },
-  "package": {
-    "productName": "tauri-punching-bag",
-    "version": "0.4.0"
-  },
-  "tauri": {
-    "allowlist": {
-      "all": true,
-      "fs": {
-        "scope": ["$RESOURCE/*"]
-      }
+  "bundle": {
+    "active": true,
+    "category": "DeveloperTool",
+    "copyright": "",
+    "targets": "all",
+    "externalBin": [],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": ""
     },
-    "bundle": {
-      "active": true,
-      "category": "DeveloperTool",
-      "copyright": "",
+    "longDescription": "",
+    "macOS": {
+      "entitlements": "Entitlements.plist",
+      "exceptionDomain": "",
+      "frameworks": [],
+      "providerShortName": "Eric Vogler",
+      "signingIdentity": "Developer ID Application: Eric Vogler (9KMDH5UH9Z)"
+    },
+    "resources": [
+      "samples/"
+    ],
+    "shortDescription": "",
+    "linux": {
       "deb": {
         "depends": []
-      },
-      "externalBin": [],
-      "icon": [
-        "icons/32x32.png",
-        "icons/128x128.png",
-        "icons/128x128@2x.png",
-        "icons/icon.icns",
-        "icons/icon.ico"
-      ],
-      "identifier": "com.vogler.dev",
-      "longDescription": "",
-      "macOS": {
-        "entitlements": "Entitlements.plist",
-        "exceptionDomain": "",
-        "frameworks": [],
-        "providerShortName": "Eric Vogler",
-        "signingIdentity": "Developer ID Application: Eric Vogler (9KMDH5UH9Z)"
-      },
-      "resources": ["samples/"],
-      "shortDescription": "",
-      "targets": "all",
-      "windows": {
-        "certificateThumbprint": null,
-        "digestAlgorithm": "sha256",
-        "timestampUrl": ""
       }
     },
-    "security": {
-      "csp": null
-    },
+    "createUpdaterArtifacts": "v1Compatible"
+  },
+  "productName": "tauri-punching-bag",
+  "mainBinaryName": "tauri-punching-bag",
+  "version": "0.4.0",
+  "identifier": "com.vogler.dev",
+  "plugins": {
     "updater": {
-      "active": true,
-      "dialog": true,
       "endpoints": [
         "https://github.com/evogler/tauri-punching-bag/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJBMERDRUQxNDM0QjAyMjMKUldRakFrdEQwYzROS3A4S0MxUDFOb2crZC9FVytiSGhIazdpd1ZhT3daM2ZlMDdOamtqUnVlZmMK"
-    },
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJBMERDRUQxNDM0QjAyMjMKUldRakFrdEQwYzROS3A4S0MxUDFOb2crZC9FVytiSGhIazdpd1ZhT3daM2ZlMDdOamtqUnVlZmMK",
+      "requireSignedVersion": true
+    }
+  },
+  "app": {
     "windows": [
       {
         "fullscreen": false,
         "height": 600,
         "resizable": true,
         "title": "Tauri Punching Bag",
-        "width": 1250
+        "width": 1250,
+        "useHttpsScheme": true
       }
-    ]
+    ],
+    "security": {
+      "csp": null
+    }
   }
 }

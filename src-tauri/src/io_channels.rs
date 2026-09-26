@@ -315,8 +315,8 @@ extern "C" fn devices_changed_listener(
 ) -> OSStatus {
     unsafe {
         if let Some(app) = (context as *const tauri::AppHandle).as_ref() {
-            use tauri::Manager;
-            let _ = app.emit_all(DEVICES_CHANGED_EVENT, ());
+            use tauri::Emitter;
+            let _ = app.emit(DEVICES_CHANGED_EVENT, ());
         }
     }
     kAudioHardwareNoError as OSStatus

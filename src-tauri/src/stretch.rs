@@ -173,7 +173,7 @@ pub fn desired_ratio(config: &crate::structs::Config, natural_frames: usize) -> 
 /// and idempotent: an unchanged ratio returns immediately, and a superseded
 /// request is dropped rather than raced.
 pub fn request(app: &tauri::AppHandle, ratio: f64) {
-    use tauri::Manager;
+    use tauri::{Emitter, Manager};
     let arc = {
         let state: tauri::State<crate::structs::Mp3BufferState> = app.state();
         state.0.clone()
@@ -199,7 +199,7 @@ pub fn request(app: &tauri::AppHandle, ratio: f64) {
             if current_generation(&arc) != generation {
                 return;
             }
-            let _ = app.emit_all("file-stretch", StretchState { stretching: true, ratio });
+            let _ = app.emit("file-stretch", StretchState { stretching: true, ratio });
         }
 
         // Rendered *outside* the lock, and the old buffer is dropped outside it
@@ -225,7 +225,7 @@ pub fn request(app: &tauri::AppHandle, ratio: f64) {
         };
         drop(old);
 
-        let _ = app.emit_all("file-stretch", StretchState { stretching: false, ratio });
+        let _ = app.emit("file-stretch", StretchState { stretching: false, ratio });
     });
 }
 

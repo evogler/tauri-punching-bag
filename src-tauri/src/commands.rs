@@ -16,7 +16,7 @@ use crate::structs::{
 };
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
 /// What the loader found, so the panel can say what it is and work out what
 /// tempo a given number of beats implies. `sourceRate` is the file's own rate;
@@ -223,8 +223,12 @@ pub fn get_active_devices(state: State<ActiveDevices>) -> ActiveDevices {
 }
 
 fn prefs_dir(app_handle: &tauri::AppHandle) -> std::path::PathBuf {
-    tauri::api::path::app_config_dir(&app_handle.config())
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
+    // `config_dir()/<identifier>` -- exactly what v1's `app_config_dir` was, so
+    // presets.json and audio-prefs.json are found where v1 builds left them.
+    app_handle
+        .path()
+        .app_config_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
 }
 
 #[tauri::command]
@@ -429,7 +433,7 @@ pub fn set_config(app_handle: tauri::AppHandle, new_config: Config) {
     let logs = logs.0.lock().unwrap();
 
     app_handle
-        .emit_all(
+        .emit(
             "log",
             Payload {
                 message: logs.to_vec(),

@@ -1,26 +1,22 @@
-import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api";
+import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
-import {
-  checkUpdate,
-  installUpdate,
-  onUpdaterEvent,
-} from "@tauri-apps/api/updater";
+import { listen } from "@tauri-apps/api/event";
+import { check as checkUpdate, Update } from "@tauri-apps/plugin-updater";
 import { ui } from "./theme";
 
-// The manual half of the updater. `dialog: true` in tauri.conf.json already
-// gives a native prompt at launch, which is the whole interaction for anyone
-// who just wants the new version -- this is for asking on purpose.
+// The manual half of the updater. The launch check in `main.rs` already gives
+// a native prompt, which is the whole interaction for anyone who just wants the
+// new version -- this is for asking on purpose.
 //
-// The two paths are genuinely separate in the crate: the launch check runs
-// `prompt_for_install`, and `checkUpdate()` from here goes through a listener
-// that never reads the `dialog` setting. So nothing here is duplicated by the
-// dialog, and nothing here can raise one.
+// The two paths are genuinely separate: the launch check is Rust, with its own
+// dialogs, and `check()` from here raises none. So nothing here is duplicated
+// by the dialog.
 //
-// That asymmetry is also why this relaunches itself. The dialog path installs
-// and then asks "Ready to Restart" on its own; the JS path only emits `DONE`
-// and returns, so an update installed from here would sit on disk unmentioned
-// until the next launch. `restart_app` is the same command the menu's Restart
+// That asymmetry is also why this relaunches itself. The launch path installs
+// and then asks "Ready to Restart" on its own; `downloadAndInstall` only
+// installs and returns, so an update installed from here would sit on disk
+// unmentioned until the next launch. `restart_app` is the same command the menu's Restart
 // uses -- `AppHandle::restart` reads Info.plist, so the *bundle* comes back
 // rather than the bare binary, which is the half that can hold the microphone
 // grant.
@@ -52,15 +48,15 @@ export const Updater = () => {
   // An updater failure is silent by construction -- the app goes on working
   // perfectly while quietly never updating again -- so the error is surfaced
   // rather than inferred. Deliberately *here* and not in the config banner:
-  // the launch check fires this every time the machine is offline, which is
-  // ordinary rather than something to shout about.
+  // the launch check fails every time the machine is offline, which is
+  // ordinary rather than something to shout about. The manual path's errors
+  // arrive as rejections below; the launch check's, as this event.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let dropped = false;
-    onUpdaterEvent(({ error, status }) => {
-      if (error) setState({ kind: "error", message: error });
-      else if (status === "DONE") setState({ kind: "installed" });
-    })
+    listen<string>("update-check-failed", ({ payload }) =>
+      setState({ kind: "error", message: payload })
+    )
       .then((fn) => (dropped ? fn() : (unlisten = fn)))
       .catch(() => {});
     return () => {
@@ -69,17 +65,18 @@ export const Updater = () => {
     };
   }, []);
 
+  // v2 hands back the update as a handle to install from, rather than
+  // installing whatever the last check found.
+  const pending = useRef<Update | null>(null);
+
   const check = async () => {
     setState({ kind: "checking" });
     try {
-      const { shouldUpdate, manifest } = await checkUpdate();
+      const update = await checkUpdate();
+      pending.current = update;
       setState(
-        shouldUpdate
-          ? {
-              kind: "available",
-              version: manifest?.version ?? "",
-              notes: manifest?.body ?? "",
-            }
+        update
+          ? { kind: "available", version: update.version, notes: update.body ?? "" }
           : { kind: "current" }
       );
     } catch (e) {
@@ -90,7 +87,8 @@ export const Updater = () => {
   const install = async () => {
     setState({ kind: "installing" });
     try {
-      await installUpdate();
+      if (!pending.current) throw new Error("no update to install");
+      await pending.current.downloadAndInstall();
       setState({ kind: "installed" });
       await invoke("restart_app");
     } catch (e) {

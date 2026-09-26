@@ -20,7 +20,8 @@ import {
 } from "./config";
 import { formatNumberList } from "./expression";
 import { Rect, fitViews, readingOrderRect } from "./paneLayout";
-import { invoke } from "@tauri-apps/api";
+import { invoke } from "@tauri-apps/api/core";
+import { BROWSER_DEBUG_MODE } from "./env";
 
 const STORAGE_KEY = "tpb.presets.v1";
 const SESSION_KEY = "tpb.session.v1";
@@ -579,7 +580,7 @@ export const formatPresetFile = (presets: StoredPreset[], app?: string) =>
 // back to localStorage there. Deliberately a presence check rather than a
 // try/catch around the command: a *failing* command in the real app must not
 // silently split the store in two.
-const HAS_TAURI = "__TAURI_IPC__" in window;
+const HAS_TAURI = !BROWSER_DEBUG_MODE;
 const FALLBACK_KEY = "tpb.presets.v2";
 
 const readFallback = (): StoredPreset[] => {

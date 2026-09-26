@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import {
   open as openFileDialog,
   save as saveFileDialog,
-} from "@tauri-apps/api/dialog";
+} from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
 import {
   Preset,

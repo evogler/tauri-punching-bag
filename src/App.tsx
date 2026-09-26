@@ -5,7 +5,7 @@ import {
   useState,
   useRef,
 } from "react";
-import { invoke } from "@tauri-apps/api";
+import { invoke } from "@tauri-apps/api/core";
 import {
   defaultRustConfig,
   RustConfig,
@@ -65,7 +65,7 @@ import {
   pairCompensation,
   withPairCompensation,
 } from "./DevicePicker";
-import { appWindow } from "@tauri-apps/api/window";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { listen } from "@tauri-apps/api/event";
 import { SlidingDivision } from "./SlidingDivision";
 import {
@@ -82,7 +82,7 @@ import {
   rowColumnLayout,
 } from "./layout";
 import { SampleStatus, makeDrumVoice } from "./DrumList";
-import { open as openFileDialog } from "@tauri-apps/api/dialog";
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { BROWSER_DEBUG_MODE } from "./env";
 import { Panel } from "./panel/Panel";
 import { HelpProvider } from "./help";
@@ -392,9 +392,12 @@ const App = () => {
 
 
   useEffect(() => {
-    const unsubscribe = appWindow.onFileDropEvent((event) => {
-      if (event.payload.type === "hover") {
+    if (BROWSER_DEBUG_MODE) return;
+    const unsubscribe = getCurrentWebview().onDragDropEvent((event) => {
+      if (event.payload.type === "enter") {
         setLog("User hovering " + JSON.stringify(event.payload.paths));
+      } else if (event.payload.type === "over") {
+        // v2 reports every movement over the window; v1 reported only entering.
       } else if (event.payload.type === "drop") {
         setLog("User dropped " + JSON.stringify(event.payload.paths));
         pickNewMp3(event.payload.paths[0])();
@@ -402,8 +405,11 @@ const App = () => {
         setLog("File drop cancelled");
       }
     });
+    // This effect runs on every render, so the listener has to actually come
+    // off again -- awaiting the promise without calling what it resolves to
+    // left one more listener behind per render, each loading the dropped file.
     return () => {
-      (async () => await unsubscribe)();
+      unsubscribe.then((unlisten) => unlisten());
     };
   });
 

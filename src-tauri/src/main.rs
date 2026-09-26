@@ -62,7 +62,10 @@ use std::{
     sync::atomic::AtomicBool,
     sync::{Arc, Mutex},
 };
-use tauri::{CustomMenuItem, Manager, Menu, MenuEntry, MenuItem};
+use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem};
+use tauri::{AppHandle, Emitter};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+use tauri_plugin_updater::UpdaterExt;
 
 // Restarting is the quickest way out of a wedged audio device -- the render
 // callback and the input stream are set up once, at launch, so there is no
@@ -73,28 +76,76 @@ const RESTART_MENU_ID: &str = "restart";
 // The default menu is kept whole and added to rather than replaced. Building
 // one from scratch would drop Edit, and with it cut/copy/paste in every text
 // field in the settings panel.
-fn menu_with_restart(app_name: &str) -> Menu {
-    let mut menu = Menu::os_default(app_name);
-    // The app submenu, found by title rather than by position -- os_default
+fn menu_with_restart(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let menu = Menu::default(app)?;
+    let app_name = &app.package_info().name;
+    // The app submenu, found by title rather than by position -- the default
     // only puts it first on macOS.
-    let app_submenu = menu.items.iter_mut().find_map(|entry| match entry {
-        MenuEntry::Submenu(submenu) if submenu.title == app_name => Some(submenu),
+    let app_submenu = menu.items()?.into_iter().find_map(|item| match item {
+        MenuItemKind::Submenu(submenu) if submenu.text().ok().as_ref() == Some(app_name) => {
+            Some(submenu)
+        }
         _ => None,
     });
     if let Some(submenu) = app_submenu {
         // Just under About, above Services: an action on the app itself.
-        submenu
-            .inner
-            .items
-            .insert(1, MenuEntry::NativeItem(MenuItem::Separator));
-        submenu.inner.items.insert(
+        submenu.insert(&PredefinedMenuItem::separator(app)?, 1)?;
+        submenu.insert(
+            &MenuItem::with_id(app, RESTART_MENU_ID, "Restart", true, Some("cmd+shift+r"))?,
             2,
-            MenuEntry::CustomItem(
-                CustomMenuItem::new(RESTART_MENU_ID, "Restart").accelerator("cmd+shift+r"),
-            ),
-        );
+        )?;
     }
-    menu
+    Ok(menu)
+}
+
+/// Emitted when the launch-time update check fails, so the updates section can
+/// say so. v1 put this on its own updater event stream, which v2 does not have.
+const UPDATE_ERROR_EVENT: &str = "update-check-failed";
+
+// The launch-time check, with native dialogs. v1 did all of this itself under
+// `updater.dialog: true`; v2's updater plugin has no dialog of its own, so this
+// reproduces it -- the same two questions, the same wording, in the same order.
+// A friend who just wants the new version never has to open the panel.
+async fn check_for_update_at_launch(app: AppHandle) {
+    let update = match app.updater() {
+        Ok(updater) => updater.check().await,
+        Err(e) => Err(e),
+    };
+    let update = match update {
+        Ok(Some(update)) => update,
+        Ok(None) => return,
+        Err(e) => {
+            let _ = app.emit(UPDATE_ERROR_EVENT, e.to_string());
+            return;
+        }
+    };
+    let name = app.package_info().name.clone();
+    let body = update.body.clone().unwrap_or_default();
+    let install = app
+        .dialog()
+        .message(format!(
+            "{} {} is now available -- you have {}.\n\nWould you like to install it now?\n\nRelease Notes:\n{}",
+            name, update.version, update.current_version, body
+        ))
+        .title(format!("A new version of {} is available!", name))
+        .buttons(MessageDialogButtons::OkCancelCustom("Yes".into(), "No".into()))
+        .blocking_show();
+    if !install {
+        return;
+    }
+    if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
+        let _ = app.emit(UPDATE_ERROR_EVENT, e.to_string());
+        return;
+    }
+    let restart = app
+        .dialog()
+        .message("The installation was successful, do you want to restart the application now?")
+        .title("Ready to Restart")
+        .buttons(MessageDialogButtons::OkCancelCustom("Yes".into(), "No".into()))
+        .blocking_show();
+    if restart {
+        app.restart();
+    }
 }
 
 // A missing or malformed manifest is an empty kit rather than a failed launch;
@@ -115,8 +166,8 @@ fn load_kit(resource_dir: &str) -> Vec<KitSound> {
 
 fn main() -> Result<(), coreaudio::Error> {
     let context = tauri::generate_context!();
-    let app_config_dir = tauri::api::path::config_dir();
-    let rd = tauri::api::path::resource_dir(&context.package_info(), &tauri::utils::Env::default());
+    let app_config_dir = dirs::config_dir();
+    let rd = tauri::utils::platform::resource_dir(context.package_info(), &tauri::utils::Env::default());
     let binding = rd.unwrap();
     let resource_dir = binding.to_str().unwrap();
     // let resource_dir = rd.unwrap().to_str().unwrap();
@@ -136,7 +187,12 @@ fn main() -> Result<(), coreaudio::Error> {
     //
     // Device choice is read from disk, not from the config: the units are opened
     // before any window exists, so localStorage is unreachable here.
-    let prefs_dir = tauri::api::path::app_config_dir(context.config())
+    // `config_dir()/<identifier>`, which is what `app.path().app_config_dir()`
+    // resolves to once the app exists -- and what v1's `app_config_dir` did, so
+    // a v1 install's prefs and presets are found after the upgrade. Computed by
+    // hand because the devices are opened before there is an app to ask.
+    let prefs_dir = dirs::config_dir()
+        .map(|dir| dir.join(&context.config().identifier))
         .unwrap_or_else(|| std::path::PathBuf::from("."));
     let audio_prefs = prefs::load(&prefs_dir);
     // There is no window to show this in and there never will be, so the
@@ -1282,24 +1338,24 @@ fn main() -> Result<(), coreaudio::Error> {
     })?;
     output_audio_unit.start()?;
 
-    // Built here rather than inline in the chain: the menu needs the product
-    // name, which only the generated context knows.
-    let context = tauri::generate_context!();
-
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
-            watch_device_changes(app.handle());
+            watch_device_changes(app.handle().clone());
+            tauri::async_runtime::spawn(check_for_update_at_launch(app.handle().clone()));
             Ok(())
         })
-        .menu(menu_with_restart(&context.package_info().name))
-        .on_menu_event(|event| {
-            if event.menu_item_id() == RESTART_MENU_ID {
+        .menu(menu_with_restart)
+        .on_menu_event(|app, event| {
+            if event.id() == RESTART_MENU_ID {
                 // Relaunches the bundle and exits this process. On macOS
-                // `api::process::restart` reads Info.plist to find the binary,
-                // so the .app comes back rather than the bare executable --
-                // which matters here, since only the bundle has the microphone
-                // grant (see the packaging notes in CLAUDE.md).
-                event.window().app_handle().restart();
+                // `restart` reads Info.plist to find the binary, so the .app
+                // comes back rather than the bare executable -- which matters
+                // here, since only the bundle has the microphone grant (see the
+                // packaging notes in CLAUDE.md).
+                app.restart();
             }
         })
         .manage(sample_output_buffer)

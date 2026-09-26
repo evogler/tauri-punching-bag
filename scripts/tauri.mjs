@@ -44,6 +44,17 @@ const loadSigningEnv = () => {
     const value = m[2].trim().replace(/^(['"])(.*)\1$/, "$2");
     if (process.env[m[1]] === undefined) process.env[m[1]] = value;
   }
+  // The updater key's variables were renamed in Tauri v2. The old names are
+  // what `.env.signing` has always said, so they are carried across rather
+  // than the file having to be edited on every machine that builds -- and a
+  // v2 CLI that finds neither simply leaves the tarball unsigned.
+  const renamed = {
+    TAURI_PRIVATE_KEY: "TAURI_SIGNING_PRIVATE_KEY",
+    TAURI_KEY_PASSWORD: "TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
+  };
+  for (const [v1, v2] of Object.entries(renamed))
+    if (process.env[v2] === undefined && process.env[v1] !== undefined)
+      process.env[v2] = process.env[v1];
 };
 
 const filesUnder = (dir, suffix) => {
@@ -117,7 +128,7 @@ const productVolume = () => {
     const conf = JSON.parse(
       readFileSync(join(root, "src-tauri", "tauri.conf.json"), "utf8")
     );
-    return `/Volumes/${conf.package.productName}`;
+    return `/Volumes/${conf.productName}`;
   } catch {
     return null;
   }
@@ -160,7 +171,7 @@ const freeDiskImageVolumes = () => {
   return false;
 };
 
-// Tauri v1 notarizes the .app and then builds the disk image around it, so the
+// Tauri notarizes the .app and then builds the disk image around it, so the
 // image itself carries a signature and no ticket. That is enough for the app to
 // launch -- its own ticket is stapled -- but not for the download: an
 // unnotarized image is what Gatekeeper judges first, and it refuses to mount it
@@ -207,7 +218,7 @@ const writeReleaseManifest = (startedAt) => {
   const conf = JSON.parse(
     readFileSync(join(root, "src-tauri", "tauri.conf.json"), "utf8")
   );
-  const version = conf.package.version;
+  const version = conf.version;
   const repo = "evogler/tauri-punching-bag";
 
   // The updater matches on this exactly, so it is derived rather than typed.
@@ -231,8 +242,8 @@ const writeReleaseManifest = (startedAt) => {
     } catch {
       console.error(
         `\n${name} has no .sig beside it, so the updater would reject it. ` +
-          `TAURI_PRIVATE_KEY and TAURI_KEY_PASSWORD have to be set at build ` +
-          `time -- see .env.signing.\n`
+          `TAURI_SIGNING_PRIVATE_KEY and its password have to be set at ` +
+          `build time -- see .env.signing.\n`
       );
       return;
     }

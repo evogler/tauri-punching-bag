@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api";
+import { invoke } from "@tauri-apps/api/core";
 import { BleedMeter } from "./BleedMeter";
 import { Calibration } from "./Calibration";
 import { exprNumber, numExpr } from "./config";

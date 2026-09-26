@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   register,
   unregister,
-} from "@tauri-apps/api/globalShortcut";
+} from "@tauri-apps/plugin-global-shortcut";
 import { BROWSER_DEBUG_MODE } from "./env";
 import { ui } from "./theme";
 import { labelStyle } from "./Input";
@@ -10,8 +10,9 @@ import { labelStyle } from "./Input";
 // One system-wide key for pause/play, so the transport can be reached from
 // whatever window is in front -- a DAW, a score, a video.
 //
-// Tauri v1 registers this through tao, which on macOS calls Carbon's
-// `RegisterEventHotKey` (see tao's `platform_impl/macos/carbon_hotkey`). That
+// The global-shortcut plugin registers this through the `global-hotkey` crate,
+// which on macOS calls Carbon's `RegisterEventHotKey` -- as v1 did through
+// tao. That
 // is the old system hotkey API, not an event tap, so it needs **no
 // Accessibility or Input Monitoring grant** -- which is the only reason this
 // is a switch rather than a permissions flow.
@@ -113,7 +114,10 @@ export const GlobalShortcut = ({ onTrigger }: { onTrigger: () => void }) => {
       try {
         await unregister(accel).catch(() => {});
         if (dropped) return;
-        await register(accel, () => {
+        // v2 calls this on release as well as press; answering both would
+        // pause and unpause on every stroke.
+        await register(accel, (event) => {
+          if (event.state !== "Pressed") return;
           trigger.current();
           setFired((n) => n + 1);
         });
