@@ -1,4 +1,5 @@
 use crate::analysis::DEFAULT_WINDOW;
+use crate::engine::MAX_BLOCK_FRAMES;
 use crate::structs::{Config, DrumVoice, Note, ParserRhythm};
 /// Fallback only. The real rate is whatever the input device is running at --
 /// see `sample_rate()`.
@@ -72,19 +73,27 @@ pub fn max_visual_backlog(sample_rate: f64) -> usize {
     sample_rate as usize
 }
 
-/// What a drain leaves behind for the callback to fill. The callback holds the
-/// buffer's lock for its whole run, so a drain always gets at least one
-/// callback's worth (2048 frames); twice that is the headroom that keeps the
-/// audio thread from ever having to grow the vector itself.
-pub const VISUAL_RESERVE_FRAMES: usize = 4096;
+/// What a drain leaves behind for the callback to fill, in frames. The callback
+/// holds the buffer's lock for its whole run, so it pushes whole blocks between
+/// drains -- and a poll can land with no callback since the last one, so the
+/// floor cannot lean on the last drain having been a typical size. Two of the
+/// *largest* block the engine takes, never of the one the device happens to
+/// use: sized from the typical block, a platform that hands over more would put
+/// the audio thread back in the allocator. `get_samples` multiplies this by the
+/// row width, since a frame is one value per visible channel.
+pub const VISUAL_RESERVE_FRAMES: usize = 2 * MAX_BLOCK_FRAMES;
 
 /// The same for the analysis stream, in hops. A hop is 64 frames at the
-/// shortest window, so one callback is at most 32 of them; this is generous
-/// without reserving a frame-sized vector for a hop-sized stream.
-pub const ANALYSIS_RESERVE_HOPS: usize = 256;
+/// shortest window, so one of the largest blocks is 64 of them; this is four
+/// of those without reserving a frame-sized vector for a hop-sized stream.
+/// `get_analysis` multiplies it out by `BINS` and `MAX_ANALYSIS_CHANNELS` for
+/// the magnitudes, which are that wide per hop.
+pub const ANALYSIS_RESERVE_HOPS: usize = 4 * MAX_BLOCK_FRAMES / 64;
 
-/// Onsets are sparse -- a handful a batch at most -- so this is a flat reserve
-/// rather than anything derived.
+/// Onsets are sparse, and the picker cannot report two on one channel closer
+/// than its peak radius -- at the shortest window that is a few per channel in
+/// one of the largest blocks -- so this is a flat reserve rather than anything
+/// derived.
 pub const ONSET_RESERVE: usize = 64;
 
 // Every echo needs a whole loop of history behind it, so the buffer grows with

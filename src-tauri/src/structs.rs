@@ -67,6 +67,12 @@ pub struct VisualSamples {
 pub struct DrainSizes {
     pub beats: AtomicUsize,
     pub values: AtomicUsize,
+    /// Values per beat at the last drain, so the floor can be a number of
+    /// *frames* times the row width. A floor in raw values was one frame per
+    /// value, which is two callbacks' worth for one channel and less than one
+    /// for three -- and a poll that lands between callbacks drains nothing, so
+    /// the floor is what the next callback actually gets.
+    pub width: AtomicUsize,
 }
 
 impl Default for DrainSizes {
@@ -74,6 +80,7 @@ impl Default for DrainSizes {
         Self {
             beats: AtomicUsize::new(0),
             values: AtomicUsize::new(0),
+            width: AtomicUsize::new(1),
         }
     }
 }

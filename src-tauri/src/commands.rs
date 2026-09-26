@@ -123,6 +123,7 @@ pub fn get_samples(state: State<SampleOutputBuffer>) -> Result<VisualSamples, St
         std::mem::swap(&mut samples.values, &mut spare.1);
         state.drained.beats.store(spare.0.len(), Ordering::Relaxed);
         state.drained.values.store(spare.1.len(), Ordering::Relaxed);
+        state.drained.width.store(samples.channels.max(1), Ordering::Relaxed);
         return Ok(VisualSamples {
             cycle: samples.cycle,
             channels: samples.channels,
@@ -144,7 +145,10 @@ fn reserve_for(last: &std::sync::atomic::AtomicUsize, floor: usize) -> usize {
 fn spare_vecs(drained: &crate::structs::DrainSizes) -> (Vec<f64>, Vec<f32>) {
     (
         Vec::with_capacity(reserve_for(&drained.beats, VISUAL_RESERVE_FRAMES)),
-        Vec::with_capacity(reserve_for(&drained.values, VISUAL_RESERVE_FRAMES)),
+        Vec::with_capacity(reserve_for(
+            &drained.values,
+            VISUAL_RESERVE_FRAMES * drained.width.load(Ordering::Relaxed),
+        )),
     )
 }
 
@@ -161,7 +165,7 @@ pub fn get_analysis(state: State<AnalysisOutputBuffer>) -> Result<AnalysisFrames
     let mut spare_beats = Vec::with_capacity(hops);
     let mut spare_mags = Vec::with_capacity(reserve_for(
         &state.drained.values,
-        ANALYSIS_RESERVE_HOPS * BINS,
+        ANALYSIS_RESERVE_HOPS * BINS * MAX_ANALYSIS_CHANNELS,
     ));
     // Both follow the hop count rather than a counter of their own: `flux` is
     // exactly one f32 a hop a channel, and onsets are sparse.

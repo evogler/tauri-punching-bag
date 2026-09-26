@@ -524,7 +524,7 @@ pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Strin
 
     // set audiounit buffer size to 32 samples, or however
     let id = kAudioDevicePropertyBufferFrameSize;
-    let buffer_size: u32 = 2048;
+    let buffer_size: u32 = super::DEVICE_BUFFER_FRAMES;
     input_audio_unit
         .set_property(id, Scope::Output, Element::Input, Some(&buffer_size))
         .map_err(|e| {

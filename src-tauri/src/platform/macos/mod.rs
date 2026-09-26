@@ -16,7 +16,7 @@ pub use devices::{
 };
 
 use crate::constants::sample_rate;
-use crate::engine::Engine;
+use crate::engine::{Engine, MAX_BLOCK_FRAMES};
 use crate::types::S;
 use coreaudio::audio_unit::render_callback::{self, data};
 use coreaudio::audio_unit::{AudioUnit, SampleFormat};
@@ -34,15 +34,21 @@ pub type InputArgs = render_callback::Args<data::Interleaved<S>>;
 
 pub const SAMPLE_FORMAT: SampleFormat = SampleFormat::F32;
 
-// make_buffers hands the same unbounded VecDeque to the input callback's
-// push_back and the render callback's pop_front, so anything that stalls the
-// render side -- the bound device going away, or slow clock drift when input
-// and output are separate devices -- would grow it forever. Cap the backlog and
-// drop the oldest excess. A quarter second is well above the few thousand
+// make_queues hands the same VecDeque to the input callback's push_back and
+// the render callback's pop_front, so anything that stalls the render side --
+// the bound device going away, or slow clock drift when input and output are
+// separate devices -- would grow it forever. Cap the backlog and drop the
+// oldest excess. A quarter second is well above the few thousand
 // samples it normally holds, so this never fires in normal running.
 pub fn max_input_backlog() -> usize {
     (sample_rate() * 0.25) as usize
 }
+
+/// What AUHAL is asked for, in frames per callback. A request, not a promise
+/// -- the render callback splits anything past `MAX_BLOCK_FRAMES` rather than
+/// trusting it -- but it should fit, or every callback pays for the split.
+pub const DEVICE_BUFFER_FRAMES: u32 = 2048;
+const _: () = assert!(DEVICE_BUFFER_FRAMES as usize <= MAX_BLOCK_FRAMES);
 
 /// The running units. Dropping this stops the audio, so `main` holds it for
 /// the life of the process.
@@ -59,13 +65,15 @@ pub fn start(
     mut engine: Engine,
 ) -> Result<Running, Error> {
     let input_channels = engine.input_channels();
-    let buffers = make_buffers(input_channels);
-    let consumers = buffers.consumers.clone();
+    let queues = make_queues(input_channels);
+    let consumers = queues.clone();
     // Assembled here, per block, from the per-channel queues: the core takes
-    // one interleaved block rather than knowing there are queues at all.
-    let mut input_block = vec![0f32; 4096 * input_channels];
+    // one interleaved block rather than knowing there are queues at all. Sized
+    // for the largest block the engine takes, never for the one AUHAL is
+    // asked for -- see `MAX_BLOCK_FRAMES`.
+    let mut input_block = vec![0f32; MAX_BLOCK_FRAMES * input_channels];
 
-    start_input_audio_unit(&mut input_audio_unit, buffers.producers)?;
+    start_input_audio_unit(&mut input_audio_unit, queues)?;
 
     output_audio_unit.set_render_callback(move |args: Args| {
         let Args {
@@ -73,30 +81,50 @@ pub fn start(
             mut data,
             ..
         } = args;
-        let mut buffers: Vec<_> = consumers.iter().map(|c| c.lock().unwrap()).collect();
-
-        // Keeps the shared input queue from growing without bound if this
-        // callback ever falls behind the input one. Also trims the startup gap,
-        // since the input unit is started before this one.
-        for buffer in buffers.iter_mut() {
-            let excess = buffer.len().saturating_sub(max_input_backlog());
-            buffer.drain(..excess);
-        }
-
-        // Every channel drained, whatever the core goes on to do with the
-        // block: `make_buffers` hands out the same queue to both ends, so an
-        // undrained one grows without bound and replays the backlog afterwards.
-        let c_in = buffers.len();
-        for i in 0..num_frames {
-            for (ch, buffer) in buffers.iter_mut().enumerate() {
-                input_block[i * c_in + ch] = buffer.pop_front().unwrap_or(0.0);
-            }
-        }
-        drop(buffers);
-
+        let c_in = input_channels;
         let mut channels = data.channels_mut();
-        if let (Some(left), Some(right)) = (channels.next(), channels.next()) {
-            engine.process(&input_block[..num_frames * c_in], [left, right]);
+        // The output format is set to two non-interleaved channels in
+        // `devices.rs`, so there are always exactly these two.
+        let (Some(left), Some(right)) = (channels.next(), channels.next()) else {
+            return Ok(());
+        };
+
+        // Split rather than trusted: a device that hands over more than the
+        // engine is sized for is processed in pieces. The engine is block-size
+        // invariant, so this changes nothing about what comes out.
+        let mut done = 0;
+        while done < num_frames {
+            let n = (num_frames - done).min(MAX_BLOCK_FRAMES);
+            {
+                let mut queues = consumers.lock().unwrap();
+                if done == 0 {
+                    // Keeps the shared input queue from growing without bound
+                    // if this callback ever falls behind the input one. Also
+                    // trims the startup gap, since the input unit is started
+                    // before this one.
+                    for queue in queues.iter_mut() {
+                        let excess = queue.len().saturating_sub(max_input_backlog());
+                        queue.drain(..excess);
+                    }
+                }
+                // Every channel drained, whatever the engine goes on to do
+                // with the block -- paused, calibrating, measuring the bleed:
+                // `make_queues` hands out the same queue to both ends, so an
+                // undrained one grows without bound and replays the backlog
+                // afterwards. A short queue reads as silence.
+                for i in 0..n {
+                    for (ch, queue) in queues.iter_mut().enumerate() {
+                        input_block[i * c_in + ch] = queue.pop_front().unwrap_or(0.0);
+                    }
+                }
+            }
+            // The lock is released before the engine runs, so the input
+            // callback never waits on the render.
+            engine.process(
+                &input_block[..n * c_in],
+                [&mut left[done..done + n], &mut right[done..done + n]],
+            );
+            done += n;
         }
         Ok(())
     })?;
@@ -107,21 +135,26 @@ pub fn start(
     })
 }
 
-pub fn start_input_audio_unit(
-    input_audio_unit: &mut AudioUnit,
-    producers: Vec<Arc<Mutex<VecDeque<S>>>>,
-) -> Result<(), Error> {
+fn start_input_audio_unit(input_audio_unit: &mut AudioUnit, producers: Queues) -> Result<(), Error> {
     input_audio_unit.set_input_callback(move |args: InputArgs| {
         let InputArgs {
             num_frames, data, ..
         } = args;
         let channels = data.channels;
-        let mut queues: Vec<_> = producers.iter().map(|p| p.lock().unwrap()).collect();
+        let mut queues = producers.lock().unwrap();
         // The buffer arrives interleaved -- frame 0 channel 0, frame 0 channel 1,
         // ... -- so split it back out into one queue per channel.
         for frame in 0..num_frames {
             for ch in 0..channels {
                 if let Some(queue) = queues.get_mut(ch) {
+                    // Full only if the render side has stopped draining
+                    // altogether -- the device went away. Dropping the oldest
+                    // is what the backlog cap does anyway, and it keeps the
+                    // queue inside the capacity it was built with instead of
+                    // reallocating on this thread.
+                    if queue.len() == queue.capacity() {
+                        queue.pop_front();
+                    }
                     queue.push_back(data.buffer[frame * channels + ch]);
                 }
             }
@@ -132,19 +165,21 @@ pub fn start_input_audio_unit(
     Ok(())
 }
 
-// One queue per input channel. Producers and consumers are clones of the same
-// Arcs -- see `max_input_backlog` for why that matters.
-pub struct Buffers {
-    pub producers: Vec<Arc<Mutex<VecDeque<f32>>>>,
-    pub consumers: Vec<Arc<Mutex<VecDeque<f32>>>>,
-}
+// One queue per input channel, behind *one* lock: the input callback pushes a
+// frame to every channel together and the render callback pops them together,
+// so the channels can never be seen out of step with each other. One lock also
+// means neither callback builds a `Vec` of guards, which was an allocation on
+// both audio threads every callback.
+//
+// The same `Arc` goes to both ends -- see `max_input_backlog` for why that
+// matters.
+type Queues = Arc<Mutex<Vec<VecDeque<S>>>>;
 
-pub fn make_buffers(channels: usize) -> Buffers {
-    let queues: Vec<Arc<Mutex<VecDeque<S>>>> = (0..channels)
-        .map(|_| Arc::new(Mutex::new(VecDeque::<S>::new())))
-        .collect();
-    Buffers {
-        producers: queues.clone(),
-        consumers: queues,
-    }
+fn make_queues(channels: usize) -> Queues {
+    // The backlog cap plus the most either side can add or take between two
+    // trims, so a queue in ordinary running never outgrows what it starts with.
+    let capacity = max_input_backlog() + 2 * MAX_BLOCK_FRAMES;
+    Arc::new(Mutex::new(
+        (0..channels).map(|_| VecDeque::with_capacity(capacity)).collect(),
+    ))
 }

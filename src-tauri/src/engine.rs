@@ -37,12 +37,35 @@ use crate::util::{
     beat_bisect, display_start, mod_add, record_cycle_bounds, recording_at, section_at,
     section_bounds,
 };
-use rand::Rng;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::{
     collections::HashMap,
     sync::atomic::{AtomicBool, AtomicU32},
     sync::{Arc, Mutex},
 };
+
+/// The largest block `process` may be handed. **Everything downstream of the
+/// engine is sized for this, never for the block a device happens to use**:
+/// the display streams' drain reserves (`VISUAL_RESERVE_FRAMES`,
+/// `ANALYSIS_RESERVE_HOPS`), the recorder's two seconds, the input backlog cap
+/// and the backend's own input block. macOS asks AUHAL for 2048; iOS hands over
+/// whatever `kAudioUnitProperty_MaximumFramesPerSlice` allows, commonly 4096.
+/// A backend given more than this splits it and calls `process` once per piece
+/// -- the engine is block-size invariant, so that is exact rather than an
+/// approximation.
+pub const MAX_BLOCK_FRAMES: usize = 4096;
+
+/// Drum hits ringing at once before a new one is dropped rather than the
+/// vector grown on the audio thread. A kit's longest sample is a few seconds,
+/// so this is dozens of voices of 16ths at a fast tempo -- it only fires when
+/// something has gone wrong enough that one missing hit is not the problem.
+const MAX_SOUNDING: usize = 512;
+
+/// Starting capacity for the per-callback rhythm and voice lists, so an
+/// ordinary config never grows them at all. Past this they grow once, the way
+/// `bounds` does when a section is added.
+const RHYTHM_RESERVE: usize = 256;
+const VOICE_RESERVE: usize = 32;
 
 /// Everything the core shares with the rest of the process -- the commands
 /// write most of these and the core reads them, or the other way round. The
@@ -78,6 +101,12 @@ pub struct Engine {
     /// file changing.
     sample_rate: f64,
     sounding_samples: Vec<SoundingSample>,
+    // The rhythms, pans and samples the frame loop reads, resolved from the
+    // config once per callback into these rather than into fresh vectors.
+    click_times: Vec<f64>,
+    pan_gains: Vec<(S, S)>,
+    voice_times: Vec<Vec<f64>>,
+    voice_samples: Vec<Option<Arc<Vec<f32>>>>,
     // One entry per drum voice: the subdivision it last fired on, so a hit
     // happens on the crossing rather than every frame. isize::MIN means "not
     // primed yet", which stops a newly added voice firing immediately.
@@ -131,7 +160,11 @@ pub struct Engine {
     // a local per frame and published to the atomics once per callback, so the
     // frame loop never touches shared state for it.
     input_peaks: Vec<f32>,
-    rng: rand::rngs::ThreadRng,
+    // Not `thread_rng`: that one reseeds from the OS every 64 KiB of output,
+    // which is a system call on the audio thread every few seconds of click,
+    // and it is `!Send`, so an engine holding it could never be built on one
+    // thread and handed to the device's. ChaCha12 either way.
+    rng: StdRng,
     beat: f64,
     // The subdivision *before* the first, so a click written on beat 0 sounds
     // at launch. At 0 it equalled `beat_bisect`'s answer for beat 0 and the
@@ -149,7 +182,11 @@ impl Engine {
             shared,
             input_channels,
             sample_rate,
-            sounding_samples: vec![],
+            sounding_samples: Vec::with_capacity(MAX_SOUNDING),
+            click_times: Vec::with_capacity(RHYTHM_RESERVE),
+            pan_gains: vec![(1.0, 1.0); input_channels],
+            voice_times: Vec::with_capacity(VOICE_RESERVE),
+            voice_samples: Vec::with_capacity(VOICE_RESERVE),
             drum_last_beats: vec![],
             tap_gains: vec![],
             input_raw: vec![0f32; input_channels],
@@ -169,7 +206,7 @@ impl Engine {
             bleed_cancel: BleedCanceller::new(input_channels, BLEED_TAPS),
             loop_guard: (0..input_channels).map(|_| LoopGuard::new(sample_rate)).collect(),
             input_peaks: vec![0f32; input_channels],
-            rng: rand::thread_rng(),
+            rng: StdRng::from_entropy(),
             beat: 0.0,
             last_beat: -1,
         }
@@ -188,11 +225,16 @@ impl Engine {
         let c_in = self.input_channels;
         debug_assert_eq!(output[1].len(), n);
         debug_assert_eq!(input.len(), n * c_in);
+        debug_assert!(n <= MAX_BLOCK_FRAMES);
         let Engine {
             shared,
             input_channels: _,
             sample_rate,
             sounding_samples,
+            click_times,
+            pan_gains,
+            voice_times,
+            voice_samples,
             drum_last_beats,
             tap_gains,
             input_raw,
@@ -385,34 +427,37 @@ impl Engine {
 
         // Resolved once per callback. Building these per frame -- as the click
         // rhythm used to be -- meant tens of thousands of allocations a second
-        // on the audio thread.
-        let mut click_times: Vec<f64> = config
-            .audio_subdivisions
-            .notes
-            .iter()
-            .map(|n| n.time)
-            .collect();
+        // on the audio thread. And *into* vectors kept on the engine rather
+        // than collected fresh: a `collect` once per callback is still the
+        // allocator on the audio thread, twenty times a second. These only
+        // grow when a rhythm gets longer or a voice is added, the same policy
+        // as `bounds`.
+        click_times.clear();
+        click_times.extend(config.audio_subdivisions.notes.iter().map(|n| n.time));
         click_times.push(config.audio_subdivisions.end);
 
         // Centre stays (1, 1) rather than the usual constant-power (0.707,
         // 0.707), so turning panning on doesn't quietly drop every existing
         // setup by 3dB. Panning attenuates the far side instead of boosting the
-        // near one.
-        let pan_gains: Vec<(S, S)> = (0..input_frame.len())
-            .map(|ch| {
-                let pan = config.channel_pans.get(ch).copied().unwrap_or(0.0) as S;
-                ((1.0 - pan).clamp(0.0, 1.0), (1.0 + pan).clamp(0.0, 1.0))
-            })
-            .collect();
+        // near one. Sized to the channel count at construction, so this never
+        // grows at all.
+        for (ch, gains) in pan_gains.iter_mut().enumerate() {
+            let pan = config.channel_pans.get(ch).copied().unwrap_or(0.0) as S;
+            *gains = ((1.0 - pan).clamp(0.0, 1.0), (1.0 + pan).clamp(0.0, 1.0));
+        }
 
-        let mut voice_times: Vec<Vec<f64>> = Vec::with_capacity(config.drums.len());
-        let mut voice_samples: Vec<Option<Arc<Vec<f32>>>> = Vec::with_capacity(config.drums.len());
+        // Never shrunk: an entry past the voice count is stale and unread, and
+        // truncating would free the inner vectors here.
+        if voice_times.len() < config.drums.len() {
+            voice_times.resize_with(config.drums.len(), || Vec::with_capacity(RHYTHM_RESERVE));
+        }
+        voice_samples.clear();
         {
             let map = shared.drum_samples.lock().unwrap();
-            for voice in config.drums.iter() {
-                let mut times: Vec<f64> = voice.rhythm.notes.iter().map(|n| n.time).collect();
+            for (voice, times) in config.drums.iter().zip(voice_times.iter_mut()) {
+                times.clear();
+                times.extend(voice.rhythm.notes.iter().map(|n| n.time));
                 times.push(voice.rhythm.end);
-                voice_times.push(times);
                 voice_samples.push(map.get(&voice.path).cloned());
             }
         }
@@ -935,7 +980,10 @@ impl Engine {
                             let sounds_here = !sections_on
                                 || section_at(&bounds, *beat + offset_beats, cycle_beats)
                                     .map_or(false, |i| config.sections[i].drums.contains(&v));
-                            if sounds_here && rolled {
+                            // Past `MAX_SOUNDING` ringing at once the hit is
+                            // dropped rather than the vector grown -- see the
+                            // constant.
+                            if sounds_here && rolled && sounding_samples.len() < MAX_SOUNDING {
                                 sounding_samples.push(SoundingSample {
                                     sample: sample.clone(),
                                     pos: 0,
@@ -1122,3 +1170,11 @@ impl Engine {
         }
     }
 }
+
+// Step 3 of the iOS plan builds a fresh engine off the audio thread and hands
+// it over, so this has to stay `Send` -- which is also why the rng is not
+// `thread_rng`.
+const _: fn() = || {
+    fn assert_send<T: Send>() {}
+    assert_send::<Engine>();
+};
