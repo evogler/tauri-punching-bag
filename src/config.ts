@@ -1042,6 +1042,12 @@ export const defaultJsConfig = {
   // Global rather than per-view: one set of names every pane's expressions can
   // reach, so `n` means the same thing wherever it's written.
   parameters: [] as Parameter[],
+  // Named snapshots of the parameters, recalled by ⌘1..⌘0. Beside them rather
+  // than inside a preset because a scene is "these numbers, with everything
+  // else as it is" -- switching 16ths to triplets mid-practice, not loading a
+  // different setup. They travel in presets, since a scene only means
+  // something against the parameters it was saved from.
+  parameterScenes: [] as ParameterScene[],
   // Drum grids: the editing surface for a drum part. Here rather than in the
   // rust config because nothing in a grid reaches the audio thread -- what it
   // compiles to is `drums`, an ordinary rhythm and an ordinary chances list.
@@ -1131,6 +1137,51 @@ export type ConfigKey = keyof Config;
 // Later duplicates would silently win, so the first binding of a name is the
 // one that counts. The panel refuses to create a duplicate; this only decides
 // what a hand-edited session does.
+/**
+ * A saved set of parameter values. Whole `Parameter`s rather than numbers, so
+ * a scene can hold `bar*4` or `choose(3,4)` as typed -- and a roll's stored
+ * value with it, since a roll is sticky and recalling a scene must give back
+ * exactly what was saved rather than a fresh draw.
+ */
+export type ParameterScene = { name: string; parameters: Parameter[] };
+
+/// The current parameters, copied deep enough that a list value is not shared.
+export const snapshotParameters = (parameters: Parameter[]): Parameter[] =>
+  JSON.parse(JSON.stringify(parameters));
+
+/**
+ * The parameters with a scene's values applied, matched by name.
+ *
+ * A parameter the scene doesn't mention keeps its value, and one the scene
+ * names that no longer exists is not brought back: a scene sets numbers, it
+ * does not decide which parameters there are. Order is the current list's.
+ */
+export const applyScene = (
+  current: Parameter[],
+  scene: ParameterScene
+): Parameter[] =>
+  current.map((p) => {
+    const saved = scene.parameters.find((q) => q.name === p.name);
+    return saved ? snapshotParameters([saved])[0] : p;
+  });
+
+/// Whether recalling this scene would change nothing -- what marks it as the
+/// one in effect. Text *and* value, so two draws of one roll are different.
+export const sceneInEffect = (
+  current: Parameter[],
+  scene: ParameterScene
+): boolean =>
+  scene.parameters.length > 0 &&
+  scene.parameters.every((s) => {
+    const p = current.find((q) => q.name === s.name);
+    return (
+      !p ||
+      (parameterText(p) === parameterText(s) &&
+        JSON.stringify(p.value) === JSON.stringify(s.value))
+    );
+  }) &&
+  scene.parameters.some((s) => current.some((p) => p.name === s.name));
+
 export const parameterText = (p: Parameter): string =>
   p.inputText ??
   (Array.isArray(p.value) ? formatNumberList(p.value) : String(p.value));

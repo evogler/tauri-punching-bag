@@ -32,6 +32,7 @@ import {
   exprNumber,
   parameterValues,
   rollParameters,
+  applyScene,
   resolveConfigs,
   applyDrumGrids,
   removeGridVoice,
@@ -88,6 +89,7 @@ import { HelpProvider } from "./help";
 import { TopBar } from "./TopBar";
 import { SetupWizard, shouldOpenSetup } from "./SetupWizard";
 import { PanelTab, tabForDigit, tabStep } from "./panel/chrome";
+import { sceneForDigit } from "./SceneList";
 import { FileInfo, PanelProps } from "./panel/types";
 import { ui } from "./theme";
 
@@ -447,6 +449,13 @@ const App = () => {
   // them, which is why nothing here knows what a random parameter feeds.
   const reroll = (pick?: (name: string) => boolean) =>
     setParameters(rollParameters(jsConfig.parameters, pick));
+
+  // A scene is an ordinary parameter change too, so everything that follows
+  // the parameters -- rows, grids, tempo, rhythms -- moves on the same update.
+  const recallScene = (i: number) => {
+    const scene = jsConfig.parameterScenes[i];
+    if (scene) setParameters(applyScene(jsConfig.parameters, scene));
+  };
 
   // Rust holds decoded samples and not the path, so the path has to be pushed
   // across whenever it changes -- not once on mount, which is what this was.
@@ -2222,6 +2231,8 @@ const App = () => {
   toggleRef.current = (k) => set(k, !get(k));
   const rerollRef = useRef(() => {});
   rerollRef.current = () => reroll();
+  const recallSceneRef = useRef((i: number) => {});
+  recallSceneRef.current = recallScene;
   // Opening a section also brings the panel back: a shortcut that silently
   // does nothing because the panel is hidden reads as a broken shortcut.
   const openTabRef = useRef((tab: PanelTab) => {});
@@ -2233,19 +2244,33 @@ const App = () => {
   stepTabRef.current = (by) => openTabRef.current(tabStep(panelTab, by));
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!e.metaKey || e.ctrlKey || e.altKey) return;
-      const key = e.key.toLowerCase();
-      // The section rail: ⌘1..⌘9 then ⌘0, counting down the rail, and ⌘[ / ⌘]
-      // to step through the whole of it once the digits run out. Taken
-      // unconditionally like ⌘P and ⌘L -- none of them is a text-editing key,
-      // and ⌘0 only resets the zoom in a browser, which this is not.
-      if (!e.shiftKey && key.length === 1 && key >= "0" && key <= "9") {
-        const tab = tabForDigit(key);
+      if (!e.metaKey || e.ctrlKey) return;
+      // The digit from the physical key, because ⌥ turns `e.key` into `¡`,
+      // `™` and the rest.
+      const digit = /^Digit[0-9]$/.test(e.code) ? e.code.slice(5) : null;
+      // The section rail: ⌘⌥1..⌘⌥9 then ⌘⌥0, counting down the rail. ⌥ rather
+      // than ⇧ because macOS takes ⌘⇧3, 4 and 5 for screenshots before the
+      // app ever sees them. The only ⌥ chord taken here -- everything else
+      // bails on it, so the global ⌘⌥P can never double-toggle.
+      if (e.altKey) {
+        if (!digit || e.shiftKey) return;
+        const tab = tabForDigit(digit);
         if (!tab) return;
         e.preventDefault();
         openTabRef.current(tab);
         return;
       }
+      const key = e.key.toLowerCase();
+      // ⌘1..⌘9 then ⌘0 recall parameter scenes. Taken unconditionally like ⌘P
+      // and ⌘L -- none of them is a text-editing key, and ⌘0 only resets the
+      // zoom in a browser, which this is not. Deliberately does not open the
+      // panel: this is reached for mid-phrase, with the picture in front.
+      if (!e.shiftKey && digit) {
+        e.preventDefault();
+        recallSceneRef.current(sceneForDigit(digit));
+        return;
+      }
+      // ⌘[ / ⌘] step through the whole rail.
       if (!e.shiftKey && (key === "[" || key === "]")) {
         e.preventDefault();
         stepTabRef.current(key === "]" ? 1 : -1);
@@ -2333,6 +2358,7 @@ const App = () => {
       paneCount={viewCtxs.length}
       activeCfg={viewCtxs[activeView]?.cfg}
       openSetup={() => setSetupOpen(true)}
+      recallScene={recallScene}
       fullHidesTopBar={fullHidesTopBar}
       setFullHidesTopBar={setFullHidesTopBar}
       togglePaused={() => toggleRef.current("paused")}

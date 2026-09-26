@@ -181,7 +181,13 @@ value (red field, still playing).
   (overridden to `auto` in `TopBar`). Booleans that take effect are `Switch`,
   not checkboxes.
 - **`TAB_GROUPS` is the source of truth** for the ten rail sections; `PanelTab`
-  derives from it. ⌘1..⌘0 and ⌘[ / ⌘] are positional.
+  derives from it. Sections are ⌘⌥1..⌘⌥0 (positional) and ⌘[ / ⌘] -- ⌥, not
+  ⇧, because macOS takes ⌘⇧3/4/5 for screenshots. Digits are read from
+  `e.code`, since ⌥ changes `e.key`.
+- **Parameter scenes** (`parameterScenes`, js config, travel in presets;
+  `SceneList.tsx`): snapshots of whole `Parameter`s, recalled by ⌘1..⌘0
+  through `setParameters`. `applyScene` matches by name and never adds or
+  removes parameters; a roll comes back with its saved value.
 - **Inactive tabs, folded `Group`s and drum-lane disclosures are hidden, not
   unmounted** -- half-typed expressions must survive. `Group` needs a `summary`
   stating values; empty says `none`.

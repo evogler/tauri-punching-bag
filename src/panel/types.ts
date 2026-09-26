@@ -90,6 +90,8 @@ export type PanelProps = {
   patchView: (index: number, patch: Partial<ViewConfig>) => void;
 
   openSetup: () => void;
+  // Apply parameter scene `i`, the same thing ⌘ and its digit do.
+  recallScene: (i: number) => void;
   // Whether hiding the panel hides the top bar too. App's, not config: a
   // per-machine preference kept in localStorage.
   fullHidesTopBar: boolean;

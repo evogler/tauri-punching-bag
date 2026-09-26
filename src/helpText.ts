@@ -537,6 +537,18 @@ export const HELP: Record<string, HelpEntry> = {
     body: "The color showing through between the panes -- and through any cell of the arrangement no pane is sitting in.",
   },
 
+  "parameters.scene": {
+    title: "Scene",
+    body: "A saved set of parameter values. ⌘ and its number recalls it from anywhere, mid-phrase; everything written against the parameters follows. The outlined one matches what is in effect now.",
+  },
+  "parameters.sceneUpdate": {
+    title: "Update scene",
+    body: "Overwrite this scene with the parameters as they are now. How a scene is edited: set the parameters, then update.",
+  },
+  "parameters.sceneSave": {
+    title: "Save as scene",
+    body: "Snapshot every parameter as it stands. A scene only sets values -- recalling it never adds or removes parameters.",
+  },
   fullHidesTopBar: {
     title: "Hide top bar",
     body: "When a pane is clicked to hide the panel, hide the transport bar too, leaving only the panes. Click a pane to bring both back; ⌘P still pauses. Saved on this machine, never in presets.",

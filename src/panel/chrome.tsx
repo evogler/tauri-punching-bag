@@ -130,9 +130,11 @@ export const RAIL_TABS: PanelTab[] = TAB_GROUPS.flatMap(
   (g) => g.tabs as readonly PanelTab[]
 );
 
-/// ⌘1..⌘9 then ⌘0, in rail order -- the browser-tab and Logic-screenset
+/// ⌘⌥1..⌘⌥9 then ⌘⌥0, in rail order -- the browser-tab and Logic-screenset
 /// convention, and the only one where the key you press is something you can
 /// *see*: the digit is drawn in the rail button, so nobody has to be told.
+/// Plain ⌘digit went to parameter scenes, which are reached for mid-phrase;
+/// ⌥ rather than ⇧ because macOS takes ⌘⇧3/4/5 for screenshots.
 ///
 /// **Positional, which is the one part of this rail that does not scale.**
 /// Reordering the groups renumbers everything, and an eleventh section gets no
@@ -146,8 +148,8 @@ export const tabAccelerator = (tab: PanelTab): string | undefined => {
   return String((i + 1) % 10);
 };
 
-/// Which section a digit selects, or nothing if it names none. ⌘1 is the first
-/// and ⌘0 the tenth, so the digit is shifted down one and wrapped; a rail with
+/// Which section a digit selects, or nothing if it names none. ⌘⌥1 is the first
+/// and ⌘⌥0 the tenth, so the digit is shifted down one and wrapped; a rail with
 /// fewer than ten sections simply has no answer for the digits past its end.
 export const tabForDigit = (digit: string): PanelTab | undefined =>
   RAIL_TABS[(Number(digit) + 9) % 10];
@@ -235,7 +237,7 @@ export const TabRail = ({
               onClick={() => onSelect(tab)}
               // Generated from the position rather than written down, so the
               // label and the key that works can never disagree.
-              title={key ? `⌘${key}` : undefined}
+              title={key ? `⌘⌥${key}` : undefined}
               {...help(`tabs.${tab}`)}
               style={railButton(tab === active)}
             >

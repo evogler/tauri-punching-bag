@@ -1,5 +1,6 @@
 import { ParameterList } from "../ParameterList";
-import { Section } from "./chrome";
+import { SceneList } from "../SceneList";
+import { Divider, Section } from "./chrome";
 import { PanelProps } from "./types";
 
 // A rail entry rather than pinned above the tabs, which it was so that `n`
@@ -13,6 +14,13 @@ export const ParametersTab = (p: PanelProps) => (
       parameters={p.get("parameters")}
       setParameters={p.setParameters}
       reroll={p.reroll}
+    />
+    <Divider label="Scenes" />
+    <SceneList
+      scenes={p.get("parameterScenes")}
+      parameters={p.get("parameters")}
+      setScenes={(next) => p.set("parameterScenes", next)}
+      recall={p.recallScene}
     />
   </Section>
 );
