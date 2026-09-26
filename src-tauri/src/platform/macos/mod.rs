@@ -11,11 +11,9 @@
 mod devices;
 
 pub use devices::{
-    get_input_output_channels, list_devices, watch_device_changes, ActiveDevices,
-    AudioDeviceInfo,
+    get_input_output_channels, list_devices, resolve_choice, watch_device_changes, watch_rate,
+    ActiveDevices, AudioDeviceInfo, AudioSetup, DeviceChoice, HintSender, RateWatch,
 };
-
-use crate::constants::sample_rate;
 use crate::engine::{Engine, MAX_BLOCK_FRAMES};
 use crate::types::S;
 use coreaudio::audio_unit::render_callback::{self, data};
@@ -25,6 +23,10 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 pub type Args = render_callback::Args<data::NonInterleaved<S>>;
+
+/// What identifies a device while it is plugged in. Opaque to `audio_host.rs`,
+/// which only stores and compares it.
+pub type DeviceId = coreaudio::sys::AudioDeviceID;
 
 // Input is interleaved while output stays non-interleaved. coreaudio-rs rejects
 // non-interleaved input above one channel (NonInterleavedInputOnlySupportsMono)
@@ -40,8 +42,14 @@ pub const SAMPLE_FORMAT: SampleFormat = SampleFormat::F32;
 // separate devices -- would grow it forever. Cap the backlog and drop the
 // oldest excess. A quarter second is well above the few thousand
 // samples it normally holds, so this never fires in normal running.
-pub fn max_input_backlog() -> usize {
-    (sample_rate() * 0.25) as usize
+pub fn max_input_backlog(sample_rate: f64) -> usize {
+    (sample_rate * 0.25) as usize
+}
+
+/// The rate a device is running at now, for the supervisor's "has the input
+/// device's rate moved under us" check.
+pub fn device_rate(device: DeviceId) -> Option<f64> {
+    devices::get_device_sample_rate(device)
 }
 
 /// What AUHAL is asked for, in frames per callback. A request, not a promise
@@ -50,8 +58,10 @@ pub fn max_input_backlog() -> usize {
 pub const DEVICE_BUFFER_FRAMES: u32 = 2048;
 const _: () = assert!(DEVICE_BUFFER_FRAMES as usize <= MAX_BLOCK_FRAMES);
 
-/// The running units. Dropping this stops the audio, so `main` holds it for
-/// the life of the process.
+/// The running units. Dropping this stops the audio -- `AudioUnit`'s drop stops
+/// the unit, which waits for a render in progress, and then frees the render
+/// callback and with it the engine, on the dropping thread rather than the
+/// audio one. `AudioHost` holds it and replaces it on a restart.
 pub struct Running {
     _input: AudioUnit,
     _output: AudioUnit,
@@ -65,7 +75,8 @@ pub fn start(
     mut engine: Engine,
 ) -> Result<Running, Error> {
     let input_channels = engine.input_channels();
-    let queues = make_queues(input_channels);
+    let backlog = max_input_backlog(engine.sample_rate());
+    let queues = make_queues(input_channels, backlog);
     let consumers = queues.clone();
     // Assembled here, per block, from the per-channel queues: the core takes
     // one interleaved block rather than knowing there are queues at all. Sized
@@ -103,7 +114,7 @@ pub fn start(
                     // trims the startup gap, since the input unit is started
                     // before this one.
                     for queue in queues.iter_mut() {
-                        let excess = queue.len().saturating_sub(max_input_backlog());
+                        let excess = queue.len().saturating_sub(backlog);
                         queue.drain(..excess);
                     }
                 }
@@ -175,11 +186,12 @@ fn start_input_audio_unit(input_audio_unit: &mut AudioUnit, producers: Queues) -
 // matters.
 type Queues = Arc<Mutex<Vec<VecDeque<S>>>>;
 
-fn make_queues(channels: usize) -> Queues {
+fn make_queues(channels: usize, backlog: usize) -> Queues {
     // The backlog cap plus the most either side can add or take between two
     // trims, so a queue in ordinary running never outgrows what it starts with.
-    let capacity = max_input_backlog() + 2 * MAX_BLOCK_FRAMES;
+    let capacity = backlog + 2 * MAX_BLOCK_FRAMES;
     Arc::new(Mutex::new(
         (0..channels).map(|_| VecDeque::with_capacity(capacity)).collect(),
     ))
 }
+

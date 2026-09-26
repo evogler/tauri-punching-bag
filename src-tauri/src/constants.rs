@@ -1,69 +1,20 @@
 use crate::analysis::DEFAULT_WINDOW;
 use crate::engine::MAX_BLOCK_FRAMES;
 use crate::structs::{Config, DrumVoice, Note, ParserRhythm};
-/// Fallback only. The real rate is whatever the input device is running at --
-/// see `sample_rate()`.
+/// What a device that will not say its own rate is assumed to run at. Only a
+/// fallback for that one case: the real rate is whatever the input device is
+/// running at, and it belongs to the audio setup that is running now -- see
+/// `AudioStatus` in `audio_host.rs`.
+///
+/// There used to be a process-global `sample_rate()` here, a `OnceLock` set
+/// once at launch. Two things ended it. The device can change while the app
+/// runs (step 3 of `docs/ios-port.md`), so the rate is no longer a property
+/// of the process; and a read before audio setup used to *freeze* the 44.1
+/// kHz fallback -- the built-in kit decoded ahead of the device made the whole
+/// process run at the wrong rate, which AUHAL answers with silence. Now every
+/// function that needs a rate takes one as an argument, so nothing *can* read
+/// it before audio setup has learned it: there is nothing to read.
 pub const DEFAULT_SAMPLE_RATE: f64 = 44100.0;
-
-/// The rate everything downstream is expressed in, learned from the input
-/// device at startup by `get_input_output_channels` and never changed after.
-///
-/// It cannot be a `const`: a MacBook's built-in microphone runs at 48 kHz, and
-/// asking AUHAL to hand us 44.1 kHz from it produces *silence* rather than a
-/// converted stream or an error -- an input of all zeroes with nothing in any
-/// log, which is indistinguishable from a missing microphone grant. Adopting
-/// the device's own rate is the only reliable option.
-///
-/// A `OnceLock` rather than a parameter threaded through every caller because
-/// this is genuinely a property of the process, fixed before the first audio
-/// callback runs, and read from both the audio thread and the command handlers.
-static SAMPLE_RATE_HZ: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
-
-/// Set by `sample_rate()` when it had to answer with the fallback. Reading the
-/// rate is not supposed to happen before audio setup has learned it, and for a
-/// while it was worse than not supposed to: `get_or_init` *froze* the fallback,
-/// so one stray early read -- decoding the built-in kit, say -- locked the
-/// process at 44.1 kHz and the later `set_sample_rate(48000)` did nothing. The
-/// input unit was then opened at the wrong rate against a 48 kHz device, which
-/// AUHAL answers with silence rather than an error. A read no longer decides
-/// anything; this flag only exists so that ordering mistake stays loud.
-static RATE_READ_EARLY: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-
-pub fn sample_rate() -> f64 {
-    match SAMPLE_RATE_HZ.get() {
-        Some(hz) => *hz,
-        None => {
-            RATE_READ_EARLY.store(true, std::sync::atomic::Ordering::Relaxed);
-            DEFAULT_SAMPLE_RATE
-        }
-    }
-}
-
-/// Called once, from audio setup, before anything reads `sample_rate()`. A
-/// second call is ignored rather than fatal -- the rate is already baked into
-/// buffer sizes by then, so changing it underneath them would be worse.
-pub fn set_sample_rate(hz: f64) {
-    if !(hz > 0.0) {
-        return;
-    }
-    if SAMPLE_RATE_HZ.set(hz).is_err() {
-        println!("sample rate already fixed at {}, ignoring {}", sample_rate(), hz);
-        return;
-    }
-    // Nothing is wrong yet -- the cell was unset, so this call won -- but
-    // something already read the rate and acted on the fallback. Whatever it
-    // sized or resampled is at 44.1 kHz on a device that may not be, and it
-    // will not be recomputed. Say so where the two numbers are side by side.
-    if RATE_READ_EARLY.load(std::sync::atomic::Ordering::Relaxed) && hz != DEFAULT_SAMPLE_RATE {
-        println!(
-            "WARNING: something read the sample rate before audio setup ran, so it \
-             saw the {} Hz fallback rather than the device's {} Hz. Whatever that was \
-             is sized or resampled wrong; move it after get_input_output_channels.",
-            DEFAULT_SAMPLE_RATE, hz
-        );
-    }
-}
 
 /// Frames of *display* backlog the callback will hold before it stops pushing.
 /// Only reachable if the frontend stops draining -- a wedged UI shouldn't be

@@ -1,6 +1,5 @@
 use std::time::Instant;
 
-use crate::constants::sample_rate;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error;
@@ -38,7 +37,11 @@ impl AudioFile {
 ///
 /// Mono lands on both sides at full level rather than being panned, since a
 /// mono drum bounce is meant to be centred.
-pub fn to_device_stereo(file: &AudioFile) -> Vec<f32> {
+///
+/// `device_rate` is an argument rather than something this reads, which is what
+/// makes decoding before the device is known impossible rather than merely
+/// wrong: there is no rate to read until audio setup has one to hand over.
+pub fn to_device_stereo(file: &AudioFile, device_rate: f64) -> Vec<f32> {
     let in_ch = file.channels.max(1);
     let in_frames = file.frames();
     if in_frames == 0 {
@@ -46,8 +49,8 @@ pub fn to_device_stereo(file: &AudioFile) -> Vec<f32> {
     }
     // Input frames per output frame. 1.0 when the rates already agree, and the
     // interpolation below then reduces to an exact sample copy.
-    let ratio = if file.rate > 0.0 {
-        file.rate / sample_rate()
+    let ratio = if file.rate > 0.0 && device_rate > 0.0 {
+        file.rate / device_rate
     } else {
         1.0
     };
@@ -68,12 +71,6 @@ pub fn to_device_stereo(file: &AudioFile) -> Vec<f32> {
         }
     }
     out
-}
-
-/// Interleaved stereo at the device rate, which is what both the file player
-/// and the drum voices assume.
-pub fn get_samples_from_filename(filename: &String) -> Result<Vec<f32>, String> {
-    Ok(to_device_stereo(&decode_audio_file(filename)?))
 }
 
 pub fn decode_audio_file(filename: &String) -> Result<AudioFile, String> {

@@ -18,10 +18,9 @@
 //! canonical 44.
 use std::fs::File;
 use std::io::{BufWriter, Seek, SeekFrom, Write};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use crate::constants::sample_rate;
 
 /// How much the callback can get ahead of the writer before a frame is
 /// dropped. Forty flush intervals, so it only ever fires if the disk has
@@ -213,12 +212,18 @@ pub struct RecordingStatus {
 struct Info {
     path: String,
     channels: usize,
+    /// The rate the file's header was written with, so the status reports its
+    /// length in the file's own seconds whatever the device is doing now.
+    rate: f64,
     error: String,
 }
 
 pub struct Recorder {
-    /// Fixed at launch, like every other per-channel buffer in the callback.
-    input_channels: usize,
+    /// The running device's input count. Changed only by an audio restart,
+    /// with the units stopped -- and a recording in flight is stopped first if
+    /// the count moves, since its file already has a channel count in its
+    /// header. See `set_input_channels`.
+    input_channels: AtomicUsize,
     /// Read by the callback before it takes any lock at all, so a session that
     /// is not recording costs one relaxed load a callback.
     armed: AtomicBool,
@@ -244,7 +249,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 impl Recorder {
     pub fn new(input_channels: usize) -> Self {
         Recorder {
-            input_channels,
+            input_channels: AtomicUsize::new(input_channels),
             armed: AtomicBool::new(false),
             stopping: AtomicBool::new(false),
             buffer: Mutex::new(RecordBuffer::idle()),
@@ -265,11 +270,47 @@ impl Recorder {
         lock(&self.buffer)
     }
 
+    /// Only while nothing is recording at a different width -- the restart
+    /// stops an incompatible recording before calling this. A recording that
+    /// is compatible (same count, same rate) is left running across the
+    /// restart; its `RecordBuffer` keeps the count it was started with.
+    pub fn set_input_channels(&self, channels: usize) {
+        self.input_channels.store(channels, Ordering::Relaxed);
+    }
+
+    /// The rate the running recording was started with, and its input width
+    /// if it is recording the inputs at all -- or `None` when nothing is
+    /// recording. An output-only recording does not care how many inputs the
+    /// device has.
+    pub fn recording_format(&self) -> Option<(f64, Option<usize>)> {
+        if !self.armed() {
+            return None;
+        }
+        let rate = lock(&self.info).rate;
+        let buf = lock(&self.buffer);
+        let inputs = if buf.record_input { Some(buf.input_channels) } else { None };
+        Some((rate, inputs))
+    }
+
+    /// Stops and finishes the file, and leaves `reason` where the panel shows
+    /// a writer failure -- so a recording ended by the device changing says so
+    /// rather than simply not being there any more.
+    pub fn stop_because(&self, reason: &str) -> RecordingStatus {
+        self.stop();
+        let mut info = lock(&self.info);
+        if info.error.is_empty() {
+            info.error = reason.to_string();
+        }
+        drop(info);
+        self.status()
+    }
+
     pub fn start(
         self: &Arc<Self>,
         path: &str,
         record_input: bool,
         record_output: bool,
+        sample_rate: f64,
     ) -> Result<(), String> {
         if self.armed() {
             return Err("already recording".into());
@@ -278,12 +319,13 @@ impl Recorder {
         // writer that failed on its own returns without being asked to.
         self.join_writer();
 
-        let channels = (if record_input { self.input_channels } else { 0 })
+        let input_channels = self.input_channels.load(Ordering::Relaxed);
+        let channels = (if record_input { input_channels } else { 0 })
             + if record_output { 2 } else { 0 };
         if channels == 0 {
             return Err("nothing to record: choose the input, the output, or both".into());
         }
-        let rate = sample_rate();
+        let rate = sample_rate;
         let wav = WavFile::create(path, channels as u16, rate as u32)?;
 
         let capacity = (RING_SECONDS * rate) as usize * channels;
@@ -292,7 +334,7 @@ impl Recorder {
             *buf = RecordBuffer {
                 samples: Vec::with_capacity(capacity),
                 dropped_frames: 0,
-                input_channels: self.input_channels,
+                input_channels,
                 record_input,
                 record_output,
             };
@@ -302,6 +344,7 @@ impl Recorder {
         *lock(&self.info) = Info {
             path: path.to_string(),
             channels,
+            rate,
             error: String::new(),
         };
         self.stopping.store(false, Ordering::Relaxed);
@@ -324,7 +367,7 @@ impl Recorder {
     pub fn status(&self) -> RecordingStatus {
         let info = lock(&self.info);
         let frames = self.frames_written.load(Ordering::Relaxed);
-        let rate = sample_rate();
+        let rate = info.rate;
         RecordingStatus {
             recording: self.armed(),
             path: info.path.clone(),

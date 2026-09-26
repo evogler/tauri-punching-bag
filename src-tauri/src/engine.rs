@@ -40,7 +40,7 @@ use crate::util::{
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::{
     collections::HashMap,
-    sync::atomic::{AtomicBool, AtomicU32},
+    sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, AtomicUsize, Ordering},
     sync::{Arc, Mutex},
 };
 
@@ -88,17 +88,95 @@ pub struct EngineShared {
     pub recorder: Arc<Recorder>,
     pub samples: Arc<Mutex<VisualSamples>>,
     pub analysis: Arc<Mutex<AnalysisFrames>>,
+    /// Where the clock had got to, published at the end of every block so an
+    /// audio restart can seed the next engine from it -- see `Carry`.
+    pub carry: Arc<EngineCarry>,
 }
 
-/// The render callback's state. Built once, before the device starts, and
-/// sized from the input channel count -- which cannot change under it, since a
-/// device change builds a new one.
+/// What one engine hands the next across an audio restart. Everything else an
+/// engine holds is either rebuilt from the config within a callback or is
+/// state that genuinely does not survive a change of device (filter memories,
+/// the bleed measurement, drums ringing at the old rate).
+///
+/// - `beat` is the master clock and is in beats, so it means the same thing at
+///   any rate: the click, the drums, the file and the display cursor come back
+///   exactly where they were, less the few tens of milliseconds the units were
+///   stopped.
+/// - `last_beat` is the click's last subdivision. Starting the new engine at
+///   the default -1 would sound a click on the first frame wherever the beat
+///   is, which is a spurious one. Drum voices need nothing: a new engine sees
+///   each voice for the first time and records the current hit rather than
+///   firing, unless the beat is exactly 0.
+/// - `cycle_count` keeps `VisualSamples::cycle` monotonic, which is what the
+///   frontend rerolls on.
+/// - `loop_written` only when the loop buffer is kept -- a buffer cleared by
+///   the restart has nothing written in it, which is what 0 says.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Carry {
+    pub beat: f64,
+    pub last_beat: isize,
+    pub cycle_count: u64,
+    pub loop_written: usize,
+}
+
+impl Default for Carry {
+    fn default() -> Self {
+        Carry {
+            beat: 0.0,
+            last_beat: -1,
+            cycle_count: 0,
+            loop_written: 0,
+        }
+    }
+}
+
+/// `Carry`, as atomics the audio thread can store into without a lock. Read
+/// only once the units have been stopped -- `AudioOutputUnitStop` waits for a
+/// render in progress to finish -- so what is read is the last block's end.
+pub struct EngineCarry {
+    beat: AtomicU64,
+    last_beat: AtomicI64,
+    cycle_count: AtomicU64,
+    loop_written: AtomicUsize,
+}
+
+impl EngineCarry {
+    pub fn new() -> Self {
+        let c = Carry::default();
+        EngineCarry {
+            beat: AtomicU64::new(c.beat.to_bits()),
+            last_beat: AtomicI64::new(c.last_beat as i64),
+            cycle_count: AtomicU64::new(c.cycle_count),
+            loop_written: AtomicUsize::new(c.loop_written),
+        }
+    }
+
+    pub fn load(&self) -> Carry {
+        Carry {
+            beat: f64::from_bits(self.beat.load(Ordering::Acquire)),
+            last_beat: self.last_beat.load(Ordering::Acquire) as isize,
+            cycle_count: self.cycle_count.load(Ordering::Acquire),
+            loop_written: self.loop_written.load(Ordering::Acquire),
+        }
+    }
+
+    fn store(&self, c: Carry) {
+        self.beat.store(c.beat.to_bits(), Ordering::Release);
+        self.last_beat.store(c.last_beat as i64, Ordering::Release);
+        self.cycle_count.store(c.cycle_count, Ordering::Release);
+        self.loop_written.store(c.loop_written, Ordering::Release);
+    }
+}
+
+/// The render callback's state. Built before the device starts, off the audio
+/// thread, and sized from the input channel count and the rate -- neither of
+/// which can change under it: an audio restart (`audio_host.rs`) stops the
+/// units and builds a new one, seeded from this one's `Carry`.
 pub struct Engine {
     shared: EngineShared,
     input_channels: usize,
-    /// Handed over at construction rather than read from the process-global
-    /// `sample_rate()`, so the rate can become per-engine state without this
-    /// file changing.
+    /// Handed over at construction: the rate belongs to the device this engine
+    /// was built for, and a device at another rate gets another engine.
     sample_rate: f64,
     sounding_samples: Vec<SoundingSample>,
     // The rhythms, pans and samples the frame loop reads, resolved from the
@@ -177,7 +255,7 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new(shared: EngineShared, input_channels: usize, sample_rate: f64) -> Self {
+    pub fn new(shared: EngineShared, input_channels: usize, sample_rate: f64, carry: Carry) -> Self {
         Engine {
             shared,
             input_channels,
@@ -195,8 +273,8 @@ impl Engine {
             loop_visual: vec![0f32; input_channels],
             bounds: Vec::new(),
             record_bounds: Vec::new(),
-            loop_written: 0,
-            cycle_count: 0,
+            loop_written: carry.loop_written,
+            cycle_count: carry.cycle_count,
             input_high_pass: (0..input_channels).map(|_| HighPass::new()).collect(),
             loop_high_pass: (0..input_channels).map(|_| HighPass::new()).collect(),
             pred_high_pass: (0..input_channels).map(|_| HighPass::new()).collect(),
@@ -207,8 +285,8 @@ impl Engine {
             loop_guard: (0..input_channels).map(|_| LoopGuard::new(sample_rate)).collect(),
             input_peaks: vec![0f32; input_channels],
             rng: StdRng::from_entropy(),
-            beat: 0.0,
-            last_beat: -1,
+            beat: carry.beat,
+            last_beat: carry.last_beat,
         }
     }
 
@@ -216,10 +294,26 @@ impl Engine {
         self.input_channels
     }
 
+    pub fn sample_rate(&self) -> f64 {
+        self.sample_rate
+    }
+
     /// One block. `input` is `n` frames interleaved, `input_channels` wide;
     /// `output` is the two sides of the stereo out, each `n` long, and every
     /// sample of both is written. `n` is whatever the platform handed over.
     pub fn process(&mut self, input: &[S], output: [&mut [S]; 2]) {
+        self.run(input, output);
+        // After every path through `run`, early returns included, so the
+        // carry is always the end of the last block. Four plain stores.
+        self.shared.carry.store(Carry {
+            beat: self.beat,
+            last_beat: self.last_beat,
+            cycle_count: self.cycle_count,
+            loop_written: self.loop_written,
+        });
+    }
+
+    fn run(&mut self, input: &[S], output: [&mut [S]; 2]) {
         let mut output = output;
         let n = output[0].len();
         let c_in = self.input_channels;
@@ -550,7 +644,7 @@ impl Engine {
         // apart from a voice that has simply not moved yet; see the seeding
         // below.
         let at_transport_start = *beat == 0.0;
-        let loop_spacing = get_loop_spacing(&config);
+        let loop_spacing = get_loop_spacing(&config, sample_rate);
         // Once per callback, next to the tap gains: the cycle only moves when
         // the config does, and the frame loop just asks which phase it is in.
         let record_cycle_on = config.loop_record_cycle_on;
@@ -1171,8 +1265,8 @@ impl Engine {
     }
 }
 
-// Step 3 of the iOS plan builds a fresh engine off the audio thread and hands
-// it over, so this has to stay `Send` -- which is also why the rng is not
+// An audio restart builds a fresh engine off the audio thread and hands it
+// over, so this has to stay `Send` -- which is also why the rng is not
 // `thread_rng`.
 const _: fn() = || {
     fn assert_send<T: Send>() {}

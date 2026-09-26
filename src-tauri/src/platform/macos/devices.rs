@@ -1,7 +1,7 @@
 extern crate coreaudio;
 
 use super::SAMPLE_FORMAT;
-use crate::constants::{sample_rate, set_sample_rate, DEFAULT_SAMPLE_RATE};
+use crate::constants::DEFAULT_SAMPLE_RATE;
 use crate::prefs::AudioPrefs;
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::macos_helpers::{
@@ -300,9 +300,25 @@ fn open_unit(
 /// shows up in the dropdown without the user having to know to look again.
 pub const DEVICES_CHANGED_EVENT: &str = "devices-changed";
 
-/// Core Audio's own notification that a device appeared or went away. Runs on a
-/// Core Audio thread -- *not* the render thread, and it only emits a Tauri
-/// event, so there is nothing here that could stall audio.
+/// How a Core Audio listener asks for the audio to be looked at again. A unit
+/// value: the listener cannot usefully say more than "something changed", and
+/// the supervisor thread in `audio_host.rs` works out what, once the burst of
+/// notifications a single plug event produces has gone quiet.
+///
+/// **The listeners only ever send on this.** They run on Core Audio's own
+/// notification threads, and restarting from one would mean stopping an audio
+/// unit from inside a Core Audio callback -- which is the shape of a deadlock
+/// rather than a restart.
+pub type HintSender = std::sync::mpsc::Sender<()>;
+
+struct Watch {
+    app: tauri::AppHandle,
+    hint: &'static HintSender,
+}
+
+/// The device list, or either system default, changed. Emits the picker's
+/// event and asks the supervisor to look -- nothing else, and nothing that can
+/// block.
 extern "C" fn devices_changed_listener(
     _object: AudioObjectID,
     _count: u32,
@@ -310,39 +326,181 @@ extern "C" fn devices_changed_listener(
     context: *mut std::ffi::c_void,
 ) -> OSStatus {
     unsafe {
-        if let Some(app) = (context as *const tauri::AppHandle).as_ref() {
+        if let Some(watch) = (context as *const Watch).as_ref() {
             use tauri::Emitter;
-            let _ = app.emit(DEVICES_CHANGED_EVENT, ());
+            let _ = watch.app.emit(DEVICES_CHANGED_EVENT, ());
+            let _ = watch.hint.send(());
         }
     }
     kAudioHardwareNoError as OSStatus
 }
 
-/// Registers the listener for the lifetime of the process. The `AppHandle` is
-/// deliberately leaked: Core Audio holds the pointer until the listener is
-/// removed, and it never is -- there is no unregister path because the only
-/// time this stops mattering is at exit.
-pub fn watch_device_changes(app: tauri::AppHandle) {
-    let property_address = AudioObjectPropertyAddress {
-        mSelector: kAudioHardwarePropertyDevices,
+/// Registers for the lifetime of the process: the device list, the default
+/// input and the default output. The context is deliberately leaked -- Core
+/// Audio holds the pointer until the listener is removed, and it never is,
+/// because the only time this stops mattering is at exit.
+///
+/// The two defaults are what "System default" in the picker follows: plugging
+/// headphones into a Mac whose headphones are their own device, or AirPods
+/// connecting, moves the default output, and the audio has to move with it.
+pub fn watch_device_changes(app: tauri::AppHandle, hint: &'static HintSender) {
+    let context = Box::into_raw(Box::new(Watch { app, hint })) as *mut std::ffi::c_void;
+    for selector in [
+        kAudioHardwarePropertyDevices,
+        kAudioHardwarePropertyDefaultInputDevice,
+        kAudioHardwarePropertyDefaultOutputDevice,
+    ] {
+        let property_address = AudioObjectPropertyAddress {
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMaster,
+        };
+        let status = unsafe {
+            AudioObjectAddPropertyListener(
+                kAudioObjectSystemObject,
+                &property_address as *const _,
+                Some(devices_changed_listener),
+                context,
+            )
+        };
+        if status != kAudioHardwareNoError as i32 {
+            // Not fatal: the picker still refreshes when it is opened and when
+            // the window regains focus, and choosing a device restarts the
+            // audio directly. What is lost is following the default by itself.
+            println!("could not watch for device changes ({}, selector {})", status, selector);
+        }
+    }
+}
+
+extern "C" fn rate_changed_listener(
+    _object: AudioObjectID,
+    _count: u32,
+    _addresses: *const AudioObjectPropertyAddress,
+    context: *mut std::ffi::c_void,
+) -> OSStatus {
+    unsafe {
+        if let Some(hint) = (context as *const HintSender).as_ref() {
+            let _ = hint.send(());
+        }
+    }
+    kAudioHardwareNoError as OSStatus
+}
+
+fn rate_address() -> AudioObjectPropertyAddress {
+    AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyNominalSampleRate,
         mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMaster,
-    };
-    let context = Box::into_raw(Box::new(app)) as *mut std::ffi::c_void;
+    }
+}
+
+/// A listener on one device's nominal rate, removed when this is dropped. The
+/// input device's rate changing under a running unit -- Audio MIDI Setup, or
+/// another app asking for a different one -- is the silent-zeroes failure from
+/// *Input capture*, so it is treated like a device change: the supervisor
+/// restarts at the new rate. One per running setup; the restart replaces it.
+pub struct RateWatch {
+    device: AudioDeviceID,
+    hint: &'static HintSender,
+}
+
+// The pointer inside is to a leaked `'static` sender, so moving the guard
+// between threads moves nothing that could dangle.
+unsafe impl Send for RateWatch {}
+
+pub fn watch_rate(device: AudioDeviceID, hint: &'static HintSender) -> Option<RateWatch> {
+    let address = rate_address();
     let status = unsafe {
         AudioObjectAddPropertyListener(
-            kAudioObjectSystemObject,
-            &property_address as *const _,
-            Some(devices_changed_listener),
-            context,
+            device,
+            &address as *const _,
+            Some(rate_changed_listener),
+            hint as *const HintSender as *mut std::ffi::c_void,
         )
     };
     if status != kAudioHardwareNoError as i32 {
-        // Not fatal: the picker still refreshes when it is opened and when the
-        // window regains focus, which covers the common "plug in, click back
-        // into the app" path on its own.
-        println!("could not watch for device changes ({})", status);
+        println!("could not watch the input device's rate ({})", status);
+        return None;
     }
+    Some(RateWatch { device, hint })
+}
+
+impl Drop for RateWatch {
+    fn drop(&mut self) {
+        let address = rate_address();
+        // Fails harmlessly if the device has gone, which is the usual reason a
+        // restart is replacing this at all.
+        unsafe {
+            AudioObjectRemovePropertyListener(
+                self.device,
+                &address as *const _,
+                Some(rate_changed_listener),
+                self.hint as *const HintSender as *mut std::ffi::c_void,
+            );
+        }
+    }
+}
+
+/// What a setup *resolves to* from the prefs and the machine as it is now, and
+/// so the thing compared to decide whether a restart has anything to do. The
+/// requested devices, not the ones `open_unit` may have fallen back to: a
+/// device that refuses to open would otherwise never compare equal, and every
+/// notification would retry it.
+///
+/// `AudioDeviceID`s rather than UIDs, deliberately. An interface unplugged and
+/// plugged back in keeps its UID and gets a new id -- and the running unit is
+/// still bound to the old, dead one. Comparing ids is what notices.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeviceChoice {
+    pub input_id: AudioDeviceID,
+    pub output_id: AudioDeviceID,
+    /// What the requested input offers, before any mono fallback -- the same
+    /// reason as above: the fallback would otherwise never compare equal.
+    pub input_channels: usize,
+}
+
+struct Resolved {
+    choice: DeviceChoice,
+    input_reason: Option<String>,
+    output_reason: Option<String>,
+    default_input_id: AudioDeviceID,
+    default_output_id: AudioDeviceID,
+}
+
+/// The prefs against the devices present now: a saved device that is missing,
+/// or present and unable to do its job, becomes the system default and a
+/// reason. Opens nothing, so it is cheap enough to run on every notification.
+fn resolve(prefs: &AudioPrefs) -> Result<Resolved, String> {
+    let default_input_id =
+        get_default_device_id(true).ok_or_else(|| "no default input device".to_string())?;
+    let default_output_id =
+        get_default_device_id(false).ok_or_else(|| "no default output device".to_string())?;
+    let (requested_input, input_reason) = match device_for_role(&prefs.input_uid, Role::Input) {
+        Ok(id) => (id, None),
+        Err(why) => (None, Some(why)),
+    };
+    let (requested_output, output_reason) =
+        match device_for_role(&prefs.output_uid, Role::Output) {
+            Ok(id) => (id, None),
+            Err(why) => (None, Some(why)),
+        };
+    let input_id = requested_input.unwrap_or(default_input_id);
+    Ok(Resolved {
+        choice: DeviceChoice {
+            input_id,
+            output_id: requested_output.unwrap_or(default_output_id),
+            input_channels: get_device_input_channels(input_id).max(1),
+        },
+        input_reason,
+        output_reason,
+        default_input_id,
+        default_output_id,
+    })
+}
+
+/// What a setup opened now would be asked for. See `DeviceChoice`.
+pub fn resolve_choice(prefs: &AudioPrefs) -> Result<DeviceChoice, String> {
+    resolve(prefs).map(|r| r.choice)
 }
 
 /// Everything audio setup produces. A struct rather than a tuple because it
@@ -353,15 +511,25 @@ pub struct AudioSetup {
     pub input_channels: usize,
     pub log: Vec<String>,
     pub active: ActiveDevices,
+    /// The rate the units were opened at: the input device's own. Handed back
+    /// rather than stored anywhere global -- the caller owns it, and nothing
+    /// can read a rate before this function has produced one.
+    pub sample_rate: f64,
+    /// What was asked for, to compare against later -- see `DeviceChoice`.
+    pub choice: DeviceChoice,
+    /// The input device actually opened, whose rate is watched.
+    pub input_device_id: AudioDeviceID,
 }
 
-/// Open the pair of units the render callback is built around.
+/// Open the pair of units the render callback is built around. Used at launch
+/// and by every audio restart; the units come back configured but not started.
 ///
 /// The error type is a message rather than `coreaudio::Error` on purpose: by
 /// the time anything here fails, which device and which role it failed for is
 /// the whole of what is worth knowing, and `Err(InvalidPropertyValue)` says
-/// neither. There is no window yet to show it in, so this is the only account
-/// of a failed launch there will ever be.
+/// neither. At launch there is no window yet to show it in, so this is the only
+/// account of a failed launch there will ever be; on a restart it goes to the
+/// panel.
 pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, String> {
     let devices = get_audio_device_ids();
     devices.unwrap().iter().for_each(|d| {
@@ -375,19 +543,13 @@ pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Strin
     // to the panel. Recording from the built-in mic while the user believes
     // their interface is selected is exactly the kind of silent wrong answer
     // that wastes an afternoon.
-    let default_input_id =
-        get_default_device_id(true).ok_or_else(|| "no default input device".to_string())?;
-    let default_output_id =
-        get_default_device_id(false).ok_or_else(|| "no default output device".to_string())?;
-    let (requested_input, mut input_reason) = match device_for_role(&prefs.input_uid, Role::Input) {
-        Ok(id) => (id, None),
-        Err(why) => (None, Some(why)),
-    };
-    let (requested_output, mut output_reason) =
-        match device_for_role(&prefs.output_uid, Role::Output) {
-            Ok(id) => (id, None),
-            Err(why) => (None, Some(why)),
-        };
+    let Resolved {
+        choice,
+        mut input_reason,
+        mut output_reason,
+        default_input_id,
+        default_output_id,
+    } = resolve(prefs)?;
     if let Some(why) = &input_reason {
         println!("{}, using default", why);
     }
@@ -397,14 +559,11 @@ pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Strin
 
     // Opened before the rate is settled, because a retry can land on a
     // different input device than the one asked for and the rate has to be the
-    // one that was actually opened. `sample_rate()` can only be set once.
+    // one that was actually opened.
     let (mut input_audio_unit, input_device_id, input_open_reason) =
-        open_unit(requested_input.unwrap_or(default_input_id), Role::Input, default_input_id)?;
-    let (mut output_audio_unit, output_device_id, output_open_reason) = open_unit(
-        requested_output.unwrap_or(default_output_id),
-        Role::Output,
-        default_output_id,
-    )?;
+        open_unit(choice.input_id, Role::Input, default_input_id)?;
+    let (mut output_audio_unit, output_device_id, output_open_reason) =
+        open_unit(choice.output_id, Role::Output, default_output_id)?;
     input_reason = input_reason.or(input_open_reason);
     output_reason = output_reason.or(output_open_reason);
 
@@ -426,10 +585,9 @@ pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Strin
     // convert on the way in: point it at a 48 kHz microphone while asking for
     // 44.1 kHz and it returns zeroes, silently. Everything downstream --
     // beats_per_sample, the loop buffer, the analyzer -- is derived from this,
-    // so it has to be settled before any of them are built. Nothing in this
-    // process may read `sample_rate()` before this line; see `constants.rs`.
+    // so it has to be settled before any of them are built -- which is now
+    // enforced by there being nothing to read until this returns it.
     let device_rate = get_device_sample_rate(input_device_id).unwrap_or(DEFAULT_SAMPLE_RATE);
-    set_sample_rate(device_rate);
     let out_device_rate = get_device_sample_rate(output_device_id).unwrap_or(device_rate);
     println!(
         "input device rate {} Hz, output device rate {} Hz",
@@ -462,7 +620,7 @@ pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Strin
     // non-interleaved caps input at one channel. Interleaved packs every channel
     // into that one buffer, which is what lets us capture more than one.
     let make_in_format = |channels: u32| StreamFormat {
-        sample_rate: sample_rate(),
+        sample_rate: device_rate,
         sample_format: SAMPLE_FORMAT,
         flags: format_flag | LinearPcmFlags::IS_PACKED,
         channels,
@@ -470,7 +628,7 @@ pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Strin
     let in_stream_format = make_in_format(input_channels as u32);
 
     let out_stream_format = StreamFormat {
-        sample_rate: sample_rate(),
+        sample_rate: device_rate,
         sample_format: SAMPLE_FORMAT,
         flags: format_flag | LinearPcmFlags::IS_PACKED | LinearPcmFlags::IS_NON_INTERLEAVED,
         // you can change this to 1
@@ -548,5 +706,8 @@ pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Strin
         input_channels,
         log: result_log,
         active,
+        sample_rate: device_rate,
+        choice,
+        input_device_id,
     })
 }

@@ -26,6 +26,12 @@ pub struct Mp3Buffer {
     /// The ratio `buffer` is currently rendered at, so an unchanged request
     /// costs nothing.
     pub ratio: f64,
+    /// Where `natural` was decoded from, empty for no file. An audio restart
+    /// onto a device at another rate decodes it again from here rather than
+    /// resampling `natural`, which is already at the old rate: converting a
+    /// conversion compounds, and 44.1 -> 48 -> 44.1 would not come back to the
+    /// file it started as. Never read by the audio thread.
+    pub path: String,
 }
 
 impl Mp3Buffer {
@@ -143,8 +149,24 @@ pub struct AnalysisOutputBuffer {
     pub drained: Arc<DrainSizes>,
 }
 
-/// How many input channels the capture device actually gave us.
-pub struct InputChannelCount(pub usize);
+/// What is running now: which devices, how many inputs, at what rate. Written
+/// only by `audio_host.rs` -- at launch, and by a restart while the units are
+/// stopped and the config lock is held -- and read by any command that has to
+/// size or convert something for the device. **The rate lives here**, where it
+/// used to be a process-global `OnceLock` that could never change.
+///
+/// Readers that build something the engine will then use at this rate (the
+/// loop buffer in `set_config`) read it under the config lock, which is what
+/// makes the pair consistent: a restart changes the rate and resizes what
+/// depends on it inside one hold of that lock. Readers that load audio (drum
+/// samples, the file) hold `AudioHost::gate` instead.
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioStatus {
+    pub active: crate::platform::ActiveDevices,
+    pub input_channels: usize,
+    pub sample_rate: f64,
+}
 
 // One recording per input channel, all sharing a position. Per channel rather
 // than a mono sum so a looped take plays back on the channel it was played on.
@@ -407,7 +429,18 @@ pub struct SoundingSample {
 
 /// Decoded drum samples, keyed the same way a voice names them: either a
 /// built-in name like "ride" or the absolute path it was loaded from.
-pub struct DrumSamples(pub Arc<Mutex<HashMap<String, Arc<Vec<f32>>>>>);
+///
+/// The first map is what the engine plays, at the device rate. The second is
+/// each sample as decoded, at its *own* rate, so an audio restart onto a device
+/// at another rate converts from the source again rather than from the last
+/// conversion -- 44.1 -> 48 -> 44.1 must come back to exactly the sample it
+/// started as. The engine never touches the second map. Drum one-shots are
+/// small, so keeping both is cheap; the file player re-decodes from its path
+/// instead, since a song is not.
+pub struct DrumSamples(
+    pub Arc<Mutex<HashMap<String, Arc<Vec<f32>>>>>,
+    pub Arc<Mutex<HashMap<String, Arc<crate::read_audio_file::AudioFile>>>>,
+);
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DrumVoice {
@@ -555,7 +588,12 @@ pub struct KitState(pub Vec<KitSound>);
 /// the callback wait: the callback only ever raises a slot, and the command
 /// reads and zeroes it. A raise racing a read loses at most one callback of
 /// peak, which a meter cannot show anyway.
-pub struct InputLevelState(pub Arc<Vec<std::sync::atomic::AtomicU32>>);
+///
+/// One slot per input, so an audio restart at a different count builds a new
+/// set: the new engine gets its own `Arc`, and this mutex is only ever taken by
+/// the command and the restart -- never the audio thread, which holds its own
+/// clone.
+pub struct InputLevelState(pub Arc<Mutex<Arc<Vec<std::sync::atomic::AtomicU32>>>>);
 
 pub fn raise_level(levels: &[std::sync::atomic::AtomicU32], ch: usize, peak: f32) {
     use std::sync::atomic::Ordering;

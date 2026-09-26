@@ -1,17 +1,19 @@
 use crate::analysis::{BINS, MAX_ANALYSIS_CHANNELS};
+use crate::audio_host::AudioHostState;
 use crate::calibration::{analyze, CalibrationPhase, CalibrationResult};
-use crate::constants::{sample_rate, ANALYSIS_RESERVE_HOPS, ONSET_RESERVE, VISUAL_RESERVE_FRAMES};
+use crate::constants::{ANALYSIS_RESERVE_HOPS, ONSET_RESERVE, VISUAL_RESERVE_FRAMES};
 use crate::get_loop_buffer_size::get_loop_buffer_size;
 use crate::platform::{list_devices, ActiveDevices, AudioDeviceInfo};
+use crate::structs::AudioStatus;
 use crate::prefs::{load as load_prefs, save as save_prefs, AudioPrefs};
 use crate::presets;
-use crate::read_audio_file::{decode_audio_file, get_samples_from_filename, to_device_stereo};
+use crate::read_audio_file::{decode_audio_file, to_device_stereo};
 use crate::stretch::{desired_ratio, request as request_stretch};
 use crate::recorder::RecordingStatus;
 use crate::structs::{
     AnalysisFrames, AnalysisOutputBuffer, BeatResetState, BleedState, CalibrationState, Config,
     ConfigReady, ConfigState, LoopGuardState,
-    DrumSamples, InputChannelCount, LogState, LoopBufferState, Mp3BufferState, Payload,
+    DrumSamples, LogState, LoopBufferState, Mp3BufferState, Payload,
     RecorderState, SampleOutputBuffer, VisualSamples,
 };
 use std::sync::atomic::Ordering;
@@ -34,7 +36,11 @@ pub struct FileInfo {
 }
 
 #[tauri::command]
-pub fn set_mp3_buffer(app_handle: tauri::AppHandle, filename: String) -> Result<FileInfo, String> {
+pub fn set_mp3_buffer(
+    app_handle: tauri::AppHandle,
+    host: State<AudioHostState>,
+    filename: String,
+) -> Result<FileInfo, String> {
     // An empty path is "no file", which a config carrying no file has to be
     // able to say. Without it, loading a preset that has none left Rust playing
     // whatever was loaded before -- against the new preset's beats and stretch,
@@ -45,11 +51,13 @@ pub fn set_mp3_buffer(app_handle: tauri::AppHandle, filename: String) -> Result<
         // callback holds this mutex for its whole run, so freeing a file's worth
         // of samples inside it is time the audio thread waits. Same reason the
         // stretch swap does it this way.
+        let _gate = host.0.gate.lock().unwrap();
         let (old_buffer, old_natural);
         {
             let mut mp3_buffer = mp3_buffer_state.0.lock().unwrap();
             old_buffer = std::mem::take(&mut mp3_buffer.buffer);
             old_natural = std::mem::replace(&mut mp3_buffer.natural, Arc::new(vec![]));
+            mp3_buffer.path.clear();
             mp3_buffer.ratio = 1.0;
             // So a render already in flight for the old file is dropped rather
             // than landing on top of the empty one.
@@ -63,11 +71,18 @@ pub fn set_mp3_buffer(app_handle: tauri::AppHandle, filename: String) -> Result<
             seconds: 0.0,
             source_rate: 0.0,
             source_channels: 0,
-            device_rate: sample_rate(),
+            device_rate: host.0.rate(),
         });
     }
+    // Decoded before the gate, since that is the slow part and a device change
+    // should not wait on it; converted inside, at the rate of whatever is
+    // running at that moment. A restart holds the gate from before it reads the
+    // path to after it has swapped the converted file in, so this lands either
+    // wholly before it (and is converted again by it) or wholly after.
     let decoded = decode_audio_file(&filename)?;
-    let samples = to_device_stereo(&decoded);
+    let _gate = host.0.gate.lock().unwrap();
+    let rate = host.0.rate();
+    let samples = to_device_stereo(&decoded, rate);
     let frames = samples.len() / 2;
 
     let mp3_buffer_state: tauri::State<Mp3BufferState> = app_handle.state();
@@ -75,6 +90,7 @@ pub fn set_mp3_buffer(app_handle: tauri::AppHandle, filename: String) -> Result<
         let mut mp3_buffer = mp3_buffer_state.0.lock().unwrap();
         mp3_buffer.natural = Arc::new(samples);
         mp3_buffer.buffer = (*mp3_buffer.natural).clone();
+        mp3_buffer.path = filename.clone();
         // A new file means the ratio the old one was rendered at says nothing.
         mp3_buffer.ratio = 1.0;
         mp3_buffer.generation += 1;
@@ -90,21 +106,17 @@ pub fn set_mp3_buffer(app_handle: tauri::AppHandle, filename: String) -> Result<
     {
         let config_state: tauri::State<ConfigState> = app_handle.state();
         let config = config_state.0.lock().unwrap();
-        let ratio = desired_ratio(&config, frames);
+        let ratio = desired_ratio(&config, frames, rate);
         drop(config);
-        request_stretch(&app_handle, ratio);
+        request_stretch(&app_handle, ratio, rate);
     }
 
     Ok(FileInfo {
         frames,
-        seconds: if sample_rate() > 0.0 {
-            frames as f64 / sample_rate()
-        } else {
-            0.0
-        },
+        seconds: if rate > 0.0 { frames as f64 / rate } else { 0.0 },
         source_rate: decoded.rate,
         source_channels: decoded.channels,
-        device_rate: sample_rate(),
+        device_rate: rate,
     })
 }
 
@@ -198,17 +210,18 @@ pub fn get_analysis(state: State<AnalysisOutputBuffer>) -> Result<AnalysisFrames
 }
 
 #[tauri::command]
-pub fn get_input_channel_count(state: State<InputChannelCount>) -> usize {
-    state.0
+pub fn get_input_channel_count(host: State<AudioHostState>) -> usize {
+    host.0.status.lock().unwrap().input_channels
 }
 
-/// The rate the input device is running at, adopted at startup. The frontend
-/// works in beats and never needs this to draw -- it is for the two places that
-/// have to name a frequency or a duration in the UI: the Nyquist ceiling on the
-/// flux band inputs and the millisecond label on the fft window dropdown.
+/// The rate the input device is running at. The frontend works in beats and
+/// never needs this to draw -- it is for the places that have to name a
+/// frequency or a duration in the UI: the Nyquist ceiling on the flux band
+/// inputs, the millisecond label on the fft window dropdown, the latency in
+/// milliseconds. It moves when the device does, and `audio-restarted` says so.
 #[tauri::command]
-pub fn get_sample_rate() -> f64 {
-    sample_rate()
+pub fn get_sample_rate(host: State<AudioHostState>) -> f64 {
+    host.0.rate()
 }
 
 /// Everything Core Audio will tell us about the devices on this machine, for
@@ -222,8 +235,8 @@ pub fn list_audio_devices() -> Vec<AudioDeviceInfo> {
 /// Which devices are actually open, which can differ from what was asked for --
 /// see `ActiveDevices::input_fell_back`.
 #[tauri::command]
-pub fn get_active_devices(state: State<ActiveDevices>) -> ActiveDevices {
-    state.inner().clone()
+pub fn get_active_devices(host: State<AudioHostState>) -> ActiveDevices {
+    host.0.status.lock().unwrap().active.clone()
 }
 
 fn prefs_dir(app_handle: &tauri::AppHandle) -> std::path::PathBuf {
@@ -281,14 +294,35 @@ pub fn export_presets(path: String, text: String) -> Result<(), String> {
     presets::write_file(&path, &text)
 }
 
-/// Device changes only take effect at startup: the audio engine owns every
-/// per-channel buffer by value, so swapping a device under it would mean
-/// putting all of that behind a lock the audio thread could wait on. Relaunch
-/// instead. `restart` reads Info.plist, so the *bundle* comes back and keeps
-/// its microphone grant.
+/// Relaunches the app. No longer how a device change is applied -- that is
+/// `restart_audio` -- but still the menu's Restart and what the updater does
+/// after installing. `restart` reads Info.plist, so the *bundle* comes back and
+/// keeps its microphone grant.
 #[tauri::command]
 pub fn restart_app(app_handle: tauri::AppHandle) {
     app_handle.restart();
+}
+
+/// Moves the audio onto whatever `audio-prefs.json` now says, in-process. The
+/// picker writes the prefs through `set_audio_prefs` and then calls this. A
+/// choice that resolves to what is already running does nothing. Answers with
+/// what is running afterwards; on failure the old audio is still running if the
+/// new devices would not open, and the message says which device and why.
+///
+/// Async so the webview's thread is not the one that waits: re-decoding the
+/// file at a new rate can take a moment, and a sync command runs on the main
+/// thread.
+#[tauri::command]
+pub async fn restart_audio(
+    app_handle: tauri::AppHandle,
+    host: State<'_, AudioHostState>,
+) -> Result<AudioStatus, String> {
+    let host = host.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        host.restart_and_report(&app_handle, "a device was chosen")
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// The deepest band the loop guard is holding down, and by how much. Polled by
@@ -309,8 +343,10 @@ pub fn get_kit(state: State<crate::structs::KitState>) -> Vec<crate::structs::Ki
 /// setup's microphone check polls; the callback only ever raises the slots.
 #[tauri::command]
 pub fn get_input_levels(state: State<crate::structs::InputLevelState>) -> Vec<f32> {
-    state
-        .0
+    // The running engine's slots, cloned out so the mutex -- which only a
+    // restart ever contends for -- is not held while reading them.
+    let levels = state.0.lock().unwrap().clone();
+    levels
         .iter()
         .map(|slot| f32::from_bits(slot.swap(0, Ordering::Relaxed)))
         .collect()
@@ -321,12 +357,15 @@ pub fn get_input_levels(state: State<crate::structs::InputLevelState>) -> Vec<f3
 /// back. Everything it needs already exists on the audio thread; this only
 /// flips the switch.
 #[tauri::command]
-pub fn start_bleed_training(state: State<BleedState>) {
+pub fn start_bleed_training(state: State<BleedState>, host: State<AudioHostState>) {
+    // Under the gate, so a restart either cancels this run or comes after it
+    // started -- never between the rate being read and the run being sized.
+    let _gate = host.0.gate.lock().unwrap();
     *state.1.lock().unwrap() = crate::bleed::BleedResult {
         phase: crate::bleed::BleedPhase::Running,
         ..Default::default()
     };
-    let frames = (crate::bleed::TRAIN_SECONDS * crate::constants::sample_rate()) as usize;
+    let frames = (crate::bleed::TRAIN_SECONDS * host.0.rate()) as usize;
     state.0.lock().unwrap().start(frames);
 }
 
@@ -361,12 +400,14 @@ pub fn get_bleed_status(state: State<BleedState>) -> crate::bleed::BleedResult {
 /// Begins a run. Everything it needs is allocated here, off the audio thread;
 /// the callback only indexes into it afterwards.
 #[tauri::command]
-pub fn start_calibration(state: State<CalibrationState>, channel: usize) {
+pub fn start_calibration(state: State<CalibrationState>, host: State<AudioHostState>, channel: usize) {
+    // Same reason as the bleed run: sized from the rate, cancelled by a restart.
+    let _gate = host.0.gate.lock().unwrap();
     *state.1.lock().unwrap() = CalibrationResult {
         phase: CalibrationPhase::Running,
         ..Default::default()
     };
-    state.0.lock().unwrap().start(channel);
+    state.0.lock().unwrap().start(channel, host.0.rate());
 }
 
 #[tauri::command]
@@ -398,8 +439,8 @@ pub fn get_calibration_status(state: State<CalibrationState>) -> CalibrationResu
             return last.clone();
         }
     };
-    let (capture, emit_at, chirp) = taken.unwrap();
-    let result = analyze(&capture, &emit_at, &chirp);
+    let (capture, emit_at, chirp, rate) = taken.unwrap();
+    let result = analyze(&capture, &emit_at, &chirp, rate);
     *state.1.lock().unwrap() = result.clone();
     result
 }
@@ -408,15 +449,29 @@ pub fn get_calibration_status(state: State<CalibrationState>) -> CalibrationResu
 /// refers to it. Decoding here rather than in the audio thread means the render
 /// callback only ever does a map lookup.
 #[tauri::command]
-pub fn load_drum_sample(state: State<DrumSamples>, path: String) -> Result<usize, String> {
+pub fn load_drum_sample(
+    state: State<DrumSamples>,
+    host: State<AudioHostState>,
+    path: String,
+) -> Result<usize, String> {
     // Already there -- a kit sound loaded at startup, or a file loaded before.
     // Answering from the map means the frontend never has to know which names
     // are built in before asking, so there is no race with fetching the kit.
     if let Some(existing) = state.0.lock().map_err(|_| "sample map poisoned".to_string())?.get(&path) {
         return Ok(existing.len());
     }
-    let samples = get_samples_from_filename(&path)?;
+    // Decoded outside the gate, converted inside it -- the same shape as the
+    // file player, for the same reason. The source is kept so a restart at
+    // another rate converts from it rather than from this conversion.
+    let source = Arc::new(decode_audio_file(&path)?);
+    let _gate = host.0.gate.lock().unwrap();
+    let samples = to_device_stereo(&source, host.0.rate());
     let len = samples.len();
+    state
+        .1
+        .lock()
+        .map_err(|_| "sample map poisoned".to_string())?
+        .insert(path.clone(), source);
     let mut map = state
         .0
         .lock()
@@ -453,6 +508,13 @@ pub fn set_config(app_handle: tauri::AppHandle, new_config: Config) {
     ready.0.store(true, std::sync::atomic::Ordering::Relaxed);
     let config_state: tauri::State<ConfigState> = app_handle.state();
     let mut config = config_state.0.lock().unwrap();
+    // Read under the config lock: an audio restart changes the rate and
+    // resizes the loop buffer inside one hold of it, so this is the rate the
+    // buffer in place was sized at, and the one the running engine plays at.
+    let rate = {
+        let host: tauri::State<AudioHostState> = app_handle.state();
+        host.0.rate()
+    };
 
     let should_update_loop_buffer = new_config.bpm != config.bpm
         || new_config.beats_to_loop != config.beats_to_loop
@@ -463,7 +525,7 @@ pub fn set_config(app_handle: tauri::AppHandle, new_config: Config) {
     if should_update_loop_buffer {
         println!("updating loop buffer");
         let c = config.clone();
-        let new_buffer_size = get_loop_buffer_size(&c);
+        let new_buffer_size = get_loop_buffer_size(&c, rate);
         let loop_buffer_state: tauri::State<LoopBufferState> = app_handle.state();
         let mut loop_buffer = loop_buffer_state.0.lock().unwrap();
         for channel in loop_buffer.channels.iter_mut() {
@@ -481,11 +543,11 @@ pub fn set_config(app_handle: tauri::AppHandle, new_config: Config) {
         let mp3 = mp3_state.0.lock().unwrap();
         mp3.natural.len() / 2
     };
-    let ratio = desired_ratio(&config, natural_frames);
+    let ratio = desired_ratio(&config, natural_frames, rate);
     // Dropped before asking: the render callback takes the config lock and then
     // the file lock, so this side must never hold the two in the other order.
     drop(config);
-    request_stretch(&app_handle, ratio);
+    request_stretch(&app_handle, ratio, rate);
 }
 
 /// Starts writing the session to `path`. The file is created *here*, before the
@@ -499,11 +561,16 @@ pub fn set_config(app_handle: tauri::AppHandle, new_config: Config) {
 #[tauri::command]
 pub fn start_recording(
     state: State<RecorderState>,
+    host: State<AudioHostState>,
     path: String,
     input: bool,
     output: bool,
 ) -> Result<(), String> {
-    state.0.start(&path, input, output)
+    // Under the gate so the width and the rate it reads are the ones the
+    // running engine has, and a restart sees a recording that is either wholly
+    // started or not at all.
+    let _gate = host.0.gate.lock().unwrap();
+    state.0.start(&path, input, output, host.0.rate())
 }
 
 /// Stops and finishes the file. Idempotent: stopping twice, or stopping

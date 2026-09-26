@@ -4,7 +4,6 @@
 //! The long explanation of *why* it is built this way -- the chirp, the matched
 //! filter, why not the onset detector -- is in `docs/calibration.md`.
 
-use crate::constants::sample_rate;
 use serde::Serialize;
 use std::f64::consts::PI;
 
@@ -42,18 +41,18 @@ const MAX_SPREAD_MS: f64 = 5.0;
 /// peak that reaches this fraction of the maximum rather than the maximum.
 const FIRST_PEAK_FRACTION: f32 = 0.5;
 
-fn ms_to_frames(ms: f64) -> usize {
-    (ms / 1000.0 * sample_rate()) as usize
+fn ms_to_frames(ms: f64, sample_rate: f64) -> usize {
+    (ms / 1000.0 * sample_rate) as usize
 }
 
 /// Hann-windowed linear sweep. Windowed so the probe doesn't start and end with
 /// a step, which would put a click either side of the thing we're measuring.
-fn make_chirp() -> Vec<f32> {
-    let n = ms_to_frames(PROBE_MS).max(2);
-    let dur = n as f64 / sample_rate();
+fn make_chirp(sample_rate: f64) -> Vec<f32> {
+    let n = ms_to_frames(PROBE_MS, sample_rate).max(2);
+    let dur = n as f64 / sample_rate;
     (0..n)
         .map(|i| {
-            let t = i as f64 / sample_rate();
+            let t = i as f64 / sample_rate;
             // Instantaneous frequency sweeps f0 -> f1, so phase is its integral.
             let phase = 2.0 * PI * (PROBE_F0 * t + (PROBE_F1 - PROBE_F0) * t * t / (2.0 * dur));
             let window = 0.5 - 0.5 * (2.0 * PI * i as f64 / (n as f64 - 1.0)).cos();
@@ -131,6 +130,13 @@ pub struct Calibration {
     total: usize,
     /// Set by the callback when `pos` reaches `total`; the command picks it up.
     pub finished: bool,
+    /// The rate the run was built at, which is the rate its capture is in. Kept
+    /// with the run rather than read again at analysis time: a device change
+    /// between the two would otherwise convert frames to milliseconds at a rate
+    /// the capture was never recorded at. (A restart cancels a run in flight
+    /// anyway -- see `audio_host.rs` -- but the analysis should not depend on
+    /// that.)
+    pub rate: f64,
 }
 
 impl Default for Calibration {
@@ -144,18 +150,20 @@ impl Default for Calibration {
             capture: vec![],
             total: 0,
             finished: false,
+            rate: crate::constants::DEFAULT_SAMPLE_RATE,
         }
     }
 }
 
 impl Calibration {
     /// Allocates the whole run up front, off the audio thread.
-    pub fn start(&mut self, channel: usize) {
-        let spacing = ms_to_frames(PROBE_SPACING_MS);
-        let lead = ms_to_frames(50.0);
-        self.chirp = make_chirp();
+    pub fn start(&mut self, channel: usize, sample_rate: f64) {
+        let spacing = ms_to_frames(PROBE_SPACING_MS, sample_rate);
+        let lead = ms_to_frames(50.0, sample_rate);
+        self.rate = sample_rate;
+        self.chirp = make_chirp(sample_rate);
         self.emit_at = (0..PROBE_COUNT).map(|k| lead + k * spacing).collect();
-        self.total = lead + (PROBE_COUNT - 1) * spacing + ms_to_frames(TAIL_MS);
+        self.total = lead + (PROBE_COUNT - 1) * spacing + ms_to_frames(TAIL_MS, sample_rate);
         self.capture = vec![0.0; self.total];
         self.channel = channel;
         self.pos = 0;
@@ -205,11 +213,12 @@ impl Calibration {
     /// Hands the capture over without copying it -- the same swap-don't-copy
     /// rule the display buffers follow, so the callback never waits on a
     /// memcpy of a second of audio.
-    pub fn take_capture(&mut self) -> (Vec<f32>, Vec<usize>, Vec<f32>) {
+    pub fn take_capture(&mut self) -> (Vec<f32>, Vec<usize>, Vec<f32>, f64) {
         (
             std::mem::take(&mut self.capture),
             self.emit_at.clone(),
             self.chirp.clone(),
+            self.rate,
         )
     }
 }
@@ -273,7 +282,7 @@ fn median_of(values: &mut [f64]) -> f64 {
 }
 
 /// Runs off the audio thread, after the capture is complete.
-pub fn analyze(capture: &[f32], emit_at: &[usize], chirp: &[f32]) -> CalibrationResult {
+pub fn analyze(capture: &[f32], emit_at: &[usize], chirp: &[f32], sample_rate: f64) -> CalibrationResult {
     let mut result = CalibrationResult {
         phase: CalibrationPhase::Failed,
         progress: 1.0,
@@ -287,7 +296,7 @@ pub fn analyze(capture: &[f32], emit_at: &[usize], chirp: &[f32]) -> Calibration
         -120.0
     };
 
-    let max_lag = ms_to_frames(MAX_LATENCY_MS);
+    let max_lag = ms_to_frames(MAX_LATENCY_MS, sample_rate);
     let mut lags: Vec<f64> = vec![];
     let mut ratios: Vec<f64> = vec![];
     for &start in emit_at.iter() {
@@ -322,10 +331,10 @@ pub fn analyze(capture: &[f32], emit_at: &[usize], chirp: &[f32]) -> Calibration
 
     let spread_frames = lags.iter().cloned().fold(f64::MIN, f64::max)
         - lags.iter().cloned().fold(f64::MAX, f64::min);
-    result.spread_ms = spread_frames / sample_rate() * 1000.0;
+    result.spread_ms = spread_frames / sample_rate * 1000.0;
     let median = median_of(&mut lags.clone());
     result.frames = median;
-    result.ms = median / sample_rate() * 1000.0;
+    result.ms = median / sample_rate * 1000.0;
 
     if result.spread_ms > MAX_SPREAD_MS {
         result.message = format!(

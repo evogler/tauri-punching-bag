@@ -4,6 +4,7 @@
 )]
 
 mod analysis;
+mod audio_host;
 mod bleed;
 mod commands;
 mod constants;
@@ -30,19 +31,21 @@ use crate::commands::{
     cancel_calibration, get_active_devices, get_analysis, get_audio_prefs,
     get_calibration_status, get_input_channel_count, get_sample_rate, get_samples,
     export_presets, get_presets, import_presets, list_audio_devices, load_drum_sample,
-    get_recording_status, quarantine_presets, reset_beat, restart_app, set_audio_prefs, set_config,
-    set_mp3_buffer, set_presets, start_calibration, start_recording, stop_recording,
+    get_recording_status, quarantine_presets, reset_beat, restart_app, restart_audio,
+    set_audio_prefs, set_config, set_mp3_buffer, set_presets, start_calibration, start_recording,
+    stop_recording,
 };
+use crate::audio_host::{spawn_supervisor, AudioHost, AudioHostState, HostHandles};
 use crate::calibration::Calibration;
-use crate::constants::{default_config, sample_rate};
-use crate::engine::{Engine, EngineShared};
+use crate::constants::default_config;
+use crate::engine::{EngineCarry, EngineShared};
 use crate::get_loop_buffer_size::get_loop_buffer_size;
-use crate::platform::{get_input_output_channels, watch_device_changes};
-use crate::read_audio_file::get_samples_from_filename;
+use crate::platform::{get_input_output_channels, watch_device_changes, HintSender};
+use crate::read_audio_file::{decode_audio_file, to_device_stereo};
 use crate::structs::{
-    AnalysisOutputBuffer, BeatResetState, BleedState, CalibrationState, ConfigState, DrumSamples,
-    LoopGuardState, InputLevelState, KitSound, KitState,
-    InputChannelCount, LogState, LoopBuffer, LoopBufferState, Mp3Buffer, Mp3BufferState,
+    AnalysisOutputBuffer, AudioStatus, BeatResetState, BleedState, CalibrationState, ConfigState,
+    DrumSamples, LoopGuardState, InputLevelState, KitSound, KitState,
+    LogState, LoopBuffer, LoopBufferState, Mp3Buffer, Mp3BufferState,
     ConfigReady, RecorderState, SampleOutputBuffer,
 };
 use std::{
@@ -55,10 +58,11 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use tauri_plugin_updater::UpdaterExt;
 
-// Restarting is the quickest way out of a wedged audio device -- the render
-// callback and the input stream are set up once, at launch, so there is no
-// other way to rebuild them. The settings survive it: the frontend writes the
-// session to local storage on every config change, and reads it back on boot.
+// Relaunching the whole app. Device changes no longer need it -- the audio
+// restarts in-process (`audio_host.rs`) -- but it stays as the way out of
+// anything else that has wedged, and the updater uses it. The settings survive
+// it: the frontend writes the session to local storage on every config change,
+// and reads it back on boot.
 const RESTART_MENU_ID: &str = "restart";
 
 // The default menu is kept whole and added to rather than replaced. Building
@@ -167,11 +171,13 @@ fn main() -> Result<(), coreaudio::Error> {
     //
     // Everything that decodes a file converts it to the *device* rate, and the
     // device rate is not known until the input device has been opened. Loading
-    // the built-in kit ahead of this read `sample_rate()` before it had been
-    // set, which used to freeze the process at the 44.1 kHz fallback: the
-    // samples were resampled to a rate the hardware was not running at, and
-    // then the input unit was opened at 44.1 against a 48 kHz microphone, which
-    // AUHAL answers with silence. Nothing above this line may read the rate.
+    // the built-in kit ahead of this used to read a global rate before it had
+    // been set, which froze the process at the 44.1 kHz fallback: the samples
+    // were resampled to a rate the hardware was not running at, and then the
+    // input unit was opened at 44.1 against a 48 kHz microphone, which AUHAL
+    // answers with silence. There is no global to read any more -- the rate is
+    // `setup.sample_rate`, and every conversion takes it as an argument -- so
+    // the order is now enforced by the types rather than by this comment.
     //
     // Device choice is read from disk, not from the config: the units are opened
     // before any window exists, so localStorage is unreachable here.
@@ -187,7 +193,7 @@ fn main() -> Result<(), coreaudio::Error> {
     // message is the whole report. A bare `unwrap` here was a backtrace naming
     // a line number and an enum variant -- nothing about which device, or which
     // role it was being asked to play.
-    let setup = match get_input_output_channels(&audio_prefs) {
+    let mut setup = match get_input_output_channels(&audio_prefs) {
         Ok(setup) => setup,
         Err(message) => {
             eprintln!("audio setup failed: {}", message);
@@ -199,11 +205,14 @@ fn main() -> Result<(), coreaudio::Error> {
         }
     };
 
+    let sample_rate = setup.sample_rate;
+
     // load mp3
-    let path = "/Users/eric/Music/Logic/tauri-file.wav".into();
+    let path: String = "/Users/eric/Music/Logic/tauri-file.wav".into();
     println!("app_config_dir: {:?}", app_config_dir);
     println!("resource_dir: {:?}", &resource_dir);
-    let data = get_samples_from_filename(&path);
+    let data = decode_audio_file(&path).map(|file| to_device_stereo(&file, sample_rate));
+    let loaded_path = if data.is_ok() { path.clone() } else { String::new() };
     // Whether a file is loaded is asked of the buffer every callback, not
     // captured here: this path is one person's machine, and a startup flag meant
     // that anywhere it didn't exist, picking a file loaded the samples and then
@@ -215,6 +224,7 @@ fn main() -> Result<(), coreaudio::Error> {
         natural,
         generation: 0,
         ratio: 1.0,
+        path: loaded_path,
     }));
 
     let mp3 = mp3_arc.clone();
@@ -222,6 +232,9 @@ fn main() -> Result<(), coreaudio::Error> {
 
     // load samples
     let mut sample_buffers: HashMap<String, Arc<Vec<f32>>> = HashMap::new();
+    // Each sample as decoded, at its own rate, so a restart at another rate can
+    // convert from the source -- see `DrumSamples`.
+    let mut sample_sources: HashMap<String, Arc<crate::read_audio_file::AudioFile>> = HashMap::new();
     // The built-in kit, described by `samples/kit.json`: an id, a name and a
     // file, three separate things. The id is what a preset stores, so it must
     // never change once shipped; the name is only what is shown; the file is
@@ -232,23 +245,27 @@ fn main() -> Result<(), coreaudio::Error> {
     let kit = load_kit(resource_dir);
     for sound in &kit {
         let path = format!("{}/samples/{}", resource_dir, sound.file);
-        match get_samples_from_filename(&path) {
-            Ok(samples) => {
-                sample_buffers.insert(sound.id.clone(), Arc::new(samples));
+        match decode_audio_file(&path) {
+            Ok(source) => {
+                sample_buffers.insert(sound.id.clone(), Arc::new(to_device_stereo(&source, sample_rate)));
+                sample_sources.insert(sound.id.clone(), Arc::new(source));
             }
             Err(e) => println!("built-in sample {} failed to load: {:?}", sound.id, e),
         }
     }
     let kit_state = KitState(kit);
     let drum_samples_arc = Arc::new(Mutex::new(sample_buffers));
-    let drum_samples_state = DrumSamples(drum_samples_arc.clone());
-    let (input_audio_unit, output_audio_unit, input_channels, io_log) = (
-        setup.input_unit,
-        setup.output_unit,
-        setup.input_channels,
-        setup.log,
-    );
-    let active_devices = setup.active;
+    let drum_sources_arc = Arc::new(Mutex::new(sample_sources));
+    let drum_samples_state = DrumSamples(drum_samples_arc.clone(), drum_sources_arc.clone());
+    let input_channels = setup.input_channels;
+    let io_log = std::mem::take(&mut setup.log);
+    // What is running, and at what rate -- the one place the rate lives. The
+    // host rewrites it on a restart.
+    let audio_status = Arc::new(Mutex::new(AudioStatus {
+        active: setup.active.clone(),
+        input_channels,
+        sample_rate,
+    }));
 
     // A measuring run, and its verdict. Two mutexes rather than one for the
     // same reason the calibration has two: the callback touches the counters
@@ -264,7 +281,8 @@ fn main() -> Result<(), coreaudio::Error> {
             .map(|_| std::sync::atomic::AtomicU32::new(0))
             .collect(),
     );
-    let input_level_state = InputLevelState(input_level_arc.clone());
+    let input_level_slot = Arc::new(Mutex::new(input_level_arc.clone()));
+    let input_level_state = InputLevelState(input_level_slot.clone());
     let bleed_live_arc = Arc::new(Mutex::new((0.0f32, 0.0f32)));
     let bleed_state = BleedState(
         bleed_training_arc.clone(),
@@ -302,7 +320,7 @@ fn main() -> Result<(), coreaudio::Error> {
     let loop_buffer_size: usize;
     {
         let c = config_state.0.lock().unwrap();
-        loop_buffer_size = get_loop_buffer_size(&c);
+        loop_buffer_size = get_loop_buffer_size(&c, sample_rate);
     }
     let loop_buffer = LoopBuffer {
         channels: vec![vec![0f32; loop_buffer_size]; input_channels],
@@ -314,11 +332,11 @@ fn main() -> Result<(), coreaudio::Error> {
     let should_reset_beat_arc = Arc::new(AtomicBool::new(false));
     let should_reset_beat_state = BeatResetState(should_reset_beat_arc.clone());
 
-    // The render callback's state, sized for this device's channel count and
-    // rate. Everything it shares with the commands is one of the handles
-    // above; the same `Arc`s go to Tauri as managed state below.
-    let engine = Engine::new(
-        EngineShared {
+    // The render callback's handles. Everything it shares with the commands is
+    // one of the `Arc`s above; the same ones go to Tauri as managed state
+    // below. The host builds an engine from these at launch and again on every
+    // restart.
+    let engine_shared = EngineShared {
             config: config_state.0.clone(),
             config_ready: config_ready.clone(),
             reset_beat: should_reset_beat_arc.clone(),
@@ -333,19 +351,41 @@ fn main() -> Result<(), coreaudio::Error> {
             recorder: recorder.clone(),
             samples: sample_output_buffer.buffer.clone(),
             analysis: analysis_output_buffer.buffer.clone(),
+            carry: Arc::new(EngineCarry::new()),
+    };
+
+    // How Core Audio's listeners ask for a restart: they only ever send on
+    // this, and the supervisor thread started in `setup` does the work. Leaked
+    // because the listeners hold a pointer to it for the life of the process.
+    let (hint_tx, hint_rx) = std::sync::mpsc::channel::<()>();
+    let hint: &'static HintSender = Box::leak(Box::new(hint_tx));
+
+    let host = Arc::new(AudioHost::new(
+        engine_shared,
+        audio_status,
+        HostHandles {
+            input_levels: input_level_slot,
+            drum_sources: drum_sources_arc,
+            bleed_result: bleed_result_arc.clone(),
+            calibration_result: calibration_result_arc.clone(),
         },
-        input_channels,
-        sample_rate(),
-    );
-    // Held for the life of the process: dropping it stops both units.
-    let _audio = platform::start(input_audio_unit, output_audio_unit, engine)?;
+        prefs_dir.clone(),
+        hint,
+    ));
+    // Same account as a failed setup: there is no window yet.
+    if let Err(message) = host.launch(setup) {
+        eprintln!("audio start failed: {}", message);
+        std::process::exit(1);
+    }
+    let supervisor_host = host.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .setup(|app| {
-            watch_device_changes(app.handle().clone());
+        .setup(move |app| {
+            watch_device_changes(app.handle().clone(), hint);
+            spawn_supervisor(supervisor_host, app.handle().clone(), hint_rx);
             tauri::async_runtime::spawn(check_for_update_at_launch(app.handle().clone()));
             Ok(())
         })
@@ -367,8 +407,7 @@ fn main() -> Result<(), coreaudio::Error> {
         .manage(mp3_state)
         .manage(should_reset_beat_state)
         .manage(log_state)
-        .manage(InputChannelCount(input_channels))
-        .manage(active_devices)
+        .manage(AudioHostState(host))
         .manage(calibration_state)
         .manage(bleed_state)
         .manage(loop_guard_state)
@@ -390,6 +429,7 @@ fn main() -> Result<(), coreaudio::Error> {
             set_audio_prefs,
             get_active_devices,
             restart_app,
+            restart_audio,
             start_calibration,
             get_calibration_status,
             get_bleed_status,

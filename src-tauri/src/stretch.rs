@@ -12,7 +12,6 @@
 //! swapped in; the render callback keeps reading a plain buffer at a position
 //! derived from the beat, exactly as it does unstretched.
 
-use crate::constants::sample_rate;
 use std::f64::consts::PI;
 
 /// Grain length. Long enough to hold a period of anything with pitch worth
@@ -41,16 +40,16 @@ pub const MAX_RATIO: f64 = 4.0;
 /// Both buffers are treated as **circular**, because this file is going to be
 /// looped: wrapping the overlap-add across the end is what makes the loop point
 /// seamless instead of a fade to silence every cycle.
-pub fn wsola(input: &[f32], channels: usize, ratio: f64) -> Vec<f32> {
+pub fn wsola(input: &[f32], channels: usize, ratio: f64, sample_rate: f64) -> Vec<f32> {
     let ch = channels.max(1);
     let in_frames = input.len() / ch;
     if !ratio.is_finite() || ratio <= 0.0 || (ratio - 1.0).abs() < 1e-9 {
         return input.to_vec();
     }
 
-    let window = (((WINDOW_MS / 1000.0 * sample_rate()) as usize) / 2) * 2;
+    let window = (((WINDOW_MS / 1000.0 * sample_rate) as usize) / 2) * 2;
     let hop = window / 2;
-    let search = (SEARCH_MS / 1000.0 * sample_rate()) as usize;
+    let search = (SEARCH_MS / 1000.0 * sample_rate) as usize;
 
     // Too short to have grains cut out of it, and too short to have any
     // periodicity for the search to find. A file this small is a click.
@@ -157,11 +156,14 @@ const DEBOUNCE_MS: u64 = 200;
 /// What the file wants to be stretched by, given the tempo it is being played
 /// against. 1.0 means leave it alone -- which is what an undeclared length, a
 /// missing file or the switch being off all come to.
-pub fn desired_ratio(config: &crate::structs::Config, natural_frames: usize) -> f64 {
+///
+/// `sample_rate` must be the rate `natural_frames` was converted to -- the
+/// running device's -- or the file's length in seconds is wrong by their ratio.
+pub fn desired_ratio(config: &crate::structs::Config, natural_frames: usize, sample_rate: f64) -> f64 {
     if !config.file_stretch || config.file_beats <= 0.0 || natural_frames == 0 {
         return 1.0;
     }
-    let natural_seconds = natural_frames as f64 / sample_rate();
+    let natural_seconds = natural_frames as f64 / sample_rate;
     let target_seconds = config.file_beats * 60.0 / config.bpm;
     if !(natural_seconds > 0.0) || !(target_seconds > 0.0) || !target_seconds.is_finite() {
         return 1.0;
@@ -172,7 +174,11 @@ pub fn desired_ratio(config: &crate::structs::Config, natural_frames: usize) -> 
 /// Asks for the playing buffer to be re-rendered at `ratio`, off-thread. Cheap
 /// and idempotent: an unchanged ratio returns immediately, and a superseded
 /// request is dropped rather than raced.
-pub fn request(app: &tauri::AppHandle, ratio: f64) {
+///
+/// `sample_rate` sizes the grains, so it travels with the request: a render in
+/// flight across a device change is at the old rate, and the restart bumps
+/// `generation` so that render lands nowhere.
+pub fn request(app: &tauri::AppHandle, ratio: f64, sample_rate: f64) {
     use tauri::{Emitter, Manager};
     let arc = {
         let state: tauri::State<crate::structs::Mp3BufferState> = app.state();
@@ -209,7 +215,7 @@ pub fn request(app: &tauri::AppHandle, ratio: f64) {
         let next = if ratio == 1.0 {
             (*natural).clone()
         } else {
-            wsola(&natural, 2, ratio)
+            wsola(&natural, 2, ratio, sample_rate)
         };
 
         let old = {
