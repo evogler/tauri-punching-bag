@@ -398,6 +398,9 @@ silently doing nothing, everywhere.
 
 ## Known issues
 
+- **Channels are indices, and the buses follow the inputs**, so a device with
+  a different input count renumbers drums/click/file under every pane. Fix
+  owed after the iOS port -- see `docs/ios-port.md`.
 - `sections[].drums` isn't re-indexed when a drum voice is deleted.
 - Device picker `describe()` shows input channel count in the output list.
 - Output channel count `2` is a magic literal; untangle before channel work.

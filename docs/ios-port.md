@@ -200,10 +200,20 @@ Touch UI (panel as a drawer, help without hover, tap targets, drum-grid drag),
 the sandbox (security-scoped bookmarks for `filePath` and drum samples, stores
 in the container), TestFlight, and the updater coming out on iOS.
 
+**Owed: stable channel identities (deferred by the owner, 2026-09-26, to do
+after iOS runs).** Panes, colours, pans, `spectrogramChannel` and the streams
+name channels by index, and the synthetic buses sit *after* the inputs -- so a
+change in input count renumbers the drums, click and file. Switching from a
+4-input interface to the 1-input mic makes a pane showing `ch 2` draw the drums
+bus. Rare while a device change needed a relaunch; with step 3 it is one click,
+and on iOS a headset plug. The fix is naming the buses (and probably inputs)
+by identity rather than position, with a migration for saved sessions and
+presets (`normalizeView`, the `loopFeedback` rule).
+
 ## Progress
 
-- [x] 1. Tauri v2 migration (2026-09-25; in-app testing by the owner still to do)
-- [x] 2. Core / platform split (2026-09-25; in-app listening by the owner still to do)
-- [x] 3. In-process engine restart (2026-09-26; exercised through the real path, not yet listened to by the owner)
+- [x] 1. Tauri v2 migration (2026-09-25; confirmed in the app by the owner)
+- [x] 2. Core / platform split (2026-09-25; confirmed by ear by the owner)
+- [x] 3. In-process engine restart (2026-09-26; confirmed in the app by the owner)
 - [ ] 4. iOS backend
 - [ ] 5. On the devices
