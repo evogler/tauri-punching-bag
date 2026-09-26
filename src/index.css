@@ -104,8 +104,13 @@ code {
   font-family: var(--font-mono);
 }
 
+/* An app, not a page: on iOS the webview would otherwise pinch-zoom the whole
+   panel and zoom on a double tap. The viewport meta in index.html stops the
+   pinch (WKWebView honours `user-scalable=no`, unlike Safari); `manipulation`
+   stops the double tap without delaying single taps. Nothing on the Mac. */
 html {
   height: 100%;
+  touch-action: manipulation;
 }
 
 #root {

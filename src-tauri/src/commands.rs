@@ -528,7 +528,29 @@ pub fn set_config(app_handle: tauri::AppHandle, new_config: Config) {
         || new_config.beats_to_loop != config.beats_to_loop
         || new_config.loop_echoes != config.loop_echoes
         || new_config.buffer_compensation != config.buffer_compensation;
+    #[cfg(target_os = "ios")]
+    let paused_changed = new_config.paused != config.paused;
     *config = new_config;
+
+    // The screen stays on while the transport runs (see `keepAwake` in the
+    // audio-session plugin). On a change only -- this command runs on every
+    // keystroke -- and the first push counts as one, since the phone starts
+    // out allowed to sleep. Off this thread, so a slow answer from Swift can
+    // never hold the config lock.
+    #[cfg(target_os = "ios")]
+    {
+        static SENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        let first = !SENT.swap(true, std::sync::atomic::Ordering::Relaxed);
+        if paused_changed || first {
+            let app = app_handle.clone();
+            let on = !config.paused;
+            std::thread::spawn(move || {
+                if let Err(e) = tauri_plugin_audio_session::keep_awake(&app, on) {
+                    println!("keep awake: {}", e);
+                }
+            });
+        }
+    }
 
     if should_update_loop_buffer {
         println!("updating loop buffer");

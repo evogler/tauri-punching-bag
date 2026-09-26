@@ -59,6 +59,10 @@ struct SessionEvent: Encodable {
   let snapshot: SessionSnapshot
 }
 
+class KeepAwakeArgs: Decodable {
+  let on: Bool
+}
+
 class AudioSessionPlugin: Plugin {
   private var events: Channel?
   private var preferredSampleRate: Double = 48000
@@ -89,6 +93,18 @@ class AudioSessionPlugin: Plugin {
         }
       }
     }
+  }
+
+  /// Stop the screen dimming and locking while the transport runs. A practice
+  /// tool is looked at, not touched, for minutes at a time -- the auto-lock
+  /// would otherwise take the picture away mid-phrase. Only while playing, so
+  /// a phone left paused still sleeps. UIKit wants the main thread.
+  @objc public func keepAwake(_ invoke: Invoke) throws {
+    let args = try invoke.parseArgs(KeepAwakeArgs.self)
+    DispatchQueue.main.async {
+      UIApplication.shared.isIdleTimerDisabled = args.on
+    }
+    invoke.resolve()
   }
 
   private func requestRecordPermission(_ done: @escaping (Bool) -> Void) {

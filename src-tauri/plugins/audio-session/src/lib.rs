@@ -142,10 +142,29 @@ mod ios {
             )
             .map_err(|e| e.to_string())
     }
+
+    #[derive(Serialize)]
+    struct KeepAwakePayload {
+        on: bool,
+    }
+
+    /// Keep the screen from locking (`on`) or let it lock again. Blocks until
+    /// Swift answers, which is at once -- the UIKit call is queued onto the
+    /// main thread rather than awaited.
+    pub fn keep_awake<R: Runtime>(app: &AppHandle<R>, on: bool) -> Result<(), String> {
+        let session = app
+            .try_state::<AudioSession<R>>()
+            .ok_or_else(|| "the audio session plugin is not registered".to_string())?;
+        session
+            .0
+            .run_mobile_plugin::<serde_json::Value>("keepAwake", KeepAwakePayload { on })
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
 }
 
 #[cfg(target_os = "ios")]
-pub use ios::configure;
+pub use ios::{configure, keep_awake};
 
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("audio-session")
