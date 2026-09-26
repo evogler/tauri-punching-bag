@@ -7,6 +7,8 @@ import { DevicePicker } from "../DevicePicker";
 import { BROWSER_DEBUG_MODE } from "../env";
 import { Help } from "../help";
 import { Input } from "../Input";
+import { IosRoute } from "../IosRoute";
+import { isIOS } from "../platform";
 import { Updater } from "../Updater";
 import { Section } from "./chrome";
 import { PanelProps } from "./types";
@@ -25,16 +27,24 @@ export const SetupTab = (p: PanelProps) => {
           <button onClick={openSetup}>Run setup again</button>
         </Help>
       </Section>
-      <Section label="Audio devices">
-        <DevicePicker
-          devices={audioDevices}
-          active={activeDevices}
-          prefs={audioPrefs}
-          setPrefs={chooseDevices}
-          onOpen={refreshDevices}
-          error={deviceError}
-        />
-      </Section>
+      {/* iOS has no devices to pick -- the system routes, and the app follows
+          -- so it shows the route instead. */}
+      {isIOS() ? (
+        <Section label="Audio route">
+          <IosRoute active={activeDevices} sampleRate={sampleRate} error={deviceError} />
+        </Section>
+      ) : (
+        <Section label="Audio devices">
+          <DevicePicker
+            devices={audioDevices}
+            active={activeDevices}
+            prefs={audioPrefs}
+            setPrefs={chooseDevices}
+            onOpen={refreshDevices}
+            error={deviceError}
+          />
+        </Section>
+      )}
       {/* The measurement and the number it writes, together: they used to be
           two sections apart, which made the result look like it went nowhere. */}
       <Section label="Latency">
@@ -92,16 +102,20 @@ export const SetupTab = (p: PanelProps) => {
 
       {/* Here rather than in the play tab: a binding belongs to this keyboard
           and this person, like the devices above it, and not to the music. */}
-      <Section label="Global shortcut">
-        <Help id="globalShortcut">
-          <GlobalShortcut onTrigger={togglePaused} />
-        </Help>
-      </Section>
+      {/* Desktop only: iOS has no system-wide keys, and no plugin for them. */}
+      {!isIOS() && (
+        <Section label="Global shortcut">
+          <Help id="globalShortcut">
+            <GlobalShortcut onTrigger={togglePaused} />
+          </Help>
+        </Section>
+      )}
 
       {/* With the device picker, because this is the tab that
           already holds what belongs to this install rather than to the
           music -- and installing an update restarts the app. */}
-      {!BROWSER_DEBUG_MODE && (
+      {/* Not on iOS, where the App Store or TestFlight updates the app. */}
+      {!BROWSER_DEBUG_MODE && !isIOS() && (
         <Section label="Updates">
           <Help id="updates">
             <Updater />

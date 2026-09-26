@@ -62,6 +62,8 @@ import {
   AudioPrefs,
   AUDIO_RESTARTED_EVENT,
   AUDIO_RESTART_FAILED_EVENT,
+  AUDIO_SUSPENDED_EVENT,
+  AUDIO_RESUMED_EVENT,
   AudioRestarted,
   DEVICES_CHANGED_EVENT,
   pairKey,
@@ -1120,6 +1122,7 @@ const App = () => {
   // now names whatever `channelLabels` says it does (see *Restarting the audio
   // in-process* in the design notes).
   const [deviceError, setDeviceError] = useState<string | null>(null);
+  const [audioSuspended, setAudioSuspended] = useState<string | null>(null);
   useEffect(() => {
     if (BROWSER_DEBUG_MODE) return;
     const restarted = listen<AudioRestarted>(AUDIO_RESTARTED_EVENT, (e) => {
@@ -1128,16 +1131,31 @@ const App = () => {
       adoptSampleRate(status.sampleRate);
       setActiveDevices(status.active);
       setDeviceError(null);
+      // A restart brings the audio back too, so it ends an interruption.
+      setAudioSuspended(null);
       refreshDevices();
     });
     const failed = listen<string>(AUDIO_RESTART_FAILED_EVENT, (e) =>
       setDeviceError(String(e.payload))
     );
+    // iOS: a call, Siri or an alarm stops the audio and the same engine comes
+    // back when it ends (`audio_host.rs`). Nothing to re-read either way --
+    // the route is the same one, or the resume restarts and says so above.
+    const suspended = listen<string>(AUDIO_SUSPENDED_EVENT, (e) =>
+      setAudioSuspended(String(e.payload))
+    );
+    const resumed = listen(AUDIO_RESUMED_EVENT, () => setAudioSuspended(null));
     return () => {
       restarted.then((f) => f()).catch(() => {});
       failed.then((f) => f()).catch(() => {});
+      suspended.then((f) => f()).catch(() => {});
+      resumed.then((f) => f()).catch(() => {});
     };
   }, [adoptSampleRate, refreshDevices]);
+  const audioNotice =
+    [audioSuspended, activeDevices?.inputWarning, activeDevices?.outputWarning]
+      .filter(Boolean)
+      .join(" ") || null;
 
   // Choosing a device applies it now. The prefs are written first, because
   // they are what `restart_audio` reads -- the file is still the one place the
@@ -1205,9 +1223,16 @@ const App = () => {
     if (appliedPairRef.current === key) return;
     appliedPairRef.current = key;
     const stored = pairCompensation(audioPrefs, activeDevices);
+    // iOS reports its own round trip, which is a far better start than the
+    // Mac's hand-tuned default; the Mac reports nothing and keeps the default.
+    // Either way it is where an unmeasured pair starts, and the write-back
+    // below then stores it for the pair like any edit.
+    const suggested = activeDevices.suggestedCompensation;
     const target =
       typeof stored === "number" && Number.isFinite(stored)
         ? stored
+        : typeof suggested === "number" && Number.isFinite(suggested) && suggested > 0
+        ? suggested
         : exprNumber(defaultRustConfig.bufferCompensation);
     if (target === activeCompensation) {
       pendingCompRef.current = null;
@@ -2412,6 +2437,7 @@ const App = () => {
       params={params}
       resetBeat={resetBeat}
       configError={configError}
+      audioNotice={audioNotice}
       setParameters={setParameters}
       reroll={reroll}
       getCurrentPreset={getCurrentPreset}

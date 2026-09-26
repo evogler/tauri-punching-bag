@@ -5,7 +5,7 @@ import { ui } from "../theme";
 export const PanelHeader = (
   p: PanelProps & { helpVisible: boolean; toggleHelp: () => void }
 ) => {
-  const { configError, helpVisible, toggleHelp } = p;
+  const { configError, audioNotice, helpVisible, toggleHelp } = p;
   const help = useHelp();
   return (
     <>
@@ -30,6 +30,20 @@ export const PanelHeader = (
           ?
         </button>
       </div>
+
+      {audioNotice && (
+        <div
+          style={{
+            border: `1px solid ${ui.warn}`,
+            borderRadius: 8,
+            margin: 4,
+            padding: 8,
+            color: ui.warn,
+          }}
+        >
+          {audioNotice}
+        </div>
+      )}
 
       {configError && (
         <div

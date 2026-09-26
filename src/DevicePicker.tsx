@@ -9,6 +9,9 @@ export const DEVICES_CHANGED_EVENT = "devices-changed";
  *  input count or another rate -- or could not. */
 export const AUDIO_RESTARTED_EVENT = "audio-restarted";
 export const AUDIO_RESTART_FAILED_EVENT = "audio-restart-failed";
+/** iOS only: an interruption stopped the audio, and it came back. */
+export const AUDIO_SUSPENDED_EVENT = "audio-suspended";
+export const AUDIO_RESUMED_EVENT = "audio-resumed";
 
 export type AudioDeviceInfo = {
   uid: string;
@@ -67,6 +70,18 @@ export type ActiveDevices = {
    *  output channels" are opposite problems to the person reading it. */
   inputFallbackReason?: string;
   outputFallbackReason?: string;
+  // iOS only (`platform/ios/mod.rs`): the route, and what the session says
+  // about it. Absent on the Mac.
+  /** The round trip the session reports, in frames: where a pair with no
+   *  stored figure starts. */
+  suggestedCompensation?: number | null;
+  /** Bluetooth or AirPlay output: latency that drifts. */
+  outputWarning?: string;
+  /** No microphone permission, or no microphone on the route. */
+  inputWarning?: string;
+  ioBufferFrames?: number;
+  inputLatencyMs?: number;
+  outputLatencyMs?: number;
 };
 
 /** What is running, as `AudioStatus` in `structs.rs` has it. */

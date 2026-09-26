@@ -9,6 +9,8 @@ import {
   AudioPrefs,
   DevicePicker,
 } from "./DevicePicker";
+import { IosRoute } from "./IosRoute";
+import { isIOS } from "./platform";
 import { ui } from "./theme";
 
 // A first-launch walk through the few things that have to be right before the
@@ -274,7 +276,21 @@ export const SetupWizard = ({
           </>
         )}
 
-        {name === "devices" && (
+        {name === "devices" && isIOS() && (
+          <>
+            <p style={text}>
+              On an iPhone or iPad the system chooses the route: plug headphones
+              in, or unplug them, and the app follows. This is what it is using
+              now.
+            </p>
+            <IosRoute active={active} sampleRate={sampleRate} error={deviceError} />
+            <p style={note}>
+              Wired headphones or the speaker, not Bluetooth: its delay drifts,
+              and nothing can line the picture up against a moving target.
+            </p>
+          </>
+        )}
+        {name === "devices" && !isIOS() && (
           <>
             <p style={text}>
               Choose what you're playing into and what you're listening on. If

@@ -40,6 +40,10 @@ export type PanelProps = {
 
   resetBeat: () => void;
   configError: string | null;
+  /** iOS: the audio is interrupted, or the route is one to warn about
+   *  (Bluetooth output, no microphone). Shown at the top of the panel, since
+   *  it explains what you hear from any tab. */
+  audioNotice: string | null;
   setParameters: (parameters: Parameter[]) => void;
   reroll: (pick?: (name: string) => boolean) => void;
   getCurrentPreset: () => Preset;
