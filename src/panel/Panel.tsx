@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { HelpArea } from "../help";
 import { AnalysisTab } from "./AnalysisTab";
 import { ExampleHint, useExampleHint } from "../ExampleBar";
@@ -57,11 +57,37 @@ export const Panel = (
   // `useExampleHint`.
   const hint = useExampleHint(p.getCurrentPreset);
 
+  // A leftward swipe across the panel puts it away, the way a sidebar goes on
+  // iOS. Only a swipe that starts on the panel's own chrome counts: a slider,
+  // a text field or a modal's drum grid is dragged sideways on purpose, and
+  // hiding the panel under a finger that was moving a value would be the worst
+  // possible answer. Clearly horizontal and clearly long, so a scroll that
+  // drifts is never read as one. Touch only -- a mouse has the pane click.
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
+  const onTouchStart = (e: React.TouchEvent) => {
+    const target = e.target as Element;
+    swipeStart.current =
+      e.touches.length === 1 &&
+      !target.closest("input, select, textarea, [data-no-swipe]")
+        ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
+        : null;
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const start = swipeStart.current;
+    swipeStart.current = null;
+    if (!start || !e.changedTouches.length) return;
+    const dx = e.changedTouches[0].clientX - start.x;
+    const dy = e.changedTouches[0].clientY - start.y;
+    if (dx < -60 && Math.abs(dy) < Math.abs(dx) / 2) p.hidePanel();
+  };
+
 
   return (
     <>
       <div
         onMouseLeave={p.clearHelp}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
         style={{
           display: "flex",
           flexDirection: "column",

@@ -301,6 +301,7 @@ export const DrumGridMatrix = ({
   return (
     <div
       style={overlayStyle}
+      data-no-swipe
       onClick={() => {
         if (dragging.current) {
           dragging.current = false;

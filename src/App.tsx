@@ -2476,6 +2476,7 @@ const App = () => {
       activeCfg={viewCtxs[activeView]?.cfg}
       openSetup={() => setSetupOpen(true)}
       recallScene={recallScene}
+      hidePanel={() => setHideConfig(true)}
       fullHidesTopBar={fullHidesTopBar}
       setFullHidesTopBar={setFullHidesTopBar}
       togglePaused={() => toggleRef.current("paused")}
@@ -2592,6 +2593,8 @@ const App = () => {
             resetBeat={resetBeat}
             statusRef={statusRef}
             clearHelp={clearHelp}
+            panelShown={!hideConfig}
+            togglePanel={() => setHideConfig(!hideConfig)}
           />
         )}
         <div

@@ -73,7 +73,7 @@ export const PresetDialog = ({
     );
 
   return (
-    <div style={overlay} onClick={onClose}>
+    <div style={overlay} onClick={onClose} data-no-swipe>
       <div style={panel} onClick={(e) => e.stopPropagation()}>
         <h4 style={{ color: ui.text.body, margin: 0 }}>{title}</h4>
         {hint && (

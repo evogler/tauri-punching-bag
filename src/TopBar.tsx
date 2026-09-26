@@ -54,6 +54,8 @@ export const TopBar = ({
   resetBeat,
   statusRef,
   clearHelp,
+  panelShown,
+  togglePanel,
 }: Pick<PanelProps, "get" | "set" | "params" | "resetBeat"> & {
   /**
    * Written by the draw loop with `textContent`, never through React: the beat
@@ -63,6 +65,9 @@ export const TopBar = ({
    */
   statusRef: React.RefObject<HTMLSpanElement>;
   clearHelp: () => void;
+  /** Whether the settings panel is showing, and the way to change that. */
+  panelShown: boolean;
+  togglePanel: () => void;
 }) => {
   const help = useHelp();
   const paused = get("paused");
@@ -70,6 +75,27 @@ export const TopBar = ({
 
   return (
     <div style={barStyle} onMouseLeave={clearHelp}>
+      {/* The panel's own switch. Tapping a pane does the same, but on a phone
+          the panel covers nearly all of the window and leaves almost no pane
+          to tap. First in the bar and drawn as the sidebar it moves -- the
+          convention every Apple app with a sidebar follows -- so it needs no
+          word, which the bar has no room for on a phone. */}
+      <button
+        onClick={togglePanel}
+        aria-label={panelShown ? "Hide settings" : "Show settings"}
+        aria-pressed={panelShown}
+        title={panelShown ? "Hide settings" : "Show settings"}
+        {...help("topbar.panel")}
+        style={{ padding: "0 6px", lineHeight: 0 }}
+      >
+        <svg width="18" height="14" viewBox="0 0 18 14" aria-hidden="true">
+          <rect x="0.75" y="0.75" width="16.5" height="12.5" rx="2" fill="none"
+            stroke="currentColor" strokeWidth="1.5" />
+          <rect x="0.75" y="0.75" width="6" height="12.5" rx="1"
+            fill={panelShown ? "currentColor" : "none"}
+            stroke="currentColor" strokeWidth="1.5" />
+        </svg>
+      </button>
       <button
         onClick={() => set("paused", !paused)}
         {...help("paused")}

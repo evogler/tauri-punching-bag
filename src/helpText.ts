@@ -549,6 +549,10 @@ export const HELP: Record<string, HelpEntry> = {
     title: "Save as scene",
     body: "Snapshot every parameter as it stands. A scene only sets values -- recalling it never adds or removes parameters.",
   },
+  "topbar.panel": {
+    title: "Settings panel",
+    body: "Show or hide the settings, to give the panes the whole window. Tapping a pane does the same; on a touch screen, swiping the panel to the left hides it too.",
+  },
   fullHidesTopBar: {
     title: "Hide top bar",
     body: "When a pane is clicked to hide the panel, hide the transport bar too, leaving only the panes. Click a pane to bring both back; ⌘P still pauses. Saved on this machine, never in presets.",

@@ -100,6 +100,8 @@ export type PanelProps = {
   openSetup: () => void;
   // Apply parameter scene `i`, the same thing ⌘ and its digit do.
   recallScene: (i: number) => void;
+  // Hide the settings panel -- a leftward swipe across it on a touch screen.
+  hidePanel: () => void;
   // Whether hiding the panel hides the top bar too. App's, not config: a
   // per-machine preference kept in localStorage.
   fullHidesTopBar: boolean;
