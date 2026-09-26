@@ -1,0 +1,2 @@
+# Copied in from the tauri crate on every iOS build.
+/.tauri
