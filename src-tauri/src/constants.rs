@@ -80,8 +80,8 @@ pub fn max_input_backlog() -> usize {
 /// Only reachable if the frontend stops draining -- a wedged UI shouldn't be
 /// able to grow the buffer without bound, and with it the capacity the next
 /// drain reserves. One second, drained in a single poll once the UI recovers.
-pub fn max_visual_backlog() -> usize {
-    sample_rate() as usize
+pub fn max_visual_backlog(sample_rate: f64) -> usize {
+    sample_rate as usize
 }
 
 /// What a drain leaves behind for the callback to fill. The callback holds the
