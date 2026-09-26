@@ -50,9 +50,11 @@ use std::{
 /// `ANALYSIS_RESERVE_HOPS`), the recorder's two seconds, the input backlog cap
 /// and the backend's own input block. macOS asks AUHAL for 2048; iOS hands over
 /// whatever `kAudioUnitProperty_MaximumFramesPerSlice` allows, commonly 4096.
-/// A backend given more than this splits it and calls `process` once per piece
-/// -- the engine is block-size invariant, so that is exact rather than an
-/// approximation.
+/// `process` splits anything longer itself and runs it a piece at a time --
+/// the engine is block-size invariant, so that is exact rather than an
+/// approximation -- so a device breaking its promise costs a split, never a
+/// buffer overrun. The backends still ask their devices for no more than this,
+/// because their own input buffers are sized for it too.
 pub const MAX_BLOCK_FRAMES: usize = 4096;
 
 /// Drum hits ringing at once before a new one is dropped rather than the
@@ -301,7 +303,37 @@ impl Engine {
     /// One block. `input` is `n` frames interleaved, `input_channels` wide;
     /// `output` is the two sides of the stereo out, each `n` long, and every
     /// sample of both is written. `n` is whatever the platform handed over.
+    ///
+    /// **Any `n`, on every platform.** A block longer than `MAX_BLOCK_FRAMES`
+    /// is split here and run a piece at a time, so no backend has to trust its
+    /// device to keep to what it was asked for. The engine is block-size
+    /// invariant -- every piece of state advances per frame, and what is read
+    /// "once per block" is the config, which a split only reads more often --
+    /// so a split block comes out exactly as the whole one would have.
     pub fn process(&mut self, input: &[S], output: [&mut [S]; 2]) {
+        let [left, right] = output;
+        let n = left.len().min(right.len());
+        let c_in = self.input_channels;
+        // A backend that hands over less input than output has broken its
+        // contract; silence is the safe answer on the audio thread, where a
+        // panic would take the whole unit down.
+        if input.len() < n * c_in {
+            left.fill(0.0);
+            right.fill(0.0);
+            return;
+        }
+        let mut done = 0;
+        while done < n {
+            let m = (n - done).min(MAX_BLOCK_FRAMES);
+            self.process_block(
+                &input[done * c_in..(done + m) * c_in],
+                [&mut left[done..done + m], &mut right[done..done + m]],
+            );
+            done += m;
+        }
+    }
+
+    fn process_block(&mut self, input: &[S], output: [&mut [S]; 2]) {
         self.run(input, output);
         // After every path through `run`, early returns included, so the
         // carry is always the end of the last block. Four plain stores.
