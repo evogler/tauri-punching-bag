@@ -55,12 +55,13 @@ f64** (f32 causes ghost trails after ~20 min).
 
 | File | Role |
 |---|---|
-| `main.rs` | Setup: prefs, devices, kit, shared state, builds the `Engine`, Tauri. |
+| `main.rs` | Setup: prefs, devices, kit, shared state, the `AudioHost`, Tauri. |
+| `audio_host.rs` | **What is running, and restarting it in-process** (device, input count, rate). The supervisor thread that turns Core Audio notifications into restarts. |
 | `engine.rs` | **The audio core.** `Engine::process(input, [left, right])`: an interleaved input block in, two output slices filled. All real-time logic; knows no device. |
 | `platform/macos/` | The backend. `devices.rs`: discovery, formats, rate. `mod.rs`: the input queues, the input callback, the render callback that feeds the engine. |
 | `structs.rs` | Config, shared state, `DrumVoice`, `VisualSamples`, `BusDelay`. |
 | `commands.rs` | Tauri commands (`set_config`, `get_samples`, `load_drum_sample`, …). |
-| `constants.rs` | `sample_rate()`, backlog caps (fns, not consts), `default_config()`. |
+| `constants.rs` | `DEFAULT_SAMPLE_RATE` (fallback only), backlog caps (fns of a rate), `default_config()`. |
 | `util.rs` | `beat_bisect`, `mod_add`, section/record-cycle bounds. |
 | `analysis.rs` | STFT for spectrogram, spectral flux, onset picker. |
 | `filter.rs` | Input high pass. |
@@ -204,7 +205,8 @@ value (red field, still playing).
   Registrations serialised through one promise chain (StrictMode).
 - Per-frame DOM readouts (`showFrameTime`, beat readout) write `textContent`
   directly, never through React state.
-- localStorage keys: `punching-bag.help-visible`, `-setup-at`, `-setup-step`,
+- localStorage keys: `punching-bag.help-visible`, `-setup-at` (still written;
+  a device change no longer relaunches, so setup just continues), `-setup-step`,
   `-setup-done`, `-global-shortcut-on`, `-global-shortcut`,
   `-full-hides-top-bar` (layout → *Hide top bar*: hiding the panel takes the
   top bar too; off by default). The session is
@@ -251,19 +253,38 @@ any block up to `MAX_BLOCK_FRAMES` (4096) and is block-size invariant.
 ## Input, devices, sample rate
 
 - **The sample rate is the input device's**; AUHAL won't convert input and
-  returns silent zeroes on mismatch. **Nothing in `main` above
-  `get_input_output_channels` may read the rate** (watch `to_device_stereo` --
-  every file decode goes through it). Frame-sized limits are fns of the rate.
+  returns silent zeroes on mismatch. **It is engine state, not a global**: it
+  lives in `AudioStatus` (with the active devices and input count), written only
+  by `audio_host.rs` while the units are stopped *and the config lock is held*.
+  Everything that needs it takes it as an argument (`to_device_stereo`,
+  `wsola`, `desired_ratio`, `get_loop_spacing`, calibration, recorder); the
+  engine has its own copy. Command-side readers: size engine-used state under
+  the config lock (`set_config`), load/start things under `AudioHost::gate`
+  (drum samples, the file, recording, calibration, bleed run).
 - Input is interleaved, output non-interleaved (required for multichannel in).
 - The macOS input queues (`make_queues`) are one `Arc` shared by both ends; the
   render callback pops a whole block every callback whatever the engine then
   does with it (pause/calibration included), capped by `max_input_backlog()`.
-- Devices are chosen in the panel, stored by UID in `audio-prefs.json`, applied
-  **at next launch** (not hot-swappable). A saved device that is missing or
-  can't serve its role falls back to the default and the panel says so in red.
-  Setup failures print device, role, error and prefs path, then exit.
+- Devices are chosen in the panel, stored by UID in `audio-prefs.json`, and
+  **applied at once** (`restart_audio`): the audio restarts in-process -- open
+  new units, prepare at the new rate while the old engine plays, stop, swap,
+  start seeded from `engine::Carry` (beat, click `last_beat`, cycle,
+  `loop_written`). ~100-200 ms. Loop buffer cleared on a rate or channel-count
+  change; drums re-converted from their decoded source, the file re-decoded
+  from its path -- **never convert a conversion**. Calibration cancelled,
+  bleed measurement lost, a recording kept only if rate and width match.
+  "System default" follows macOS (listeners on the device list, both defaults
+  and the input's rate -- **listeners only send a hint**; the supervisor
+  debounces and restarts). Missing / wrong-role / won't-open devices fall back
+  to the default with the reason in red, at launch and on restart alike. Launch
+  setup failures print device, role, error and prefs path, then exit. See
+  *Restarting the audio in-process*.
 - `pairCompensations: {inUid: {outUid: frames}}` in the same file; applied once
-  over the restored session, written back on change.
+  **per pair** (stored value, else the default -- never the last pair's),
+  written back on change only after the applied figure has landed.
+- Channels are indices and the buses follow the inputs, so after a switch to
+  fewer inputs a pane's `ch 2` may now be the drums bus. Config is never
+  rewritten; out-of-range channels are skipped by the draw path.
 - Frontend never sees frames: streams are stamped in beats.
 
 ## Channels and streams
@@ -381,7 +402,6 @@ silently doing nothing, everywhere.
 - Device picker `describe()` shows input channel count in the output list.
 - Output channel count `2` is a magic literal; untangle before channel work.
 - Click counter ticks twice per frame (`400` is really 200 frames).
-- Sample rate is read once at startup; device rate changes need a restart.
 - Default `audioSubdivisions` has a hand-written `val` with `sounds: ["h"]`
   that isn't what `"2:1"` parses to.
 
@@ -395,6 +415,9 @@ open (details under *Verification* in the design notes):
 - Speaker bleed on real hardware: ~10 dB observed vs 14.8 measured; widening
   `TAPS` is the cheap next try. Looper on speakers regressed with
   `loopFeedbackGuardOn` -- bisect by turning it off, then `bleedCancelAudioOn`.
+- In-process audio restart: exercised through the real path (output on
+  BlackHole), never listened to -- headphones/AirPods, interface unplug,
+  44.1↔48 kHz with the kit, file and stretch.
 - Not yet used in the app: one-row-per-note, presets-to-file migration, pane
   placement / `rowColumns`, the control restyle, section rail, examples picker,
   drum grid, and v0.3.0's chances / pane names / recorder / record cycles /

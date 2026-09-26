@@ -129,6 +129,45 @@ same path an iOS route change (headphones in/out) will take.
   since channel labels and every pane's `channels` are indexed by it.
 - The device picker applies immediately instead of "at the next launch".
 
+**Done 2026-09-26** -- see *Restarting the audio in-process* in
+`docs/design-notes.md`. `audio_host.rs` owns what is running; `restart` opens
+the new units, prepares everything at the new rate while the old engine plays,
+stops, swaps and starts an engine seeded from `engine::Carry`. The rate lives
+in `AudioStatus` and is passed as an argument everywhere; the global is gone.
+Callers: `restart_audio` (the picker) and the supervisor thread (Core Audio's
+device list, both defaults and the input's rate). Frontend listens for
+`audio-restarted` / `audio-restart-failed`.
+
+Found on the way, for step 4:
+
+- **The route change is a `restart` with a different resolver.** On macOS
+  "should we restart" is `resolve_choice(prefs) != running choice` or the
+  input's rate moved. On iOS it becomes "the session's route or sample rate
+  changed", read from `AVAudioSession` after the notification -- the rest of
+  `AudioHost::restart` (prepare, stop, swap, start, events) is platform-free
+  already. `DeviceChoice`, `DeviceId`, `RateWatch`, `resolve_choice`,
+  `device_rate` and `watch_*` are the platform surface to reimplement;
+  `AudioSetup` is what the backend returns.
+- **Notifications must only signal.** The Swift plugin should hand Rust a hint
+  (the same `HintSender` channel works) rather than calling restart on the
+  notification's thread; the supervisor's 300 ms debounce suits route changes,
+  which also arrive in bursts.
+- **Open-before-stop may not hold on iOS.** macOS opens the new AUHAL units
+  while the old ones run, which is why a failed switch leaves audio playing.
+  RemoteIO is one unit per session; expect stop-then-open there, and a failed
+  open to mean silence plus `audio-restart-failed` until the next route change.
+- **Interruptions are a pause, not a restart**, unless the route changed while
+  interrupted. Stopping the unit and starting it again with the same engine
+  would keep the bleed filter; today every restart builds a new engine and loses
+  it, which is fine for a device change and wasteful for a phone call.
+- **The rate can differ between input and output on a route** (Bluetooth HFP is
+  8/16 kHz). The input-wins rule and `to_device_stereo`'s one rate still apply;
+  the Bluetooth refusal belongs here.
+- **Channels are indices and the buses follow the inputs**, so a route that
+  changes the input count relabels panes' channels (`ch 2` becomes drums). On a
+  phone that will happen on every headset plug; worth naming the buses
+  independently of the input count before then.
+
 ### 4. The iOS backend
 
 - Swift plugin: `AVAudioSession` category `playAndRecord`, preferred rate and
@@ -165,6 +204,6 @@ in the container), TestFlight, and the updater coming out on iOS.
 
 - [x] 1. Tauri v2 migration (2026-09-25; in-app testing by the owner still to do)
 - [x] 2. Core / platform split (2026-09-25; in-app listening by the owner still to do)
-- [ ] 3. In-process engine restart
+- [x] 3. In-process engine restart (2026-09-26; exercised through the real path, not yet listened to by the owner)
 - [ ] 4. iOS backend
 - [ ] 5. On the devices

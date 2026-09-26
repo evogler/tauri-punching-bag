@@ -48,12 +48,13 @@ position, looper) derives from it.
 
 | File | Role |
 |---|---|
-| `main.rs` | Setup: prefs, devices, kit, the shared state, the `Engine`, Tauri. |
+| `main.rs` | Setup: prefs, devices, kit, the shared state, the `AudioHost`, Tauri. |
+| `audio_host.rs` | What is running, and restarting it in-process onto other devices, another input count or another rate. The supervisor thread. See *Restarting the audio in-process*. |
 | `engine.rs` | The audio core: every real-time thing, handed a block in and a block out. See *The core and the platform*. |
 | `platform/macos/` | The macOS backend. `devices.rs` is device discovery, stream formats and the rate; `mod.rs` the input queues and both callbacks. |
 | `structs.rs` | Config, shared state, `DrumVoice`, `VisualSamples`. |
 | `commands.rs` | Tauri commands (`set_config`, `get_samples`, `load_drum_sample`, …). |
-| `constants.rs` | `SAMPLE_RATE`, `MAX_INPUT_BACKLOG`, `default_config()`. |
+| `constants.rs` | `DEFAULT_SAMPLE_RATE` (a fallback only), backlog caps as fns of a rate, `default_config()`. |
 | `util.rs` | `beat_bisect` (which subdivision a beat falls in), `mod_add`. |
 | `analysis.rs` | The short-time FFT behind the spectrogram and the spectral flux (see below). |
 | `filter.rs` | The high pass over the input. Pure logic, no Core Audio. |
@@ -1452,6 +1453,7 @@ the commands -- the same ones `main` hands Tauri as managed state.
   `Analyzer` and its `LoopGuard`s take the number they were built with. The
   global is still what the commands, `get_loop_spacing`, the calibration and
   the decoders read -- step 3's job -- but the engine is already per-rate.
+  *(Step 3 done: the global is gone -- see *Restarting the audio in-process*.)*
 - **A drum hit past `MAX_SOUNDING` (512) ringing at once is dropped** rather
   than the vector grown. The only behaviour change, and only reachable when
   something has gone wrong enough that one missing hit is not the problem.
@@ -1731,9 +1733,11 @@ reasons they fail are not visible until you measure.
 
 - **The sample rate is the input device's, not a constant.**
   `get_input_output_channels` reads `kAudioDevicePropertyNominalSampleRate` off
-  the default input device and calls `set_sample_rate` before anything derived
-  is built; `sample_rate()` in `constants.rs` is the `OnceLock` everything else
-  reads. **AUHAL will not convert on the way in**: point it at a 48 kHz
+  the input device it opened and returns it in `AudioSetup::sample_rate`.
+  *(Until 2026-09-26 it called `set_sample_rate`, and `sample_rate()` in
+  `constants.rs` was a process-global `OnceLock` everything read. The device
+  can change while the app runs now, so the rate lives in `AudioStatus` and is
+  passed as an argument -- see *Restarting the audio in-process*.)* **AUHAL will not convert on the way in**: point it at a 48 kHz
   microphone while asking for 44.1 kHz and it hands back zeroes -- no error, no
   log, an input of all silence indistinguishable from a missing microphone
   grant. That is why the constant had to go; a MacBook's built-in mic is 48 kHz
@@ -1766,9 +1770,16 @@ reasons they fail are not visible until you measure.
   `WARNING:` naming both numbers, because the old message only fired when the
   cell had been *set* twice, which was never the case that bit. Latent since
   the built-in kit landed.
-- **Everything sized in frames is now a fn, not a const**: `max_input_backlog()`,
-  `max_visual_backlog()` (`constants.rs`) and `max_loop_frames()`
-  (`get_loop_buffer_size.rs`). They are documented in seconds -- a quarter
+  - **Superseded 2026-09-26 by something stronger.** The global is gone:
+    `to_device_stereo`, `wsola`, `desired_ratio`, `get_loop_spacing`, the
+    calibration and the recorder all take the rate as an argument, and the only
+    place a rate comes from is `AudioSetup`. Decoding before the device is known
+    is not a mistake to warn about any more -- there is no rate to decode at
+    until setup hands one over, so the ordering is enforced by the types.
+- **Everything sized in frames is now a fn, not a const**: `max_input_backlog`,
+  `max_visual_backlog` (`constants.rs`) and `max_loop_frames`
+  (`get_loop_buffer_size.rs`) -- and since 2026-09-26 each takes the rate as an
+  argument rather than reading a global. They are documented in seconds -- a quarter
   second, one second, ten minutes -- and a const would quietly stop meaning that
   at 48 kHz.
 - **`buffer_compensation` is still in frames, so its duration moves with the
@@ -1820,12 +1831,17 @@ order and explanation, never a second place anything is stored.
   reinterpreted, and an index left by an older build simply starts setup over.
   `shouldOpenSetup` still reads the old key for whether setup is part way
   through, and `finish` clears both.
-- **Its progress survives a restart, on purpose.** A device change needs a
-  relaunch, so the current step is written to `punching-bag.setup-step` on
+- **Its progress survives a restart, on purpose.** A device change needed a
+  relaunch, so the current step is written to `punching-bag.setup-at` on
   *every* move -- not only on the wizard's own "Restart and continue", because
-  the device picker's Restart button relaunches too. Finishing or skipping
+  the device picker's Restart button relaunched too. Finishing or skipping
   removes it and sets `punching-bag.setup-done`. Install state, so localStorage
   and not config.
+  - **Since 2026-09-26 a device change continues in place**: the picker restarts
+    the audio in-process, so the devices step just says Next and the microphone
+    check after it is already listening to what was chosen. The step is still
+    written on every move -- harmless, and a relaunch from the menu or a crash
+    should still come back to where setup was.
 - **The microphone step checks that sound arrives, not that permission was
   granted.** The device is opened before any window exists, so macOS has
   already asked by the time setup shows; and the failure worth catching is an
@@ -1843,11 +1859,18 @@ order and explanation, never a second place anything is stored.
 
 ### Device selection, and the third store
 
-The input and output devices are chosen in the panel (signal tab → *device*) and
-applied **at the next launch**, not live. `restart_app` is the button; ⌘⇧R is
-the same thing from the menu.
+The input and output devices are chosen in the panel (Setup → *Audio devices*)
+and, **since 2026-09-26, applied at once**: the picker writes the prefs and calls
+`restart_audio`, which restarts the audio in-process -- see *Restarting the
+audio in-process*. Until then they were applied at the next launch, and the
+first bullet below is why; it is kept as the history of that decision.
 
-- **Not hot-swappable, on purpose.** The `Engine` (`engine.rs`) *owns*
+- **Not hot-swappable, on purpose.** *(Superseded 2026-09-26 -- the way out
+  named in the parenthesis below is what was built. What made it possible is
+  that nothing is resized under a running engine: the units are stopped, a new
+  engine and every buffer sized by the device are built beside the old ones,
+  and the new units are started. The audio thread never waits on a lock for
+  it, which was the objection.)* The `Engine` (`engine.rs`) *owns*
   `input_frame`, `loop_visual`, `analyzer`, `bus_delay`, `drum_last_beats`,
   `tap_gains`, and the render callback owns it and the consumer queues -- all
   of them sized from `input_channels`. (Since the core/platform split the way
@@ -1909,10 +1932,13 @@ the same thing from the menu.
   is listening to the wrong thing.
 - **The list refreshes on Core Audio's own notification**, not on a timer.
   `watch_device_changes` registers a listener on
-  `kAudioHardwarePropertyDevices` and emits `devices-changed`; the picker
+  `kAudioHardwarePropertyDevices` -- and, since 2026-09-26, on both system
+  defaults, which is how "System default" follows macOS -- and emits
+  `devices-changed`; the picker
   re-enumerates on it, so an interface plugged in after launch appears without a
   relaunch. The listener runs on a Core Audio thread -- not the render thread --
-  and only emits a Tauri event, so it cannot stall audio. The `AppHandle` handed
+  and only emits a Tauri event and sends a hint to the audio supervisor, so it
+  cannot stall audio. The `AppHandle` handed
   to it is deliberately leaked, because Core Audio holds the pointer for as long
   as the listener is registered and it never is unregistered.
   Two cheaper paths back it up in case the registration fails: window focus
@@ -1941,13 +1967,25 @@ pushed to the audio thread, which must never do a map lookup.
   different semantics. Rename rather than redefine -- the config rule applies
   here too.
 
-- **Applied once, over the restored session.** The session is the same on every
-  machine; this number is not, so on mount the stored value for whatever device
-  actually opened wins. A `useRef` guard rather than state, because applying it
-  must not depend on having applied it.
-- **Written back on change**, guarded on equality *and* on having applied first,
-  so it can neither loop nor overwrite a saved measurement with the default
-  before that measurement has been read.
+- **Applied once per pair, over the restored session.** The session is the same
+  on every machine; this number is not, so the stored value for whatever pair
+  actually opened wins. Once *per pair* rather than once per launch since the
+  audio restarts in-process (2026-09-26): moving onto another pair applies that
+  pair's figure, or the default if it has none -- never the last pair's, which
+  is a measurement of other hardware. `useRef` guards rather than state,
+  because applying must not depend on having applied. It also waits for the
+  prefs to have been read: they are fetched separately from the active devices,
+  and applying against the empty placeholder used to be able to mark the pair
+  done with nothing applied.
+- **Written back on change**, guarded on equality, on the pair having been
+  applied, and on a figure just applied having *landed* -- so it can neither
+  loop, nor overwrite a saved measurement with the default before that
+  measurement has been read, nor save one pair's figure onto the next. The last
+  is a real ordering hazard: both effects run in the commit that brings the new
+  pair, and without `pendingCompRef` the write-back sees the new pair beside
+  the old pair's number and stores it. Checked against the real restart path:
+  after four switches every new pair had the default and none had the M4's
+  measured 4337.
 - **Frames, not milliseconds.** Partly because that is the unit the key has
   always been in and redefining it is the `loopFeedback` trap, and partly
   because a device implies its own sample rate -- so a per-device frame count
@@ -2002,6 +2040,152 @@ probe, why not the onset detector, and what each gate means.
   one: a number that tracks the microphone's position is measuring the acoustic
   path rather than producing a plausible constant. It also retroactively
   confirms the 4330 default.
+
+### Restarting the audio in-process
+
+`audio_host.rs`, step 3 of `docs/ios-port.md`, 2026-09-26. Choosing a device,
+the system default moving, a chosen interface going away, or the input's rate
+changing under us all restart the audio **without relaunching the app** -- and
+iOS route changes (headphones in and out) will take the same path.
+
+```
+open the new units            (old engine still playing)
+prepare everything at the new rate, if it moved
+stop the old units            -- silence starts
+cancel/stop what cannot carry, swap the per-device state
+build an engine seeded from the old one's Carry, start   -- silence ends
+```
+
+Measured on the owner's machine through the real command path: **110-200 ms
+from call to running**, most of it opening the units while the old ones still
+play; the silent part is the stop, the swap and the start.
+
+- **Stop, swap, start -- not a hand-over between running engines.** Nothing is
+  shared with the audio thread during a swap because there is no audio thread:
+  `AudioOutputUnitStop` waits out a render in progress, and dropping the unit
+  frees the render closure (and the engine in it) on the restarting thread. So
+  there is no lock the render callback could wait on, which was the whole
+  objection to hot-swapping. The engine being `Send` (step 2) is what lets it
+  be built here and moved in.
+- **The new units are opened before the old ones stop.** A device that will not
+  open then costs nothing: the error goes to the panel in red and the audio
+  carries on as it was. Every fallback launch makes -- missing device, wrong
+  role, refuses to open (`open_unit`'s retry) -- a restart makes too, because it
+  is the same `get_input_output_channels`, and `ActiveDevices` says so the same
+  way.
+- **Whether to restart is decided by comparing a `DeviceChoice`**, what the
+  prefs resolve to *now*: the requested input and output `AudioDeviceID`s and
+  the requested input's channel count. Requested, not opened, so a device that
+  keeps refusing to open does not compare unequal on every notification. Ids,
+  not UIDs, because an interface unplugged and plugged back keeps its UID and
+  gets a new id -- while the running unit is bound to the old, dead one. And
+  the running input device's nominal rate against the running rate, so a rate
+  change is caught even with the same devices.
+- **The rate is engine state.** It lives in `AudioStatus` (with the active
+  devices and the input count), written only by the host: at launch, and by a
+  restart *while the units are stopped and the config lock is held*. Nothing on
+  the audio thread reads it -- the engine has its own copy from construction.
+  Two rules keep command-side readers consistent:
+  - **Anything that sizes something the engine then uses reads the rate under
+    the config lock** (`set_config` resizing the loop buffer), because the
+    restart changes the rate and resizes what depends on it inside one hold of
+    that lock -- so it sees old-and-old or new-and-new.
+  - **Anything that loads or starts at the rate takes `AudioHost::gate`**:
+    loading a drum sample or the file, starting a recording, a calibration or a
+    bleed run. The restart holds the gate for its whole length, so none of them
+    can read the old rate and land after everything was converted to the new
+    one. Decoding happens before the gate (it is the slow part), converting
+    inside it. The audio thread never takes the gate.
+- **Carried across** (`engine::Carry`, published by the engine at the end of
+  every block into four atomics, read after the stop): the beat, which is in
+  beats and so means the same at any rate; the click's `last_beat`, without
+  which the new engine clicks on its first frame; the cycle count, so
+  `VisualSamples::cycle` stays monotonic; and `loop_written` when the loop is
+  kept. Drum voices need nothing: a new engine sees each voice for the first
+  time and records the current hit rather than firing. Temp-tested (run, then
+  deleted): a swap at the same rate carries the beat **bit-identically** and
+  the clicks land on exactly the frames an unbroken engine puts them on; with
+  the default `last_beat` the swap clicks at once; a swap to 48 kHz continues
+  the beat at the new rate.
+- **Cleared on a rate change or a channel-count change: the loop buffer.** A
+  loop recorded at another rate would play back at the wrong pitch against a
+  different bar, and one recorded per channel has nowhere to go when the
+  channels change. At the same rate and count it is kept, with `loop_written`.
+- **Re-converted from the source, never from the last conversion.** Drum
+  samples keep their decoded source (`DrumSamples.1`, at the file's own rate --
+  one-shots are small); the file player re-decodes from `Mp3Buffer::path`,
+  since a song is not small, falling back to converting the loaded copy (and
+  saying so in the log) if the path no longer reads. Converting conversions
+  compounds: temp-tested, 44.1 -> 48 -> 44.1 -> 48 -> 44.1 from the source
+  lands on exactly the original length every time, where converting the last
+  conversion loses a frame per round trip. All of it happens before the old
+  units stop, so it adds nothing to the silence.
+- **The stretch is re-requested, asynchronously.** The swap sets the file back
+  to its unstretched natural at the new rate and bumps `generation`, so a
+  render in flight at the old rate lands nowhere; `request` then renders at the
+  new rate exactly as a tempo change does, with the same `rendering…` note. The
+  position is derived from the beat, so the file stays in sync meanwhile and
+  only its pitch is off (varispeed) until the render lands. A free-running file
+  (`fileBeats` 0) has its `pos` scaled by the length ratio.
+- **In flight during a restart:**
+  - **A calibration is cancelled**, running *or* finished-but-unread, with a
+    failed result saying why. A measurement across a device change measures
+    neither pair, and a finished one is the old pair's: applying it would write
+    the old pair's round trip onto the new one.
+  - **The bleed measurement is always lost**, run in progress or not. The
+    filter lives in the engine and describes one speaker, microphone and rate;
+    the new engine's is untrained, which is a pass-through, not a wrong
+    subtraction. The panel's result is set to failed with "measure again"
+    rather than left saying done -- `BleedMeter` re-reads on `audio-restarted`
+    since it may not be polling. Persisting it per pair is still *not built*.
+  - **A recording is kept if it can be, stopped cleanly if it cannot.** Same
+    rate and (if it records the inputs) the same input count: it carries on,
+    with a gap of the restart's length -- the same judgement as not recording
+    while paused. Otherwise the file is finished, and its status carries the
+    reason where the panel shows a writer failure. A WAV header has one rate
+    and one width; the alternative, resampling or padding channels into a take,
+    is a surprise nobody asked for.
+  - **A stretch render** is dropped by `generation` and re-requested (above).
+  - **`get_samples` / `get_analysis`** need nothing: the buffers are shared and
+    the beat is continuous, so the stream simply resumes.
+  - **Level meter slots** (`InputLevelState`) are rebuilt at the new count; the
+    command clones the current `Arc` out of a mutex only the restart contends.
+- **Two callers, one path.** The picker (`restart_audio`, async so the main
+  thread never waits on a re-decode) and the **supervisor thread**, which turns
+  Core Audio notifications -- the device list, the default input, the default
+  output, the running input's nominal rate -- into restarts. **The listeners
+  only send on a channel.** They run on Core Audio's notification threads, and
+  stopping a unit from inside one is the shape of a deadlock. The supervisor
+  waits for 300 ms of quiet first, since one plug event fires several
+  notifications, then asks the host whether anything it cares about changed;
+  usually nothing did and it returns at once. Restarts are serialised by the
+  host's own mutex.
+- **"System default" now follows macOS.** Empty prefs resolve to the current
+  default, so the default moving is a different `DeviceChoice`. A device chosen
+  explicitly that goes away falls back to the default and says so, exactly as
+  at launch; when it comes back its id resolves again and the audio moves back
+  onto it.
+- **The rate listener fixes an old known issue** (a device rate changed in
+  Audio MIDI Setup was not picked up, and AUHAL answers a mismatched input with
+  silence). Registered on the input device actually opened; the restart
+  replaces it. Checked by changing BlackHole's nominal rate while it was the
+  input: the supervisor restarted at 48 kHz and every kit sound came back at
+  exactly 48/44.1 of its length.
+- **The frontend is told** by `audio-restarted` (what is running, and what was
+  cancelled or stopped) or `audio-restart-failed` (why). `App` re-reads the
+  input count (channel labels, the channel list, the mic check), the rate
+  (`setSampleRateHz` -- `analysisNyquist()`, the fft ms label, the latency in
+  ms) and the active devices, which triggers the per-pair latency above.
+- **Panes naming inputs that no longer exist keep their config.** Nothing is
+  rewritten, and the draw path already skips a channel with no style or no
+  stream slot. What the owner may not like: channels are *indices*, and the
+  synthetic buses follow the inputs, so a pane showing `ch 2` on a 2-input
+  interface shows the **drums bus** after switching to the 1-input built-in
+  mic (and goes back when switched back). Honest to the labels, which move in
+  step, but a different thing on screen. Fixing it means naming the buses
+  independently of the input count, which is a config migration.
+- **The menu's Restart still relaunches**, as does the updater. It is no longer
+  how a device change is applied.
 
 ### Recording the session
 
@@ -3714,10 +3898,10 @@ exactly as before.
 - A zero-length `beatsToLoop` used to panic; guarded now, but similar bare
   indexing exists elsewhere.
 - ~~`SAMPLE_RATE` hard-coded at 44100~~ -- **fixed 2026-09-06**, adopted from
-  the input device instead. See *Input capture*. The rate is still read **once**
-  at startup: changing the device rate in Audio MIDI Setup, or switching the
-  default input device, while the app is running is not picked up and needs a
-  restart.
+  the input device instead. See *Input capture*. ~~The rate is still read
+  **once** at startup~~ -- **fixed 2026-09-26**: a rate change on the running
+  input, or the default input moving, restarts the audio in-process. See
+  *Restarting the audio in-process*.
 
 ## Verification
 
@@ -3726,6 +3910,16 @@ without saying so.** Treat a feature as heard and seen unless a note below says
 otherwise. The dated sections that follow record what was *new and unconfirmed
 at the time of writing* -- they are a build log, not a standing list of doubts,
 and several of them have since been confirmed. What is genuinely open is here:
+
+- **The in-process audio restart has not been heard.** Driven through the real
+  restart path in `tauri dev` by a temporary harness (run, then deleted): M4,
+  the built-in mic, BlackHole and a missing device, 1, 2 and 4 inputs, a no-op
+  repeat, and a rate change on BlackHole caught by the listener -- restarts in
+  110-200 ms, kit re-converted to the exact new length, loop buffer rebuilt,
+  per-pair latency applied without leaking. Output was on BlackHole the whole
+  time, so nothing was *listened to*: whether the gap is audible as a click,
+  whether the file's varispeed until the stretch lands is objectionable, and
+  whether plugging real headphones or AirPods moves the sound cleanly are open.
 
 - **Onsets: the threshold and the late bias are both measured and fixed.** See
   *Running the picker over a file*. `onsetThreshold` 0.05 -> 0.4 takes 61
