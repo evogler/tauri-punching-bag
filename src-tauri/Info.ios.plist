@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Merged by the Tauri CLI into gen/apple/app_iOS/Info.plist on every iOS
+         build. Without the usage string iOS never asks for the microphone and
+         the app would be killed the moment RemoteIO's input is enabled. -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Tauri Punching Bag records your playing so it can draw the waveform you play against, and loop it back.</string>
+    <!-- Keeps the click, the drums and the looper going with the screen locked
+         or another app in front, like any metronome. The picture stops -- the
+         webview is not drawing -- and the sample stream is capped, so nothing
+         piles up. Pause to stop. -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>audio</string>
+    </array>
+</dict>
+</plist>

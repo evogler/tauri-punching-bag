@@ -2,6 +2,7 @@ extern crate coreaudio;
 
 use super::SAMPLE_FORMAT;
 use crate::constants::DEFAULT_SAMPLE_RATE;
+use crate::platform::{Hint, HintSender};
 use crate::prefs::AudioPrefs;
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::macos_helpers::{
@@ -300,16 +301,10 @@ fn open_unit(
 /// shows up in the dropdown without the user having to know to look again.
 pub const DEVICES_CHANGED_EVENT: &str = "devices-changed";
 
-/// How a Core Audio listener asks for the audio to be looked at again. A unit
-/// value: the listener cannot usefully say more than "something changed", and
-/// the supervisor thread in `audio_host.rs` works out what, once the burst of
-/// notifications a single plug event produces has gone quiet.
-///
-/// **The listeners only ever send on this.** They run on Core Audio's own
-/// notification threads, and restarting from one would mean stopping an audio
-/// unit from inside a Core Audio callback -- which is the shape of a deadlock
-/// rather than a restart.
-pub type HintSender = std::sync::mpsc::Sender<()>;
+// **The listeners only ever send a hint** (`HintSender`, in `platform/mod.rs`).
+// They run on Core Audio's own notification threads, and restarting from one
+// would mean stopping an audio unit from inside a Core Audio callback -- which
+// is the shape of a deadlock rather than a restart.
 
 struct Watch {
     app: tauri::AppHandle,
@@ -329,7 +324,7 @@ extern "C" fn devices_changed_listener(
         if let Some(watch) = (context as *const Watch).as_ref() {
             use tauri::Emitter;
             let _ = watch.app.emit(DEVICES_CHANGED_EVENT, ());
-            let _ = watch.hint.send(());
+            let _ = watch.hint.send(Hint::Devices);
         }
     }
     kAudioHardwareNoError as OSStatus
@@ -380,7 +375,7 @@ extern "C" fn rate_changed_listener(
 ) -> OSStatus {
     unsafe {
         if let Some(hint) = (context as *const HintSender).as_ref() {
-            let _ = hint.send(());
+            let _ = hint.send(Hint::Devices);
         }
     }
     kAudioHardwareNoError as OSStatus
@@ -506,8 +501,7 @@ pub fn resolve_choice(prefs: &AudioPrefs) -> Result<DeviceChoice, String> {
 /// Everything audio setup produces. A struct rather than a tuple because it
 /// grew a fifth member and the call site was getting hard to read.
 pub struct AudioSetup {
-    pub input_unit: AudioUnit,
-    pub output_unit: AudioUnit,
+    pub units: super::Units,
     pub input_channels: usize,
     pub log: Vec<String>,
     pub active: ActiveDevices,
@@ -701,8 +695,10 @@ pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Strin
         })?;
 
     Ok(AudioSetup {
-        input_unit: input_audio_unit,
-        output_unit: output_audio_unit,
+        units: super::Units {
+            input: input_audio_unit,
+            output: output_audio_unit,
+        },
         input_channels,
         log: result_log,
         active,

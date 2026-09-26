@@ -298,6 +298,14 @@ pub fn export_presets(path: String, text: String) -> Result<(), String> {
 /// `restart_audio` -- but still the menu's Restart and what the updater does
 /// after installing. `restart` reads Info.plist, so the *bundle* comes back and
 /// keeps its microphone grant.
+/// `macos` or `ios`, for the panel to hide what a platform cannot do -- the
+/// device picker, the global shortcut and the updater on iOS. Asked of Rust
+/// rather than the user agent, which on an iPad claims to be a Mac.
+#[tauri::command]
+pub fn get_platform() -> &'static str {
+    std::env::consts::OS
+}
+
 #[tauri::command]
 pub fn restart_app(app_handle: tauri::AppHandle) {
     app_handle.restart();

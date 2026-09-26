@@ -1,0 +1,6 @@
+xcuserdata/
+build/
+Externals/
+
+# Copied from bundle.resources by the Tauri CLI on every build.
+assets/

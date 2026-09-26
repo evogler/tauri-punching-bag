@@ -25,7 +25,7 @@ use crate::bleed::{BleedPhase, BleedResult};
 use crate::calibration::{CalibrationPhase, CalibrationResult};
 use crate::engine::{Carry, Engine, EngineShared};
 use crate::get_loop_buffer_size::get_loop_buffer_size;
-use crate::platform::{self, DeviceChoice, DeviceId, HintSender, RateWatch};
+use crate::platform::{self, DeviceChoice, DeviceId, Hint, HintSender, RateWatch};
 use crate::prefs;
 use crate::read_audio_file::{decode_audio_file, to_device_stereo, AudioFile};
 use crate::stretch::{desired_ratio, request as request_stretch};
@@ -45,6 +45,13 @@ use tauri::{AppHandle, Emitter};
 pub const AUDIO_RESTARTED_EVENT: &str = "audio-restarted";
 /// Emitted when a restart could not bring the audio back, with the reason.
 pub const AUDIO_RESTART_FAILED_EVENT: &str = "audio-restart-failed";
+/// iOS: an interruption (a call, Siri, an alarm) has stopped the audio, with
+/// what to tell the player. The engine is kept, so nothing is lost.
+#[cfg(target_os = "ios")]
+pub const AUDIO_SUSPENDED_EVENT: &str = "audio-suspended";
+/// iOS: the interruption is over and the same engine is running again.
+#[cfg(target_os = "ios")]
+pub const AUDIO_RESUMED_EVENT: &str = "audio-resumed";
 
 /// How long the notifications have to go quiet before the supervisor looks. A
 /// single plug event fires the device list, then one or both defaults, then
@@ -84,6 +91,11 @@ struct Inner {
     /// running one. `None` until something has started.
     input_device: Option<DeviceId>,
     rate_watch: Option<RateWatch>,
+    /// iOS: stopped by an interruption, engine kept. While this is set the
+    /// session is inactive and a unit cannot be started, so a route change
+    /// waits: the resume compares the route again anyway.
+    #[cfg(target_os = "ios")]
+    suspended: bool,
 }
 
 pub struct AudioHost {
@@ -129,6 +141,8 @@ impl AudioHost {
                 choice: None,
                 input_device: None,
                 rate_watch: None,
+                #[cfg(target_os = "ios")]
+                suspended: false,
             }),
             gate: Mutex::new(()),
             shared: Mutex::new(shared),
@@ -144,7 +158,10 @@ impl AudioHost {
     }
 
     /// The first start, from a setup `main` has already opened and sized
-    /// everything for. The same `begin` a restart ends with.
+    /// everything for. The same `begin` a restart ends with. macOS only: on
+    /// iOS nothing can open before the session is configured, which needs the
+    /// app, so the first start there is a `restart` from nothing.
+    #[cfg(target_os = "macos")]
     pub fn launch(&self, setup: platform::AudioSetup) -> Result<(), String> {
         let mut inner = lock(&self.inner);
         self.begin(&mut inner, setup, Carry::default())
@@ -155,8 +172,7 @@ impl AudioHost {
     /// never constructs anything.
     fn begin(&self, inner: &mut Inner, setup: platform::AudioSetup, carry: Carry) -> Result<(), String> {
         let platform::AudioSetup {
-            input_unit,
-            output_unit,
+            units,
             input_channels,
             sample_rate,
             choice,
@@ -165,8 +181,7 @@ impl AudioHost {
         } = setup;
         let shared = lock(&self.shared).clone();
         let engine = Engine::new(shared, input_channels, sample_rate, carry);
-        let running = platform::start(input_unit, output_unit, engine)
-            .map_err(|e| format!("the audio units would not start ({:?})", e))?;
+        let running = platform::start(units, engine)?;
         inner.running = Some(running);
         inner.choice = Some(choice);
         inner.input_device = Some(input_device_id);
@@ -181,7 +196,19 @@ impl AudioHost {
     /// or the input's rate has moved. `Ok(None)` when there was nothing to do.
     /// `reason` is only carried to the frontend.
     pub fn restart(&self, app: &AppHandle, reason: &str) -> Result<Option<AudioRestarted>, String> {
+        self.restart_with(app, reason, false)
+    }
+
+    /// `force` rebuilds whatever the comparison says -- for when the running
+    /// unit is known to be dead (iOS's media services reset).
+    fn restart_with(&self, app: &AppHandle, reason: &str, force: bool) -> Result<Option<AudioRestarted>, String> {
         let mut inner = lock(&self.inner);
+        #[cfg(target_os = "ios")]
+        if inner.suspended {
+            // The session is inactive until the interruption ends; opening a
+            // unit now would fail. The resume compares the route again.
+            return Ok(None);
+        }
         let prefs = prefs::load(&self.prefs_dir);
         let wanted = platform::resolve_choice(&prefs)?;
         let running_rate = self.rate();
@@ -191,7 +218,7 @@ impl AudioHost {
             .input_device
             .and_then(platform::device_rate)
             .map_or(false, |r| r != running_rate);
-        if inner.running.is_some() && inner.choice.as_ref() == Some(&wanted) && !rate_moved {
+        if !force && inner.running.is_some() && inner.choice.as_ref() == Some(&wanted) && !rate_moved {
             return Ok(None);
         }
         let _gate = lock(&self.gate);
@@ -420,7 +447,16 @@ impl AudioHost {
 
     /// `restart`, with the outcome sent to the frontend. What both callers use.
     pub fn restart_and_report(&self, app: &AppHandle, reason: &str) -> Result<AudioStatus, String> {
-        match self.restart(app, reason) {
+        self.report(app, reason, self.restart(app, reason))
+    }
+
+    fn report(
+        &self,
+        app: &AppHandle,
+        reason: &str,
+        outcome: Result<Option<AudioRestarted>, String>,
+    ) -> Result<AudioStatus, String> {
+        match outcome {
             Ok(Some(event)) => {
                 println!(
                     "audio restarted ({}): {} -> {}, {} input(s) at {} Hz",
@@ -441,29 +477,119 @@ impl AudioHost {
             }
         }
     }
+
+    /// iOS: an interruption began. The system has already stopped the unit;
+    /// stopping it here too keeps our side in step, and the engine -- the beat,
+    /// the loop, the bleed filter -- stays in the callback for the resume.
+    #[cfg(target_os = "ios")]
+    pub fn suspend(&self, app: &AppHandle) {
+        let mut inner = lock(&self.inner);
+        if inner.suspended {
+            return;
+        }
+        inner.suspended = true;
+        if let Some(running) = inner.running.as_mut() {
+            running.suspend();
+        }
+        println!("audio suspended: interrupted");
+        let _ = app.emit(
+            AUDIO_SUSPENDED_EVENT,
+            "interrupted by another app or a call -- the audio comes back when it ends, or when you return to the app",
+        );
+    }
+
+    /// iOS: the session is active again. The same engine starts where it
+    /// stopped; a route that moved meanwhile goes through the ordinary
+    /// comparison, and a unit that will not start is rebuilt. Also how a
+    /// launch whose first start failed gets another go, since the app coming
+    /// to the front sends this too.
+    #[cfg(target_os = "ios")]
+    pub fn resume(&self, app: &AppHandle, force: bool) {
+        let unit_dead = {
+            let mut inner = lock(&self.inner);
+            let was_suspended = std::mem::replace(&mut inner.suspended, false);
+            let resumed = match inner.running.as_mut() {
+                Some(running) if !force => match running.resume() {
+                    Ok(()) => true,
+                    Err(e) => {
+                        println!("audio could not resume ({}); rebuilding it", e);
+                        false
+                    }
+                },
+                _ => false,
+            };
+            if was_suspended && resumed {
+                println!("audio resumed");
+                let _ = app.emit(AUDIO_RESUMED_EVENT, ());
+            }
+            // Nothing running needs no forcing: `restart_with` goes ahead
+            // whenever nothing is running.
+            inner.running.is_some() && !resumed
+        };
+        // Outside the lock, which `restart_with` takes. Forced only when a
+        // running unit is known dead; otherwise it acts only on a change.
+        let outcome = self.restart_with(app, "the audio session came back", unit_dead);
+        let _ = self.report(app, "the audio session came back", outcome);
+    }
 }
 
-/// The thread that turns Core Audio's notifications into restarts. The
-/// listeners only send on the channel; this waits for them to go quiet, then
-/// asks the host whether anything it cares about actually changed -- most
-/// notifications (a device the prefs do not name coming or going) change
-/// nothing, and `restart` returns at once.
-pub fn spawn_supervisor(host: Arc<AudioHost>, app: AppHandle, hints: Receiver<()>) {
+/// The thread that turns the platform's notifications into restarts -- Core
+/// Audio's listeners on the Mac, the audio session's on iOS. They only send on
+/// the channel; this waits for them to go quiet, then acts on what arrived.
+/// Most device notifications (a device the prefs do not name coming or going)
+/// change nothing, and `restart` returns at once.
+pub fn spawn_supervisor(host: Arc<AudioHost>, app: AppHandle, hints: Receiver<Hint>) {
     let spawned = std::thread::Builder::new()
         .name("audio-supervisor".into())
         .spawn(move || {
-            while hints.recv().is_ok() {
+            while let Ok(first) = hints.recv() {
+                let mut burst = vec![first];
                 loop {
                     match hints.recv_timeout(DEBOUNCE) {
-                        Ok(()) => continue,
+                        Ok(hint) => burst.push(hint),
                         Err(RecvTimeoutError::Timeout) => break,
                         Err(RecvTimeoutError::Disconnected) => return,
                     }
                 }
-                let _ = host.restart_and_report(&app, "the system's audio devices changed");
+                act(&host, &app, &burst);
             }
         });
     if let Err(e) = spawned {
         println!("could not start the audio supervisor ({}); device changes need a relaunch", e);
+    }
+}
+
+/// One quiet burst of hints. The last word on an interruption wins -- a call
+/// that began and ended inside one burst is a resume -- and a route change
+/// during an interruption waits for it to end.
+fn act(host: &AudioHost, app: &AppHandle, burst: &[Hint]) {
+    #[cfg(target_os = "ios")]
+    {
+        let reset = burst.contains(&Hint::Reset);
+        let interruption = burst
+            .iter()
+            .rev()
+            .find(|h| matches!(h, Hint::Suspend | Hint::Resume));
+        match interruption {
+            Some(Hint::Suspend) => {
+                host.suspend(app);
+                if burst.contains(&Hint::Devices) {
+                    let _ = host.restart_and_report(app, "the audio route changed");
+                }
+                return;
+            }
+            Some(_) => {
+                host.resume(app, reset);
+                return;
+            }
+            None if reset => {
+                host.resume(app, true);
+                return;
+            }
+            None => {}
+        }
+    }
+    if burst.contains(&Hint::Devices) {
+        let _ = host.restart_and_report(app, "the system's audio devices changed");
     }
 }

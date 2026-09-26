@@ -12,13 +12,12 @@ mod devices;
 
 pub use devices::{
     get_input_output_channels, list_devices, resolve_choice, watch_device_changes, watch_rate,
-    ActiveDevices, AudioDeviceInfo, AudioSetup, DeviceChoice, HintSender, RateWatch,
+    ActiveDevices, AudioDeviceInfo, AudioSetup, DeviceChoice, RateWatch,
 };
 use crate::engine::{Engine, MAX_BLOCK_FRAMES};
 use crate::types::S;
 use coreaudio::audio_unit::render_callback::{self, data};
 use coreaudio::audio_unit::{AudioUnit, SampleFormat};
-use coreaudio::Error;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
@@ -67,13 +66,26 @@ pub struct Running {
     _output: AudioUnit,
 }
 
+/// What `get_input_output_channels` opened and `start` starts: the two units,
+/// configured and not yet running. Opened ahead of the swap on purpose -- see
+/// `AudioHost::restart` -- so a device that will not open costs nothing.
+pub struct Units {
+    pub input: AudioUnit,
+    pub output: AudioUnit,
+}
+
 /// Start both units, with `engine` as the render callback. The engine must
-/// have been built for `setup`'s channel count and rate.
-pub fn start(
+/// have been built for the setup's channel count and rate.
+pub fn start(units: Units, engine: Engine) -> Result<Running, String> {
+    start_units(units.input, units.output, engine)
+        .map_err(|e| format!("the audio units would not start ({:?})", e))
+}
+
+fn start_units(
     mut input_audio_unit: AudioUnit,
     mut output_audio_unit: AudioUnit,
     mut engine: Engine,
-) -> Result<Running, Error> {
+) -> Result<Running, coreaudio::Error> {
     let input_channels = engine.input_channels();
     let backlog = max_input_backlog(engine.sample_rate());
     let queues = make_queues(input_channels, backlog);
@@ -100,9 +112,10 @@ pub fn start(
             return Ok(());
         };
 
-        // Split rather than trusted: a device that hands over more than the
-        // engine is sized for is processed in pieces. The engine is block-size
-        // invariant, so this changes nothing about what comes out.
+        // In pieces, because `input_block` is sized for `MAX_BLOCK_FRAMES` and
+        // AUHAL's 2048 is a request rather than a promise. The engine would
+        // split an oversized block itself; what cannot be split for it is
+        // assembling the input from the queues into a buffer of fixed size.
         let mut done = 0;
         while done < num_frames {
             let n = (num_frames - done).min(MAX_BLOCK_FRAMES);
@@ -146,7 +159,7 @@ pub fn start(
     })
 }
 
-fn start_input_audio_unit(input_audio_unit: &mut AudioUnit, producers: Queues) -> Result<(), Error> {
+fn start_input_audio_unit(input_audio_unit: &mut AudioUnit, producers: Queues) -> Result<(), coreaudio::Error> {
     input_audio_unit.set_input_callback(move |args: InputArgs| {
         let InputArgs {
             num_frames, data, ..

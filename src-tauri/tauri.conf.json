@@ -41,7 +41,11 @@
         "depends": []
       }
     },
-    "createUpdaterArtifacts": "v1Compatible"
+    "createUpdaterArtifacts": "v1Compatible",
+    "iOS": {
+      "developmentTeam": "9KMDH5UH9Z",
+      "minimumSystemVersion": "14.0"
+    }
   },
   "productName": "tauri-punching-bag",
   "mainBinaryName": "tauri-punching-bag",

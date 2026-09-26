@@ -1,14 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Exactly what the frontend calls. v1 ran with `allowlist.all`; everything else here goes through the app's own commands, which need no permission.",
+  "description": "Exactly what the frontend calls. v1 ran with `allowlist.all`; everything else here goes through the app's own commands, which need no permission. The desktop-only plugins are in desktop.json.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "dialog:allow-open",
-    "dialog:allow-save",
-    "global-shortcut:allow-register",
-    "global-shortcut:allow-unregister",
-    "updater:default"
+    "dialog:allow-save"
   ]
 }
