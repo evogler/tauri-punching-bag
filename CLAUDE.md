@@ -196,7 +196,9 @@ value (red field, still playing).
 - Per-frame DOM readouts (`showFrameTime`, beat readout) write `textContent`
   directly, never through React state.
 - localStorage keys: `punching-bag.help-visible`, `-setup-at`, `-setup-step`,
-  `-setup-done`, `-global-shortcut-on`, `-global-shortcut`. The session is
+  `-setup-done`, `-global-shortcut-on`, `-global-shortcut`,
+  `-full-hides-top-bar` (layout → *Hide top bar*: hiding the panel takes the
+  top bar too; off by default). The session is
   localStorage; presets are `presets.json`.
 
 ## Presets and examples

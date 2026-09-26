@@ -191,7 +191,7 @@ export const Switch = ({
   </button>
 );
 
-const rowStyle: React.CSSProperties = {
+export const rowStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "row",
   gap: "4px",

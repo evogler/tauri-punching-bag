@@ -241,9 +241,31 @@ const camelCaseToSnakeCase = (str: string) =>
 const snakeCaseKeys = <T,>(obj: Record<string, T>) =>
   mapFuncOnObjectKeys(obj, camelCaseToSnakeCase);
 
+// Whether hiding the panel hides the top bar too. See `fullHidesTopBar`.
+const FULL_HIDES_TOP_BAR_KEY = "punching-bag.full-hides-top-bar";
+
 const App = () => {
   const [log, setLog] = useState("log");
   const [hideConfig, setHideConfig] = useState(false);
+  // Whether hiding the panel takes the top bar with it. Off by default: the
+  // bar was put above the panel precisely so that asking for more picture
+  // didn't take away the ability to stop, and ⌘P still reaches the transport
+  // with it gone. A per-machine preference like the help toggle, so
+  // localStorage rather than config -- a preset load merges over the defaults
+  // and would otherwise switch it back off every time.
+  const [fullHidesTopBar, setFullHidesTopBarState] = useState(() => {
+    try {
+      return window.localStorage.getItem(FULL_HIDES_TOP_BAR_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const setFullHidesTopBar = (on: boolean) => {
+    setFullHidesTopBarState(on);
+    try {
+      window.localStorage.setItem(FULL_HIDES_TOP_BAR_KEY, String(on));
+    } catch {}
+  };
   // Plain state rather than a config key: which tab is open is transient UI,
   // and keeping it out of config keeps it out of presets and the session.
   const [panelTab, setPanelTab] = useState<PanelTab>("play");
@@ -2092,6 +2114,7 @@ const App = () => {
     // What was last written, so an unchanged string costs no DOM work at all.
     // The beat moves most frames; the section and the step do not.
     let shownStatus = "";
+    let shownStatusNode: HTMLSpanElement | null = null;
 
     const render = () => {
       drawOps.current = 0;
@@ -2104,9 +2127,13 @@ const App = () => {
       const status = statusRef.current;
       if (status) {
         const text = statusTextRef.current();
-        if (text !== shownStatus) {
+        // The node as well as the text: the bar can be unmounted with the
+        // panel and comes back as a fresh, empty span that the text alone
+        // would call already written -- blank for as long as it is paused.
+        if (text !== shownStatus || status !== shownStatusNode) {
           status.textContent = text;
           shownStatus = text;
+          shownStatusNode = status;
         }
       }
 
@@ -2306,6 +2333,8 @@ const App = () => {
       paneCount={viewCtxs.length}
       activeCfg={viewCtxs[activeView]?.cfg}
       openSetup={() => setSetupOpen(true)}
+      fullHidesTopBar={fullHidesTopBar}
+      setFullHidesTopBar={setFullHidesTopBar}
       togglePaused={() => toggleRef.current("paused")}
       registerHelp={registerHelp}
       clearHelp={clearHelp}
@@ -2412,14 +2441,16 @@ const App = () => {
           overflow: "hidden",
         }}
       >
-        <TopBar
-          get={get as unknown as PanelProps["get"]}
-          set={set}
-          params={params}
-          resetBeat={resetBeat}
-          statusRef={statusRef}
-          clearHelp={clearHelp}
-        />
+        {!(hideConfig && fullHidesTopBar) && (
+          <TopBar
+            get={get as unknown as PanelProps["get"]}
+            set={set}
+            params={params}
+            resetBeat={resetBeat}
+            statusRef={statusRef}
+            clearHelp={clearHelp}
+          />
+        )}
         <div
           style={{
             display: "flex",

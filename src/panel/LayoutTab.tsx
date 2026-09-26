@@ -1,4 +1,5 @@
-import { ColorInput } from "../Input";
+import { ColorInput, labelStyle, rowStyle, Switch } from "../Input";
+import { useHelp } from "../help";
 import { Slider } from "../Slider";
 import { Divider, Section } from "./chrome";
 import { PanelProps } from "./types";
@@ -6,6 +7,7 @@ import { ui } from "../theme";
 
 export const LayoutTab = (p: PanelProps) => {
   const { get, set, gridWidth, paneScale, viewCols, viewRows } = p;
+  const help = useHelp();
   return (
     <>
       {/* The frame rather than the signal: what a pane sits on, and what
@@ -67,6 +69,18 @@ export const LayoutTab = (p: PanelProps) => {
             No gutter to see -- needs more than one cell, or a gap above 0.
           </div>
         )}
+        {/* Full screen is the panel hidden -- clicking a pane -- so this
+            takes the top bar along with it. Clicking a pane again brings
+            both back, and ⌘P reaches the transport either way. */}
+        <Divider label="Full screen" />
+        <div style={rowStyle} {...help("fullHidesTopBar")}>
+          <label style={labelStyle}>Hide top bar</label>
+          <Switch
+            on={p.fullHidesTopBar}
+            onChange={() => p.setFullHidesTopBar(!p.fullHidesTopBar)}
+            label="Hide top bar"
+          />
+        </div>
       </Section>
     </>
   );

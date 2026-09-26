@@ -537,6 +537,11 @@ export const HELP: Record<string, HelpEntry> = {
     body: "The color showing through between the panes -- and through any cell of the arrangement no pane is sitting in.",
   },
 
+  fullHidesTopBar: {
+    title: "Hide top bar",
+    body: "When a pane is clicked to hide the panel, hide the transport bar too, leaving only the panes. Click a pane to bring both back; ⌘P still pauses. Saved on this machine, never in presets.",
+  },
+
   // ---- setup ----
   "device.input": {
     title: "Input",

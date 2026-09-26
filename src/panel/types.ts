@@ -90,6 +90,10 @@ export type PanelProps = {
   patchView: (index: number, patch: Partial<ViewConfig>) => void;
 
   openSetup: () => void;
+  // Whether hiding the panel hides the top bar too. App's, not config: a
+  // per-machine preference kept in localStorage.
+  fullHidesTopBar: boolean;
+  setFullHidesTopBar: (on: boolean) => void;
   // The same thing ⌘P does. Handed over as an action rather than left to a
   // `set("paused", !get("paused"))` at the call site, because the global
   // shortcut's handler is captured once and must not close over a stale `get`.
