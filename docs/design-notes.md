@@ -48,8 +48,9 @@ position, looper) derives from it.
 
 | File | Role |
 |---|---|
-| `main.rs` | Setup: prefs, devices, kit, the shared state, the `AudioHost`, Tauri. |
-| `audio_host.rs` | What is running, and restarting it in-process onto other devices, another input count or another rate. The supervisor thread. See *Restarting the audio in-process*. |
+| `lib.rs` | `run()`: prefs, devices, kit, the shared state, the `AudioHost`, Tauri (a library since step 4, so iOS can link it; `main.rs` is one line over it). |
+| `audio_host.rs` | What is running, and restarting it in-process onto other devices, another input count or another rate. The supervisor thread. See *Restarting the audio in-process*; on iOS also suspend/resume (*The iOS backend*). |
+| `platform/ios/`, `plugins/audio-session/` | The iOS backend and the Swift session plugin. See *The iOS backend*. |
 | `engine.rs` | The audio core: every real-time thing, handed a block in and a block out. See *The core and the platform*. |
 | `platform/macos/` | The macOS backend. `devices.rs` is device discovery, stream formats and the rate; `mod.rs` the input queues and both callbacks. |
 | `structs.rs` | Config, shared state, `DrumVoice`, `VisualSamples`. |
@@ -1035,7 +1036,7 @@ chases a new disk image.
   sit in the URL. v2's updater plugin does take headers, but going private is
   only safe once every v1 install has come across.
 - **The launch-time prompt and the manual check are independent paths.** The
-  launch check is `check_for_update_at_launch` in `main.rs`, with native
+  launch check is `check_for_update_at_launch` in `lib.rs`, with native
   dialogs; `check()` from `Updater.tsx` raises none -- which is why the panel
   renders its own line rather than reusing one.
   - **The launch path installs *and* asks to restart; the JS path does
@@ -1123,7 +1124,7 @@ what had to be held still:
   every command would have been skipped and samples faked. `isTauri()` now,
   and `presets.ts` reads the same flag.
 - **The updater's launch dialog is ours now.** v2's plugin has no `dialog`
-  option, so `check_for_update_at_launch` in `main.rs` reproduces v1's two
+  option, so `check_for_update_at_launch` in `lib.rs` reproduces v1's two
   questions -- install, then restart -- with the dialog plugin, in v1's
   wording.
   - **`createUpdaterArtifacts: "v1Compatible"`** writes the same
@@ -2186,6 +2187,174 @@ play; the silent part is the stop, the swap and the start.
   independently of the input count, which is a config migration.
 - **The menu's Restart still relaunches**, as does the updater. It is no longer
   how a device change is applied.
+
+### The iOS backend
+
+Step 4 of `docs/ios-port.md`, 2026-09-26. `platform/ios/` (Rust),
+`plugins/audio-session/` (Swift plus its Rust wrapper), and `gen/apple` (the
+Xcode project `tauri ios init` generates, committed as Tauri does). The Mac is
+untouched in behaviour: every iOS path is `#[cfg(target_os = "ios")]`, and the
+desktop-only plugins are target dependencies.
+
+**The split of work is the owner's rule: Swift configures the session and
+reports; Rust owns the unit.** The Swift plugin calls nothing but
+`AVAudioSession` and `NotificationCenter`, and hands Rust a *snapshot* of the
+session (rate, IO buffer, both latencies, channel counts, the route's ports,
+the microphone permission, the mode) at configuration and with every event, so
+Rust never has to call back into Swift to ask. Events travel over a Tauri
+`Channel` created in Rust and passed to Swift's `configure`; the callback on
+Rust's side only stores the snapshot and sends a `Hint` -- **exactly the
+listeners-only-signal rule the Mac's Core Audio listeners follow**, since it
+runs on Swift's queue.
+
+#### The session
+
+- **`playAndRecord`**, because click and microphone share one route.
+- **`defaultToSpeaker`**: without it an iPhone plays through the earpiece.
+- **`allowBluetoothA2DP`, never `allowBluetooth` (HFP).** A2DP is output only,
+  so the built-in microphone stays the input at full rate. HFP would take the
+  headset's microphone at 8/16 kHz through a voice codec, and would drag the
+  whole session's rate down with it -- the input-wins rule from *Input capture*
+  would then run everything at 16 kHz. A2DP's latency is long and drifts,
+  which no compensation can absorb, so the panel warns (Bluetooth or AirPlay
+  output) rather than refusing: a practice session on AirPods with the picture
+  ignored is still a metronome.
+- **`measurement` mode**: the least system processing iOS applies to the
+  microphone -- no automatic gain, no voice EQ -- which the onset picker, the
+  bleed canceller and the picture all want. **The thing to check on a phone**:
+  some iPhones play the speaker quieter in this mode. `PREFERENCES.mode` in
+  `platform/ios/mod.rs` is one constant; `"default"` is the other choice.
+- **No `mixWithOthers`**: a call or another app playing interrupts cleanly
+  instead of the two fighting over the speaker. Playing along with Music would
+  want it; a decision for later.
+- **48 kHz and 256 frames (5.3 ms) asked for.** 48 kHz is the hardware rate of
+  every current iPhone and iPad, so no conversion; 256 frames puts the
+  per-callback costs (config lock, section walk, display locks) at ~190/s, ~9x
+  the Mac's -- all O(1), none measured on a phone. The session may round
+  either, and what it grants is what is read back and used.
+- **Every input channel the route offers** (`preferredInputNumberOfChannels` =
+  the maximum, after activation), capped at 8 in Rust.
+- **Microphone permission is asked before activating**, so the first launch
+  shows the prompt before RemoteIO wants the input. Which is why
+  `start_session` runs on its own thread: it blocks on Swift, Swift waits for
+  the prompt, and the prompt needs the main thread.
+- **`UIBackgroundModes: audio`** (`src-tauri/Info.ios.plist`, merged by the
+  CLI): the click and the looper carry on with the screen locked, like any
+  metronome. The picture stops -- the webview is not drawing -- and the sample
+  stream's cap stops anything piling up. The owner may prefer silence on lock;
+  it is one plist key.
+
+#### RemoteIO
+
+`remote_io.rs`, on `coreaudio-sys` directly. `coreaudio-rs` 0.11 has
+`IOType::RemoteIO`, but its iOS input path is a *separate* input callback
+sized through the deprecated C `AudioSession` API, it reallocates its buffer
+on the audio thread when the slice size changes, and the unit handle that
+`AudioUnitRender` needs is private.
+
+- **One callback.** Output bus 0 asks for a block; inside it the input is
+  pulled from bus 1 with `AudioUnitRender` into an interleaved buffer allocated
+  for `MAX_BLOCK_FRAMES` (and `ShouldAllocateBuffer` off, so the unit writes
+  straight into ours), then `Engine::process` renders into the unit's own two
+  output buffers. **No queue and no backlog cap** -- same clock by
+  construction.
+- **`MaximumFramesPerSlice` is set to `MAX_BLOCK_FRAMES`**, which is the
+  contract the input buffer is sized to. A request past it, or a malformed
+  buffer list, is answered with silence rather than a bounds violation.
+  `Engine::process` now splits oversized blocks itself too (checked
+  bit-identical against 256-frame blocks over three seconds with the looper
+  on, ragged and 10000-frame blocks alike), so neither backend relies on its
+  device keeping a promise; the Mac's loop remains only because its input is
+  assembled from queues into a fixed buffer.
+- **A pull that fails, no microphone, or a refused one: the engine gets
+  silence**, which looks like a muted input everywhere else in the app. The
+  panel says which.
+- The state (`RenderState`: unit, engine, input buffer) is boxed and freed in
+  `Running`'s `Drop` *after* `AudioOutputUnitStop` has returned, which waits
+  out a render in progress -- the Mac's rule.
+
+#### Route changes restart; interruptions pause
+
+- **The "device" is the route.** `DeviceChoice` on iOS is the first input and
+  output port (`portType:uid`), the rate and the input count, compared by the
+  supervisor exactly as the Mac compares device ids. RemoteIO would follow a
+  route change by itself, but **a different speaker or microphone is a
+  different acoustic path**: the bleed measurement and a calibration in flight
+  no longer describe it, and the latency figure has to be looked up for the
+  new pair. Step 3's restart does all three, so a headset plug is a restart
+  (a few tens of ms of silence) rather than a special case. The 300 ms
+  debounce suits route changes, which come in bursts too.
+- **RemoteIO cannot be opened beside the old unit**, so on iOS
+  `get_input_output_channels` opens nothing and `start` opens the unit after
+  the old one has stopped. A failed open is silence, `audio-restart-failed`
+  with the OSStatus, and another try at the next hint -- the app coming back
+  to the front is one.
+- **An interruption is not a restart.** `Hint::Suspend` stops the unit and
+  keeps it, engine and all (`Running::suspend`); `Hint::Resume` starts the
+  same unit again (`Running::resume`), so the beat, the loop buffer and the
+  bleed filter survive a phone call. Swift reactivates the session first, and
+  only when the system says `shouldResume`; otherwise the app waits to be
+  brought to the front (`didBecomeActive`, which also reactivates and sends a
+  resume). A route change during an interruption waits: the session is
+  inactive and no unit could start, and the resume compares the route anyway.
+  A unit that will not resume is rebuilt.
+- **Media services reset** (`Hint::Reset`): every audio object in the process
+  is dead, so Swift sets the session up again and Rust rebuilds the unit
+  whatever the comparison says.
+- **Launch is a restart from nothing.** `run()` sizes everything at a
+  provisional 48 kHz before the app exists, as the Mac does; the real first
+  start happens after `start_session` has configured the session, on the
+  launch thread, and converts the kit if the session granted another rate.
+  The frontend learns the real rate and input count from `audio-restarted`.
+  Race worth knowing: a webview that registers its listener only *after* that
+  event keeps whatever its first `get_*` calls returned, which were read
+  after the restart in every launch seen.
+
+Simulated in the iOS simulator by injecting the hints the Swift side sends
+(temporary code, removed): suspend stopped `AURemoteIO@0x109820e40` and resume
+started *the same* one; an unchanged route was a no-op; a reset started a new
+unit; a route hint during a suspension did nothing until the resume. The
+simulator cannot raise a real interruption or route change -- switching the
+Mac's default input did not reach it -- so the Swift half of those paths is
+only confirmed on a device.
+
+#### Latency
+
+- **`pairCompensations` keys are `portType:uid`** --
+  `MicrophoneBuiltIn:...` / `Speaker:...`, `Headphones:...`,
+  `BluetoothA2DPOutput:<address>`. A port's uid is stable per accessory, so a
+  pair of AirPods keeps its figure; the type in front keeps
+  `audio-prefs.json` legible. Built-in speaker and receiver are different
+  outputs, and so different pairs.
+- **An unmeasured pair starts at the session's own figure**:
+  `inputLatency + outputLatency + 2 x ioBufferDuration`, in frames at the
+  session rate (`seed_compensation`; `ActiveDevices::suggested_compensation`).
+  Two buffers: one for the input to fill before the callback sees it, one for
+  the output rendered in it to wait behind the buffer already playing. Neither
+  latency includes the air, which is why *measure latency* stays and is still
+  the right answer; this only replaces the Mac's hand-tuned 4330, which is
+  ~90 ms and wrong for any phone. The frontend applies it where it used to
+  apply the default, and the write-back then stores it for the pair like any
+  edit. Temp-tested (522 frames for the simulator's 0.1 + 0.1 ms and 5.33 ms
+  buffer; nothing for a zero or NaN session), and 522 was what the simulator
+  run pushed at launch.
+
+#### What iOS hides
+
+The device picker (the Setup tab and the wizard show `IosRoute` instead: the
+route, the rate, the buffer, the reported latencies, the seed and any
+warning), the global shortcut and the updater -- hidden by `isIOS()`, not
+deleted, and their Rust plugins not compiled (target dependencies, and
+`capabilities/desktop.json` is `platforms`-restricted so their permissions are
+not demanded on iOS). The menu with Restart is `#[cfg(desktop)]`. The
+platform is asked of Rust (`get_platform`) once before the first render, since
+an iPad's webview claims to be a Mac.
+
+Left alone and known to be wrong on iOS: a drum sample or file picked from a
+path, the file player's startup path, and presets import/export all assume
+paths the sandbox does not grant -- they fail with their existing messages;
+the built-in kit is a bundled resource (`.app/assets/samples`) and works. The
+touch UI, the sandbox work and stable channel identities are later steps.
 
 ### Recording the session
 

@@ -2,8 +2,9 @@
 
 A practice tool for drummers/musicians: a metronome with programmable rhythms, a
 looper, and a real-time waveform display you play *against*. Tauri v2 app —
-React/TypeScript frontend, Rust + CoreAudio backend. macOS only (uses
-`coreaudio-rs` directly, not `cpal`).
+React/TypeScript frontend, Rust + CoreAudio backend. macOS, and iOS/iPadOS
+(step 4 of the port: builds and runs in the simulator, not yet on a device).
+Core Audio directly, not `cpal`.
 
 **`docs/design-notes.md` is the full record** -- every decision, what was tried
 first, what was measured. This file is the working summary; *Italic names* below
@@ -21,6 +22,13 @@ yarn tauri build    # ALWAYS run this after a change
 yarn start          # browser-only, fakes samples; no Rust backend
 npx tsc --noEmit    # typecheck
 yarn build:parser   # regenerate parser2.js from parser2.peg
+
+# iOS (needs xcodegen + libimobiledevice from arm64 brew, and Rust targets
+# aarch64-apple-ios / aarch64-apple-ios-sim)
+yarn tauri ios dev "iPhone 16 Pro"            # simulator (device: `ios run`, or `ios dev --host`)
+yarn tauri ios run                           # on a plugged-in device, bundled frontend
+yarn tauri ios build --target aarch64-sim --debug   # sim .app in the xcarchive
+yarn tauri ios build --target aarch64 --debug       # device .ipa
 ```
 
 - **Run `yarn tauri build` after every change** (owner's explicit request). It
@@ -35,6 +43,15 @@ yarn build:parser   # regenerate parser2.js from parser2.peg
   `could not access /Volumes/.../tauri-punching-bag.app - Operation not
   permitted`, which is TCC -- grant **App Management** to the terminal in System
   Settings. Don't chase LaunchServices. See *The disk image step*.
+- **iOS builds**: `yarn tauri ios build` fails at the end with `failed to rename
+  app ... Directory not empty` when `gen/apple/build/arm64*` is left from the
+  last one -- `rm -rf src-tauri/gen/apple/build` first (the fresh app is in
+  `build/app_iOS.xcarchive` anyway). Rust's `println!` shows in the unified
+  log, not the console: `xcrun simctl spawn booted log show --last 2m
+  --predicate 'process == "tauri-punching-bag" AND eventMessage CONTAINS
+  "[stdout]"'`. `gen/apple` is committed (Tauri's convention); `build/`,
+  `Externals/` and `assets/` inside it are not. `scripts/tauri.mjs` only
+  sweeps/notarizes after `build`, never `ios ...`.
 
 ## Architecture
 
@@ -55,10 +72,13 @@ f64** (f32 causes ghost trails after ~20 min).
 
 | File | Role |
 |---|---|
-| `main.rs` | Setup: prefs, devices, kit, shared state, the `AudioHost`, Tauri. |
-| `audio_host.rs` | **What is running, and restarting it in-process** (device, input count, rate). The supervisor thread that turns Core Audio notifications into restarts. |
+| `lib.rs` | `run()`: prefs, devices, kit, shared state, the `AudioHost`, Tauri. A library so iOS can link it; `main.rs` is one line over it. Menu, updater and global shortcut are `#[cfg(desktop)]`. |
+| `audio_host.rs` | **What is running, and restarting it in-process** (device, input count, rate). The supervisor thread that turns platform `Hint`s into restarts -- and on iOS into suspend/resume. |
 | `engine.rs` | **The audio core.** `Engine::process(input, [left, right])`: an interleaved input block in, two output slices filled. All real-time logic; knows no device. |
-| `platform/macos/` | The backend. `devices.rs`: discovery, formats, rate. `mod.rs`: the input queues, the input callback, the render callback that feeds the engine. |
+| `platform/mod.rs` | The backend surface both platforms provide, and `Hint`. |
+| `platform/macos/` | `devices.rs`: discovery, formats, rate. `mod.rs`: the input queues, the input callback, the render callback that feeds the engine. |
+| `platform/ios/` | `mod.rs`: the session snapshot as the "device", `DeviceChoice` = route + rate + inputs, latency seed, warnings. `remote_io.rs`: the RemoteIO unit on raw `coreaudio-sys`, one callback that pulls input and runs the engine. |
+| `plugins/audio-session/` | Tauri plugin: `ios/Sources/AudioSessionPlugin.swift` configures `AVAudioSession` and forwards its notifications over a `Channel`; `src/lib.rs` is the Rust wrapper. Swift never touches a unit. |
 | `structs.rs` | Config, shared state, `DrumVoice`, `VisualSamples`, `BusDelay`. |
 | `commands.rs` | Tauri commands (`set_config`, `get_samples`, `load_drum_sample`, …). |
 | `constants.rs` | `DEFAULT_SAMPLE_RATE` (fallback only), backlog caps (fns of a rate), `default_config()`. |
@@ -94,6 +114,7 @@ f64** (f32 causes ghost trails after ~20 min).
 | `help.tsx` / `helpText.ts` | Help area mechanism / all help text (keyed by config key or dotted id). |
 | `theme.ts` + `index.css` | Colour tokens and control styling. |
 | `SetupWizard.tsx`, `GlobalShortcut.tsx`, `Updater.tsx` | First-launch setup, global pause key, manual update check. |
+| `platform.ts` / `IosRoute.tsx` | `isIOS()` (asked of Rust before first render; an iPad's user agent says Mac) / the iOS route panel shown instead of the device picker. |
 | `parser2.js` | **Generated** from `parser2.peg` -- don't hand-edit. `parser1.js` is legacy with no source. |
 
 ## Config system -- sharp edges
@@ -240,7 +261,11 @@ any block up to `MAX_BLOCK_FRAMES` (4096) and is block-size invariant.
 - The callback holds the display mutexes for its whole run; command-side work
   under them must be O(1) swaps. Lock order: config, then file.
 - **Real-time logic goes in `engine.rs`; only queueing and device specifics in
-  a backend.** iOS will call the same `process` from one RemoteIO callback.
+  a backend.** `process` splits any block past `MAX_BLOCK_FRAMES` itself
+  (bit-identical; temp-tested). iOS calls it from the one RemoteIO callback,
+  after pulling input with `AudioUnitRender` into a buffer sized for
+  `MAX_BLOCK_FRAMES` -- no queue there. At a 256-frame IO buffer the
+  per-callback costs run ~190×/s, ~9× the Mac's.
 - **Per-frame vs per-output-channel**: the output loop runs twice per frame.
   Anything advancing time (input pops, loop buffer, beat, triggers, display
   pushes) goes outside it.
@@ -286,6 +311,21 @@ any block up to `MAX_BLOCK_FRAMES` (4096) and is block-size invariant.
   fewer inputs a pane's `ch 2` may now be the drums bus. Config is never
   rewritten; out-of-range channels are skipped by the draw path.
 - Frontend never sees frames: streams are stamped in beats.
+- **iOS** (*The iOS backend*): no picker -- the session's route is the device.
+  Swift sets `playAndRecord` / `measurement` / `defaultToSpeaker` +
+  `allowBluetoothA2DP` (never HFP), asks 48 kHz and 256 frames, activates, and
+  forwards route changes, interruptions, becoming active and media-services
+  resets; every event carries a session snapshot. **Route change = restart**
+  (ports, rate or inputs differ). **Interruption = suspend/resume the same
+  unit and engine** (bleed filter kept); a route change while suspended waits
+  for the resume. RemoteIO is opened only after the old unit stops, so a
+  failed open is silence + `audio-restart-failed` until the next hint. Launch
+  is a restart from nothing on a thread after `start_session` (off the main
+  thread: the mic prompt needs it). Pairs are keyed `portType:uid`; an
+  unmeasured pair starts at the session's in + out latency + 2 IO buffers
+  (`suggestedCompensation`). Bluetooth/AirPlay output and a refused mic warn
+  at the top of the panel. `UIBackgroundModes: audio` (in `Info.ios.plist`)
+  keeps the click going with the screen locked.
 
 ## Channels and streams
 
@@ -362,12 +402,14 @@ Each has a full section in `docs/design-notes.md`.
 
 ## macOS packaging, signing, updates
 
-- Permissions are `src-tauri/capabilities/main.json`: only what the frontend
-  calls (dialog open/save, global-shortcut register/unregister, updater).
+- Permissions are `src-tauri/capabilities/main.json` (dialog open/save) and
+  `desktop.json` (global shortcut, updater; `platforms` excludes iOS, where
+  those plugins aren't compiled): only what the frontend calls.
   Our own commands need none. A new plugin call from JS needs a line there.
 - App config dir is `~/Library/Application Support/com.vogler.dev`
   (`audio-prefs.json`, `presets.json`) -- same as under v1; don't move it.
-- `src-tauri/Info.plist` carries `NSMicrophoneUsageDescription`;
+- `src-tauri/Info.plist` (Mac) and `Info.ios.plist` (merged into
+  `gen/apple/app_iOS/Info.plist` by the CLI) carry `NSMicrophoneUsageDescription`;
   `Entitlements.plist` needs `com.apple.security.device.audio-input` (hardened
   runtime). Never add `com.apple.private.tcc.allow-prompting`.
 - Signed with `Developer ID Application: Eric Vogler (9KMDH5UH9Z)`, notarized
@@ -375,12 +417,17 @@ Each has a full section in `docs/design-notes.md`.
   (app-specific) / `APPLE_TEAM_ID` from gitignored `.env.signing`; missing
   credentials skip notarization *quietly*. Check with `xcrun notarytool
   history`.
+- iOS: bundle id `com.vogler.dev`, the same as the Mac -- iOS does not
+  require a different one, and changing the Mac's would void every TCC grant;
+  team
+  `9KMDH5UH9Z` in `bundle.iOS.developmentTeam`, signed by Xcode automatic
+  signing with the *Apple Development* certificate (not the Developer ID).
 - **Identify an artifact with `codesign -dvvv`** -- expect `arm64`,
   `TeamIdentifier=9KMDH5UH9Z`. Not file size. Stale TCC:
   `tccutil reset Microphone com.vogler.dev`.
 - Updater: minisign key at `~/.tauri/punching-bag.key` (back it up; losing it
   strands every install), GitHub Releases endpoint (repo must stay public).
-  Tauri v2 from the first release after 0.4.0: the launch-time dialog is ours (`main.rs`), not the
+  Tauri v2 from the first release after 0.4.0: the launch-time dialog is ours (`lib.rs`), not the
   plugin's; `createUpdaterArtifacts: "v1Compatible"` keeps v1 installs able
   to update and must stay until none are left (*Tauri v2*).
   **Bump the version** in `tauri.conf.json` and `package.json`; **commit before
@@ -418,6 +465,10 @@ open (details under *Verification* in the design notes):
 - Speaker bleed on real hardware: ~10 dB observed vs 14.8 measured; widening
   `TAPS` is the cheap next try. Looper on speakers regressed with
   `loopFeedbackGuardOn` -- bisect by turning it off, then `bleedCancelAudioOn`.
+- **iOS has only run in the simulator** (UI, session, RemoteIO, click and
+  input drawn, suspend/resume/reset via injected hints). Nothing about latency,
+  the mic, routes or interruptions is known on a device -- the step 5
+  checklist in `docs/ios-port.md`.
 - In-process audio restart: exercised through the real path (output on
   BlackHole), never listened to -- headphones/AirPods, interface unplug,
   44.1↔48 kHz with the kit, file and stretch.

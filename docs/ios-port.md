@@ -183,6 +183,43 @@ Found on the way, for step 4:
   compensation can only absorb a constant.
 - Info.plist: `NSMicrophoneUsageDescription` carries over.
 
+**Done 2026-09-26 in the simulator** -- see *The iOS backend* in
+`docs/design-notes.md`. The shape: a Tauri plugin in `plugins/audio-session`
+whose Swift sets up `AVAudioSession` (`playAndRecord`, `measurement`,
+`defaultToSpeaker` + `allowBluetoothA2DP`, 48 kHz, 256 frames) and forwards
+route changes, interruptions, becoming active and media-services resets, each
+with a snapshot of the session, over a `Channel` into Rust; `platform/ios/`
+treats the route as the device and owns one RemoteIO unit on raw
+`coreaudio-sys`, pulling input with `AudioUnitRender` inside the render
+callback. Route change = restart; interruption = suspend/resume of the same
+unit and engine. `Engine::process` splits oversized blocks itself. The crate is
+a library (`lib.rs`) now, `main.rs` one line over it.
+
+In the simulator (iPhone 16 Pro, iOS 18.4): the UI, the session (`48000 Hz, IO
+buffer 5.33 ms, ... mic granted, mode AVAudioSessionModeMeasurement`),
+`Starting AURemoteIO`, `audio restarted (launch): MicrophoneBuiltIn ->
+Speaker`, the beat advancing, the click and ride sounding through the Mac and
+coming back in through its microphone into the waveform, the latency seed
+(522 frames) pushed at launch, becoming active after a trip to Safari, and
+suspend / resume / reset / a route change while suspended, by injected hints.
+**The device target builds and signs** (`yarn tauri ios build --target
+aarch64 --debug` -> `.ipa`, Apple Development certificate, Xcode-managed team
+profile).
+
+Found on the way, for step 5:
+
+- **Xcode's automatic signing is already set up on this Mac**: an *Apple
+  Development: ericvogler@gmail.com* certificate is in the keychain and the
+  CLI's `-allowProvisioningUpdates` made an "iOS Team Provisioning Profile: *"
+  for team 9KMDH5UH9Z, with one device already registered
+  (`00008110-00142CE90184401E`). A second device is registered the same way,
+  by Xcode, the first time it is built for.
+- **The simulator cannot raise an interruption or a route change**, and says
+  nothing about latency. Everything in the checklist below is first-time.
+- **The portrait phone layout is unusable** -- the panel takes the screen and
+  the pane is below it. Landscape works well enough to test. That is the touch
+  UI step, not this one.
+
 ### 5. Run it on the devices
 
 `tauri ios dev` on the iPad and iPhone, desktop UI as-is. Needs an **Apple
@@ -193,6 +230,44 @@ latency or the mic: devices from day one.
 
 If the phone struggles with `get_samples` at 100 Hz, *decimated sample
 transport* (per-column peaks from Rust) is the fix, and helps the Mac too.
+
+**Checklist** (landscape; `yarn tauri ios dev` streams Rust's output):
+
+1. Plug in the iPhone, unlock it, trust the Mac. On iOS 16+ turn on **Settings
+   > Privacy & Security > Developer Mode** (it appears once Xcode has seen the
+   device) and restart when asked. Same for the iPad.
+2. `yarn tauri ios run` with the device plugged in -- the bundled frontend,
+   no dev server, the simplest path (pick the device if asked). For live
+   reload instead, `yarn tauri ios dev --host` (the CRA server already listens
+   on 0.0.0.0; the CLI points the app at the Mac's address). If signing says
+   the device is not in the profile, open `src-tauri/gen/apple/app.xcodeproj`
+   in Xcode once with the device plugged in and let automatic signing register
+   it, then run the command again.
+3. First launch: the microphone prompt. **Allow**, then the panel's Setup tab
+   should show *Built-In Microphone -> Speaker*, 48000 Hz, a buffer near 256,
+   and the reported latencies.
+4. Click and drums on the beat from the speaker; the ride's hits land on the
+   grid in a pane showing the drums bus.
+5. Play (clap) and watch the waveform land where you played. Then **measure
+   latency** on the speaker, and again on wired headphones: note the seed the
+   panel reported against each measurement -- that difference is the air
+   plus whatever the session does not report, and says how good a seed it is.
+6. Looper on: a phrase comes back a loop later, in time.
+7. Plug and unplug wired headphones mid-play: a short gap, the audio follows,
+   the latency figure switches to that pair's, no red in the panel.
+8. AirPods (or any Bluetooth): the output should move to them, the warning
+   should show at the top of the panel, and the mic should stay the built-in
+   one at 48 kHz -- *not* the AirPods' mic.
+9. A phone call (or Siri, or an alarm) mid-play: the audio stops with the
+   interruption notice, and comes back by itself when it ends -- with the same
+   beat and the loop still in the buffer. Decline the call, and try one where
+   you answer.
+10. Lock the screen: the click should carry on (background audio). Unlock:
+    the picture resumes. Switch to another app and back: same.
+11. `measurement` mode: if the speaker is noticeably quieter than other apps,
+    try `mode: "default"` in `platform/ios/mod.rs` and compare the waveform.
+12. Watch for a struggling frame rate or a lagging pane -- the `showFrameTime`
+    overlay says whether it is the draw or the 100 Hz poll.
 
 ## Later
 
@@ -215,5 +290,5 @@ presets (`normalizeView`, the `loopFeedback` rule).
 - [x] 1. Tauri v2 migration (2026-09-25; confirmed in the app by the owner)
 - [x] 2. Core / platform split (2026-09-25; confirmed by ear by the owner)
 - [x] 3. In-process engine restart (2026-09-26; confirmed in the app by the owner)
-- [ ] 4. iOS backend
+- [x] 4. iOS backend (2026-09-26; simulator only -- the device build signs, has not run)
 - [ ] 5. On the devices
