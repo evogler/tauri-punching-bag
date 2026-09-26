@@ -62,6 +62,10 @@ export type PanelProps = {
   activeDevices: ActiveDevices | null;
   audioPrefs: AudioPrefs;
   writeAudioPrefs: (next: AudioPrefs) => void;
+  /** Writes the prefs *and* restarts the audio onto them. */
+  chooseDevices: (next: AudioPrefs) => void;
+  /** Why the last device switch failed, if it did. */
+  deviceError: string | null;
   refreshDevices: () => void;
   inputChannelCount: number;
   channelLabels: string[];

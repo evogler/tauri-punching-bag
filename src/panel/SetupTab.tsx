@@ -1,4 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
 import { BleedMeter } from "../BleedMeter";
 import { Calibration } from "../Calibration";
 import { GlobalShortcut } from "../GlobalShortcut";
@@ -17,7 +16,7 @@ import { ui } from "../theme";
 // latency between them, the inputs, the room on speakers, and updates. Mostly
 // set once, which is why it is not the first tab.
 export const SetupTab = (p: PanelProps) => {
-  const { get, set, params, togglePaused, audioDevices, activeDevices, audioPrefs, writeAudioPrefs, refreshDevices, inputChannelCount, channelLabels, sampleRate, openSetup } = p;
+  const { get, set, params, togglePaused, audioDevices, activeDevices, audioPrefs, chooseDevices, deviceError, refreshDevices, inputChannelCount, channelLabels, sampleRate, openSetup } = p;
   return (
     <>
       {/* First, so someone who skipped setup and is now stuck finds it. */}
@@ -31,9 +30,9 @@ export const SetupTab = (p: PanelProps) => {
           devices={audioDevices}
           active={activeDevices}
           prefs={audioPrefs}
-          setPrefs={writeAudioPrefs}
+          setPrefs={chooseDevices}
           onOpen={refreshDevices}
-          onRestart={() => invoke("restart_app").catch(() => {})}
+          error={deviceError}
         />
       </Section>
       {/* The measurement and the number it writes, together: they used to be
@@ -99,7 +98,7 @@ export const SetupTab = (p: PanelProps) => {
         </Help>
       </Section>
 
-      {/* With the device picker and Restart, because this is the tab that
+      {/* With the device picker, because this is the tab that
           already holds what belongs to this install rather than to the
           music -- and installing an update restarts the app. */}
       {!BROWSER_DEBUG_MODE && (

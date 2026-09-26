@@ -60,7 +60,11 @@ import {
   ActiveDevices,
   AudioDeviceInfo,
   AudioPrefs,
+  AUDIO_RESTARTED_EVENT,
+  AUDIO_RESTART_FAILED_EVENT,
+  AudioRestarted,
   DEVICES_CHANGED_EVENT,
+  pairKey,
   emptyPrefs,
   pairCompensation,
   withPairCompensation,
@@ -415,7 +419,8 @@ const App = () => {
 
   // Read once, on the first render only.
   const [restoredSession] = useState(readSession);
-  // A fresh install, or setup part way through a device-change restart.
+  // A fresh install, or setup part way through (an older build relaunched the
+  // app on a device change, and setup had to come back to its step).
   const [setupOpen, setSetupOpen] = useState(() =>
     shouldOpenSetup(restoredSession !== null)
   );
@@ -1015,7 +1020,8 @@ const App = () => {
   };
 
   // How many channels the capture device gave us, which is what the channel
-  // list is sized from.
+  // list is sized from. Moves when the audio restarts onto another device --
+  // see `AUDIO_RESTARTED_EVENT` below.
   const [inputChannelCount, setInputChannelCount] = useState(1);
   useEffect(() => {
     if (BROWSER_DEBUG_MODE) {
@@ -1028,20 +1034,22 @@ const App = () => {
   }, []);
 
   // The rate Rust took from the input device. The sample stream is stamped in
-  // beats, so nothing in the draw path needs this -- it is only for the two
-  // places the UI has to name a frequency or a duration.
+  // beats, so nothing in the draw path needs this -- it is only for the places
+  // the UI has to name a frequency or a duration. It is the *running* device's,
+  // so it moves on an audio restart too.
   const [sampleRate, setSampleRate] = useState(44100);
+  const adoptSampleRate = useCallback((hz: number) => {
+    if (!(hz > 0)) return;
+    setSampleRate(hz);
+    // The validators are module-level and can't read state.
+    setSampleRateHz(hz);
+  }, []);
   useEffect(() => {
     if (BROWSER_DEBUG_MODE) return;
     invoke<number>("get_sample_rate")
-      .then((hz) => {
-        if (!(hz > 0)) return;
-        setSampleRate(hz);
-        // The validators are module-level and can't read state.
-        setSampleRateHz(hz);
-      })
+      .then(adoptSampleRate)
       .catch(() => {});
-  }, []);
+  }, [adoptSampleRate]);
 
   // The built-in kit, for the add menu and every drum label. Held module-level
   // (see `setKit`), since `drumLabel` has no way to reach state; this counter
@@ -1080,7 +1088,10 @@ const App = () => {
     if (BROWSER_DEBUG_MODE) return;
     invoke<AudioPrefs>("get_audio_prefs")
       .then((p) => setAudioPrefs({ ...emptyPrefs(), ...p }))
-      .catch(() => {});
+      .catch(() => {})
+      // Loaded or not, stop waiting: an unreadable file means defaults, which
+      // is what Rust did with it too.
+      .finally(() => setPrefsLoaded(true));
     // Core Audio tells us when a device appears or goes away, so the list is
     // current without polling. Focus is the belt-and-braces path: plugging
     // something in usually means clicking back into the app straight after,
@@ -1097,6 +1108,47 @@ const App = () => {
     setAudioPrefs(next);
     if (BROWSER_DEBUG_MODE) return;
     invoke("set_audio_prefs", { prefs: next }).catch(() => {});
+  };
+
+  // The audio restarts in-process now, so everything read from Rust at launch
+  // that describes the device has to be read again when it does: the input
+  // count (channel labels, the channel list, the mic check), the rate, and
+  // which devices actually opened. The same event covers a device chosen here
+  // and one macOS changed underneath us -- "System default" following a new
+  // default output, an interface unplugged. A pane naming an input that no
+  // longer exists is left alone: its config is not rewritten, and the index
+  // now names whatever `channelLabels` says it does (see *Restarting the audio
+  // in-process* in the design notes).
+  const [deviceError, setDeviceError] = useState<string | null>(null);
+  useEffect(() => {
+    if (BROWSER_DEBUG_MODE) return;
+    const restarted = listen<AudioRestarted>(AUDIO_RESTARTED_EVENT, (e) => {
+      const status = e.payload.status;
+      setInputChannelCount(Math.max(1, status.inputChannels));
+      adoptSampleRate(status.sampleRate);
+      setActiveDevices(status.active);
+      setDeviceError(null);
+      refreshDevices();
+    });
+    const failed = listen<string>(AUDIO_RESTART_FAILED_EVENT, (e) =>
+      setDeviceError(String(e.payload))
+    );
+    return () => {
+      restarted.then((f) => f()).catch(() => {});
+      failed.then((f) => f()).catch(() => {});
+    };
+  }, [adoptSampleRate, refreshDevices]);
+
+  // Choosing a device applies it now. The prefs are written first, because
+  // they are what `restart_audio` reads -- the file is still the one place the
+  // choice lives, and still what the next launch opens.
+  const chooseDevices = (next: AudioPrefs) => {
+    setAudioPrefs(next);
+    if (BROWSER_DEBUG_MODE) return;
+    invoke("set_audio_prefs", { prefs: next })
+      .then(() => invoke<unknown>("restart_audio"))
+      .then(() => setDeviceError(null))
+      .catch((e) => setDeviceError(String(e)));
   };
 
   // A saved device that is present but cannot do the role it was saved for is
@@ -1126,24 +1178,55 @@ const App = () => {
   // `audio-prefs.json` is the only home for this: it is excluded from presets
   // and from the session (see LOCAL_RUST_KEYS), so the config boots at the
   // default and the stored figure for whatever device actually opened is
-  // applied over it, once. A ref rather than state because applying it must not
-  // depend on having applied it.
-  const appliedCompRef = useRef(false);
-  useEffect(() => {
-    if (appliedCompRef.current || !activeDevices) return;
-    appliedCompRef.current = true;
-    const stored = pairCompensation(audioPrefs, activeDevices);
-    if (typeof stored !== "number" || !Number.isFinite(stored)) return;
-    if (stored === exprNumber(get("bufferCompensation"))) return;
-    set("bufferCompensation", numExpr(stored));
-  }, [activeDevices, audioPrefs]);
-
-  // ...and edits flow back, so the next launch on this device starts there.
-  // Guarded on equality, and on having applied first, so it can neither loop
-  // nor overwrite a saved value with the default before it has been read.
+  // applied over it.
+  //
+  // **Once per device pair, not once per launch**, since the pair can change
+  // while the app runs. Moving onto a pair with nothing stored goes back to the
+  // default rather than keeping the last pair's figure: a latency measured on
+  // other hardware is noise here -- the same argument that keeps it out of
+  // presets -- and the default is exactly what a launch onto that pair would
+  // have given.
+  //
+  // Refs rather than state because applying must not depend on having applied.
+  // `appliedPairRef` is the pair whose figure is in the config; `pendingCompRef`
+  // is a figure set but not yet landed, which holds the write-back below off
+  // until it has -- otherwise that effect, running in the same commit, sees the
+  // new pair beside the *old* pair's number and saves it onto the new pair.
+  // Waiting for the prefs to have been read is the same guard at launch: the
+  // two are fetched separately, and applying against the empty placeholder
+  // would mark the pair applied with nothing applied.
+  const [prefsLoaded, setPrefsLoaded] = useState(BROWSER_DEBUG_MODE);
+  const appliedPairRef = useRef<string | null>(null);
+  const pendingCompRef = useRef<number | null>(null);
   const activeCompensation = exprNumber(get("bufferCompensation"));
   useEffect(() => {
-    if (!appliedCompRef.current || !activeDevices) return;
+    if (!activeDevices || !prefsLoaded) return;
+    const key = pairKey(activeDevices);
+    if (appliedPairRef.current === key) return;
+    appliedPairRef.current = key;
+    const stored = pairCompensation(audioPrefs, activeDevices);
+    const target =
+      typeof stored === "number" && Number.isFinite(stored)
+        ? stored
+        : exprNumber(defaultRustConfig.bufferCompensation);
+    if (target === activeCompensation) {
+      pendingCompRef.current = null;
+      return;
+    }
+    pendingCompRef.current = target;
+    set("bufferCompensation", numExpr(target));
+  }, [activeDevices, audioPrefs, prefsLoaded]);
+
+  // ...and edits flow back, so the next time this pair runs it starts there.
+  // Guarded on equality, on the pair having been applied, and on any figure
+  // just applied having landed, so it can neither loop nor save one pair's
+  // value onto another.
+  useEffect(() => {
+    if (!activeDevices || appliedPairRef.current !== pairKey(activeDevices)) return;
+    if (pendingCompRef.current !== null) {
+      if (activeCompensation !== pendingCompRef.current) return;
+      pendingCompRef.current = null;
+    }
     if (pairCompensation(audioPrefs, activeDevices) === activeCompensation) return;
     writeAudioPrefs(
       withPairCompensation(audioPrefs, activeDevices, activeCompensation)
@@ -2346,6 +2429,8 @@ const App = () => {
       activeDevices={activeDevices}
       audioPrefs={audioPrefs}
       writeAudioPrefs={writeAudioPrefs}
+      chooseDevices={chooseDevices}
+      deviceError={deviceError}
       refreshDevices={refreshDevices}
       inputChannelCount={inputChannelCount}
       channelLabels={channelLabels}
@@ -2500,7 +2585,8 @@ const App = () => {
             devices={audioDevices}
             active={activeDevices}
             prefs={audioPrefs}
-            setPrefs={writeAudioPrefs}
+            setPrefs={chooseDevices}
+            deviceError={deviceError}
             refreshDevices={refreshDevices}
             inputCount={inputChannelCount}
             channelLabels={channelLabels}

@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { AUDIO_RESTARTED_EVENT } from "./DevicePicker";
+import { BROWSER_DEBUG_MODE } from "./env";
 import { ui } from "./theme";
 
 // Measuring the speaker's bleed, and saying what it managed.
@@ -48,8 +51,20 @@ export const BleedMeter = ({
     lastPhase.current = result?.phase;
   }, [result?.phase, onPassed]);
 
+  // Read on mount, and again whenever the audio restarts: the measurement
+  // lives in the engine and describes one device pair, so a restart forgets it
+  // and Rust's result says so. Without this a meter that was not polling --
+  // measured, but switched off -- would go on showing "done" for a filter
+  // that no longer exists.
   useEffect(() => {
-    invoke<BleedResult>("get_bleed_status").then(setResult).catch(() => {});
+    const read = () =>
+      invoke<BleedResult>("get_bleed_status").then(setResult).catch(() => {});
+    read();
+    if (BROWSER_DEBUG_MODE) return;
+    const unlisten = listen(AUDIO_RESTARTED_EVENT, read);
+    return () => {
+      unlisten.then((f) => f()).catch(() => {});
+    };
   }, []);
 
   // Fast while a run is in flight, slow while it is only reporting what the

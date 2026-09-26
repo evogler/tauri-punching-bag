@@ -56,9 +56,9 @@ const store = {
 // check refuses, asking for the very thing the next step was going to do.
 const STEPS = ["welcome", "devices", "microphone", "latency", "room", "done"] as const;
 
-// Open at launch when setup is part way through -- changing a device restarts
-// the app, and it has to come back to the step it left -- or on a fresh
-// install. An install that already has a saved session was set up by hand
+// Open at launch when setup is part way through -- a device change used to
+// relaunch the app, which had to come back to the step it left, and a
+// relaunch from the menu still should -- or on a fresh install. An install that already has a saved session was set up by hand
 // before this existed and is not interrupted; Run setup again is in the Setup
 // tab for it.
 export const shouldOpenSetup = (hasSession: boolean) => {
@@ -152,6 +152,7 @@ export const SetupWizard = ({
   active,
   prefs,
   setPrefs,
+  deviceError,
   refreshDevices,
   inputCount,
   channelLabels,
@@ -163,7 +164,9 @@ export const SetupWizard = ({
   devices: AudioDeviceInfo[];
   active: ActiveDevices | null;
   prefs: AudioPrefs;
+  /** Writes the prefs and restarts the audio onto them, in place. */
   setPrefs: (next: AudioPrefs) => void;
+  deviceError: string | null;
   refreshDevices: () => void;
   inputCount: number;
   channelLabels: string[];
@@ -182,8 +185,10 @@ export const SetupWizard = ({
   const [room, setRoom] = useState<"headphones" | "speakers" | null>(null);
   const [applied, setApplied] = useState<number | null>(null);
 
-  // Written on every move, not only before a restart: the device picker's own
-  // Restart button relaunches too, and setup must come back either way.
+  // Written on every move. A device change no longer relaunches -- the audio
+  // restarts in place and setup simply carries on -- but a relaunch from the
+  // menu, or a crash, should still come back to the step it left. Harmless
+  // otherwise: finishing or skipping clears it.
   useEffect(() => {
     store.set(STEP_KEY, STEPS[step]);
   }, [step]);
@@ -196,30 +201,18 @@ export const SetupWizard = ({
   };
 
   const name = STEPS[step];
-  const pendingDevice =
-    !!active &&
-    ((prefs.inputUid !== "" && prefs.inputUid !== active.inputUid) ||
-      (prefs.outputUid !== "" && prefs.outputUid !== active.outputUid));
 
+  // A device picked on the devices step is already running by the time Next
+  // is pressed -- the picker restarts the audio in place -- so the microphone
+  // check that follows is listening to it. This used to be "Restart and
+  // continue": a relaunch, with the step saved so setup came back one on.
   const next = () => {
     if (name === "done") return finish();
-    if (name === "devices" && pendingDevice) {
-      // Saved first: the relaunch is what brings setup back, one step on.
-      store.set(STEP_KEY, STEPS[step + 1]);
-      invoke("restart_app").catch(() => {});
-      return;
-    }
     setStep(step + 1);
   };
 
   const nextLabel =
-    name === "welcome"
-      ? "Start"
-      : name === "done"
-      ? "Start playing"
-      : name === "devices" && pendingDevice
-      ? "Restart and continue"
-      : "Next";
+    name === "welcome" ? "Start" : name === "done" ? "Start playing" : "Next";
 
   const title: Record<(typeof STEPS)[number], string> = {
     welcome: "Welcome to Punching Bag",
@@ -294,11 +287,11 @@ export const SetupWizard = ({
               prefs={prefs}
               setPrefs={setPrefs}
               onOpen={refreshDevices}
-              onRestart={() => invoke("restart_app").catch(() => {})}
+              error={deviceError}
             />
             <p style={note}>
-              A change takes effect after a restart. Setup picks up where you
-              left off.
+              A change takes effect straight away. The next step checks that
+              the input you chose can hear you.
             </p>
           </>
         )}

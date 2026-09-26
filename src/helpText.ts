@@ -557,11 +557,11 @@ export const HELP: Record<string, HelpEntry> = {
   // ---- setup ----
   "device.input": {
     title: "Input",
-    body: "The microphone or interface to listen to. Takes effect after a restart. Saved on this machine, never in presets; System default follows macOS.",
+    body: "The microphone or interface to listen to. Takes effect at once. Saved on this machine, never in presets; System default follows macOS, including when it changes while the app is running.",
   },
   "device.output": {
     title: "Output",
-    body: "Where the click, drums, file and loop play. Takes effect after a restart.",
+    body: "Where the click, drums, file and loop play. Takes effect at once; System default follows macOS -- plugging headphones in moves the sound with it.",
   },
   "latency.measure": {
     title: "Measure latency",

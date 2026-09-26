@@ -3,8 +3,12 @@ import { useHelp } from "./help";
 import { ui } from "./theme";
 import { labelStyle } from "./Input";
 
-/** Matches DEVICES_CHANGED_EVENT in src-tauri/src/io_channels.rs. */
+/** Matches DEVICES_CHANGED_EVENT in src-tauri/src/platform/macos/devices.rs. */
 export const DEVICES_CHANGED_EVENT = "devices-changed";
+/** Match `audio_host.rs`: the audio restarted onto other devices, another
+ *  input count or another rate -- or could not. */
+export const AUDIO_RESTARTED_EVENT = "audio-restarted";
+export const AUDIO_RESTART_FAILED_EVENT = "audio-restart-failed";
 
 export type AudioDeviceInfo = {
   uid: string;
@@ -26,6 +30,10 @@ export type AudioPrefs = {
    *  a round trip: output latency and input latency both land in it. */
   pairCompensations: Record<string, Record<string, number>>;
 };
+
+/** What a latency figure is stored against. */
+export const pairKey = (active: ActiveDevices) =>
+  `${active.inputUid}\u0000${active.outputUid}`;
 
 export const pairCompensation = (
   prefs: AudioPrefs,
@@ -61,6 +69,25 @@ export type ActiveDevices = {
   outputFallbackReason?: string;
 };
 
+/** What is running, as `AudioStatus` in `structs.rs` has it. */
+export type AudioStatus = {
+  active: ActiveDevices;
+  inputChannels: number;
+  sampleRate: number;
+};
+
+/** `AudioRestarted` in `audio_host.rs`: what is running now, and what the
+ *  restart had to let go of. */
+export type AudioRestarted = {
+  status: AudioStatus;
+  rateChanged: boolean;
+  channelsChanged: boolean;
+  recordingStopped: boolean;
+  calibrationCancelled: boolean;
+  bleedReset: boolean;
+  reason: string;
+};
+
 export const emptyPrefs = (): AudioPrefs => ({
   inputUid: "",
   outputUid: "",
@@ -90,12 +117,14 @@ const describe = (d?: AudioDeviceInfo) =>
         .join(" · ");
 
 /**
- * Device choice takes effect at startup, not live -- the render closure owns
- * every per-channel buffer by value, so swapping under it would mean a lock the
- * audio thread could wait on. So this shows what is *running* alongside what is
- * *chosen*, and offers the relaunch when they differ. Nothing here is config:
- * it lives in the prefs file, since a preset carrying a device UID would be
- * meaningless on another machine.
+ * A choice applies at once: `setPrefs` writes the prefs file and restarts the
+ * audio in-process (`restart_audio`). It used to wait for a relaunch, because
+ * the render closure owned every per-channel buffer by value; the engine is a
+ * value that can be rebuilt now. This still shows what is *running* beside
+ * what is *chosen*, because the two can differ -- a saved device that is
+ * unplugged, or cannot do its role, falls back to the system default -- and
+ * says so in red. Nothing here is config: it lives in the prefs file, since a
+ * preset carrying a device UID would be meaningless on another machine.
  */
 export const DevicePicker = ({
   devices,
@@ -103,14 +132,16 @@ export const DevicePicker = ({
   prefs,
   setPrefs,
   onOpen,
-  onRestart,
+  error,
 }: {
   devices: AudioDeviceInfo[];
   active: ActiveDevices | null;
   prefs: AudioPrefs;
   setPrefs: (next: AudioPrefs) => void;
   onOpen: () => void;
-  onRestart: () => void;
+  /** Why the last restart could not happen -- the device would not open, say.
+   *  The audio is still on whatever was running before. */
+  error?: string | null;
 }) => {
   const inputs = devices.filter((d) => d.inputChannels > 0);
   // The output list used to be every device, microphones included. Picking one
@@ -118,11 +149,8 @@ export const DevicePicker = ({
   // panicked in Core Audio before any window existed to say so.
   const outputs = devices.filter((d) => d.outputChannels > 0);
   // An empty uid means "whatever macOS calls the default", which is the only
-  // choice that keeps working when the machine's devices change underneath it.
-  const pending =
-    !!active &&
-    ((prefs.inputUid !== "" && prefs.inputUid !== active.inputUid) ||
-      (prefs.outputUid !== "" && prefs.outputUid !== active.outputUid));
+  // choice that keeps working when the machine's devices change underneath it
+  // -- and the audio now follows the default when it moves.
 
   const help = useHelp();
   const select = (
@@ -184,10 +212,9 @@ export const DevicePicker = ({
         </div>
       )}
 
-      {pending && (
-        <div style={rowStyle}>
-          <button onClick={onRestart}>Restart to apply</button>
-          <span style={noteStyle}>Device changes take effect after a restart</span>
+      {error && (
+        <div style={{ ...noteStyle, color: ui.error }}>
+          Could not switch: {error}
         </div>
       )}
     </div>
