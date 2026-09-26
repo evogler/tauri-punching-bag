@@ -13,8 +13,8 @@ mod filter;
 mod get_loop_buffer_size;
 mod prefs;
 mod presets;
-mod io_channels;
 mod loop_guard;
+mod platform;
 mod read_audio_file;
 mod recorder;
 mod stretch;
@@ -34,12 +34,10 @@ use crate::commands::{
     set_mp3_buffer, set_presets, start_calibration, start_recording, stop_recording,
 };
 use crate::calibration::Calibration;
-use crate::constants::{default_config, max_input_backlog, sample_rate};
+use crate::constants::{default_config, sample_rate};
 use crate::engine::{Engine, EngineShared};
 use crate::get_loop_buffer_size::get_loop_buffer_size;
-use crate::io_channels::{
-    get_input_output_channels, make_buffers, start_input_audio_unit, watch_device_changes,
-};
+use crate::platform::{get_input_output_channels, watch_device_changes};
 use crate::read_audio_file::get_samples_from_filename;
 use crate::structs::{
     AnalysisOutputBuffer, BeatResetState, BleedState, CalibrationState, ConfigState, DrumSamples,
@@ -47,7 +45,6 @@ use crate::structs::{
     InputChannelCount, LogState, LoopBuffer, LoopBufferState, Mp3Buffer, Mp3BufferState,
     ConfigReady, RecorderState, SampleOutputBuffer,
 };
-use crate::types::Args;
 use std::{
     collections::HashMap,
     sync::atomic::AtomicBool,
@@ -245,15 +242,13 @@ fn main() -> Result<(), coreaudio::Error> {
     let kit_state = KitState(kit);
     let drum_samples_arc = Arc::new(Mutex::new(sample_buffers));
     let drum_samples_state = DrumSamples(drum_samples_arc.clone());
-    let (mut input_audio_unit, mut output_audio_unit, input_channels, io_log) = (
+    let (input_audio_unit, output_audio_unit, input_channels, io_log) = (
         setup.input_unit,
         setup.output_unit,
         setup.input_channels,
         setup.log,
     );
     let active_devices = setup.active;
-    let buffers = make_buffers(input_channels);
-    let consumers = buffers.consumers.clone();
 
     // A measuring run, and its verdict. Two mutexes rather than one for the
     // same reason the calibration has two: the callback touches the counters
@@ -322,7 +317,7 @@ fn main() -> Result<(), coreaudio::Error> {
     // The render callback's state, sized for this device's channel count and
     // rate. Everything it shares with the commands is one of the handles
     // above; the same `Arc`s go to Tauri as managed state below.
-    let mut engine = Engine::new(
+    let engine = Engine::new(
         EngineShared {
             config: config_state.0.clone(),
             config_ready: config_ready.clone(),
@@ -342,47 +337,8 @@ fn main() -> Result<(), coreaudio::Error> {
         input_channels,
         sample_rate(),
     );
-    // Assembled here, per block, from the per-channel queues: the core takes
-    // one interleaved block rather than knowing there are queues at all.
-    let mut input_block = vec![0f32; 4096 * input_channels];
-
-    start_input_audio_unit(&mut input_audio_unit, buffers.producers).unwrap();
-
-    output_audio_unit.set_render_callback(move |args: Args| {
-        let Args {
-            num_frames,
-            mut data,
-            ..
-        } = args;
-        let mut buffers: Vec<_> = consumers.iter().map(|c| c.lock().unwrap()).collect();
-
-        // Keeps the shared input queue from growing without bound if this
-        // callback ever falls behind the input one. Also trims the startup gap,
-        // since the input unit is started before this one.
-        for buffer in buffers.iter_mut() {
-            let excess = buffer.len().saturating_sub(max_input_backlog());
-            buffer.drain(..excess);
-        }
-
-        // Every channel drained, whatever the core goes on to do with the
-        // block: `make_buffers` hands out the same queue to both ends, so an
-        // undrained one grows without bound and replays the backlog afterwards.
-        let c_in = buffers.len();
-        debug_assert_eq!(c_in, engine.input_channels());
-        for i in 0..num_frames {
-            for (ch, buffer) in buffers.iter_mut().enumerate() {
-                input_block[i * c_in + ch] = buffer.pop_front().unwrap_or(0.0);
-            }
-        }
-        drop(buffers);
-
-        let mut channels = data.channels_mut();
-        if let (Some(left), Some(right)) = (channels.next(), channels.next()) {
-            engine.process(&input_block[..num_frames * c_in], [left, right]);
-        }
-        Ok(())
-    })?;
-    output_audio_unit.start()?;
+    // Held for the life of the process: dropping it stops both units.
+    let _audio = platform::start(input_audio_unit, output_audio_unit, engine)?;
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

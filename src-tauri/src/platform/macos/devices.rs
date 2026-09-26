@@ -1,9 +1,8 @@
 extern crate coreaudio;
 
-use crate::constants::{sample_rate, set_sample_rate, DEFAULT_SAMPLE_RATE, SAMPLE_FORMAT};
+use super::SAMPLE_FORMAT;
+use crate::constants::{sample_rate, set_sample_rate, DEFAULT_SAMPLE_RATE};
 use crate::prefs::AudioPrefs;
-use crate::structs::Buffers;
-use crate::types::{InputArgs, S};
 use coreaudio::audio_unit::audio_format::LinearPcmFlags;
 use coreaudio::audio_unit::macos_helpers::{
     audio_unit_from_device_id, get_audio_device_ids, get_default_device_id, get_device_name,
@@ -11,13 +10,10 @@ use coreaudio::audio_unit::macos_helpers::{
 };
 use coreaudio::audio_unit::{AudioUnit, Element, SampleFormat, Scope, StreamFormat};
 use coreaudio::sys::*;
-use coreaudio::Error;
 use serde::Serialize;
-use std::collections::VecDeque;
 use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::ptr::null;
-use std::sync::{Arc, Mutex};
 
 /// How many channels a device offers in one direction. Core Audio reports this
 /// as a stream configuration -- a buffer list whose per-buffer channel counts
@@ -553,39 +549,4 @@ pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Strin
         log: result_log,
         active,
     })
-}
-
-pub fn start_input_audio_unit(
-    input_audio_unit: &mut AudioUnit,
-    producers: Vec<Arc<Mutex<VecDeque<S>>>>,
-) -> Result<(), Error> {
-    input_audio_unit.set_input_callback(move |args: InputArgs| {
-        let InputArgs {
-            num_frames, data, ..
-        } = args;
-        let channels = data.channels;
-        let mut queues: Vec<_> = producers.iter().map(|p| p.lock().unwrap()).collect();
-        // The buffer arrives interleaved -- frame 0 channel 0, frame 0 channel 1,
-        // ... -- so split it back out into one queue per channel.
-        for frame in 0..num_frames {
-            for ch in 0..channels {
-                if let Some(queue) = queues.get_mut(ch) {
-                    queue.push_back(data.buffer[frame * channels + ch]);
-                }
-            }
-        }
-        Ok(())
-    })?;
-    input_audio_unit.start()?;
-    Ok(())
-}
-
-pub fn make_buffers(channels: usize) -> Buffers {
-    let queues: Vec<Arc<Mutex<VecDeque<S>>>> = (0..channels)
-        .map(|_| Arc::new(Mutex::new(VecDeque::<S>::new())))
-        .collect();
-    Buffers {
-        producers: queues.clone(),
-        consumers: queues,
-    }
 }

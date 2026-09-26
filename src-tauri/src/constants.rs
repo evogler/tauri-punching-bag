@@ -1,6 +1,5 @@
 use crate::analysis::DEFAULT_WINDOW;
 use crate::structs::{Config, DrumVoice, Note, ParserRhythm};
-use coreaudio::audio_unit::SampleFormat;
 /// Fallback only. The real rate is whatever the input device is running at --
 /// see `sample_rate()`.
 pub const DEFAULT_SAMPLE_RATE: f64 = 44100.0;
@@ -63,17 +62,6 @@ pub fn set_sample_rate(hz: f64) {
             DEFAULT_SAMPLE_RATE, hz
         );
     }
-}
-pub const SAMPLE_FORMAT: SampleFormat = SampleFormat::F32;
-
-// make_buffers hands the same unbounded VecDeque to the input callback's
-// push_back and the render callback's pop_front, so anything that stalls the
-// render side -- the bound device going away, or slow clock drift when input
-// and output are separate devices -- would grow it forever. Cap the backlog and
-// drop the oldest excess. A quarter second is well above the few thousand
-// samples it normally holds, so this never fires in normal running.
-pub fn max_input_backlog() -> usize {
-    (sample_rate() * 0.25) as usize
 }
 
 /// Frames of *display* backlog the callback will hold before it stops pushing.

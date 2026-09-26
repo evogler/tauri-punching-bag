@@ -4,7 +4,7 @@
 //! anything but live audio, which makes it untestable against material you can
 //! look at -- and where the onsets land is the one thing in this app that has
 //! never been right. This drives the *real* `Analyzer` frame by frame in
-//! exactly the order `main.rs` does, so what it reports is what the app would
+//! exactly the order `engine.rs` does, so what it reports is what the app would
 //! have drawn.
 //!
 //! An `examples/` target rather than a second `[[bin]]`, deliberately: cargo
@@ -199,7 +199,7 @@ fn run(samples: &[f32], channels: usize, rate: f64, o: &Opts) -> (Vec<Onset>, Ve
             frame[ch] = samples[i * channels + ch];
         }
         if analyzer.push(&frame) {
-            // Exactly `main.rs`: the hop that just completed describes the
+            // Exactly `engine.rs`: the hop that just completed describes the
             // window centred half a window behind this frame.
             let hop_at = i as f64 - analyzer.window_len() as f64 / 2.0;
             analyzer.note_hop_beat(hop_at);

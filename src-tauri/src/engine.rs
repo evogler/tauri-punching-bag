@@ -317,10 +317,10 @@ impl Engine {
         // loop buffer -- so resuming picks up exactly where it stopped, and no
         // visual samples are produced so the display holds still.
         //
-        // The input still has to be drained. make_buffers hands out the same
-        // queue as both producer and consumer, so leaving it alone while the
-        // input unit keeps pushing would grow it without bound and then play
-        // back a pause-length backlog of stale audio on resume.
+        // The input still arrives, and is still consumed: the backend hands
+        // over a block whatever state the transport is in, which on macOS is
+        // what keeps the input queue from growing through a pause and then
+        // playing back a pause-length backlog of stale audio on resume.
         // Silent until the frontend has spoken. Rust's `default_config()` is not
         // anybody's saved settings, so sounding it while the window comes up is
         // a beat of the wrong thing on every launch. Treated exactly as a pause

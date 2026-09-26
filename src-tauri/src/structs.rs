@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    collections::VecDeque,
     sync::atomic::{AtomicBool, AtomicUsize},
     sync::{Arc, Mutex},
 };
@@ -440,13 +439,6 @@ pub struct DrumVoice {
     pub rhythm: ParserRhythm,
 }
 
-// One queue per input channel. Producers and consumers are clones of the same
-// Arcs -- see MAX_INPUT_BACKLOG for why that matters.
-pub struct Buffers {
-    pub producers: Vec<Arc<Mutex<VecDeque<f32>>>>,
-    pub consumers: Vec<Arc<Mutex<VecDeque<f32>>>>,
-}
-
 /// A short delay line for the synthetic display buses.
 ///
 /// The sample stream is stamped with a beat shifted back by
@@ -456,7 +448,7 @@ pub struct Buffers {
 /// the full compensation. Holding them back by it puts each one back on its own
 /// beat without moving anything else.
 /// drums, click, file -- the synthetic buses, in the order the frontend labels
-/// them and the order `main.rs` fills them.
+/// them and the order `engine.rs` fills them.
 /// Drums, click, file, and the looper's own feed. The first three are drawn as
 /// synthetic channels; the fourth exists only so the bleed canceller can be
 /// told what the speaker is playing back at the microphone.

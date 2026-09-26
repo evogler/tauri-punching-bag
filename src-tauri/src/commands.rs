@@ -2,7 +2,7 @@ use crate::analysis::{BINS, MAX_ANALYSIS_CHANNELS};
 use crate::calibration::{analyze, CalibrationPhase, CalibrationResult};
 use crate::constants::{sample_rate, ANALYSIS_RESERVE_HOPS, ONSET_RESERVE, VISUAL_RESERVE_FRAMES};
 use crate::get_loop_buffer_size::get_loop_buffer_size;
-use crate::io_channels::{list_devices, ActiveDevices, AudioDeviceInfo};
+use crate::platform::{list_devices, ActiveDevices, AudioDeviceInfo};
 use crate::prefs::{load as load_prefs, save as save_prefs, AudioPrefs};
 use crate::presets;
 use crate::read_audio_file::{decode_audio_file, get_samples_from_filename, to_device_stereo};
@@ -277,7 +277,7 @@ pub fn export_presets(path: String, text: String) -> Result<(), String> {
     presets::write_file(&path, &text)
 }
 
-/// Device changes only take effect at startup: the render closure owns every
+/// Device changes only take effect at startup: the audio engine owns every
 /// per-channel buffer by value, so swapping a device under it would mean
 /// putting all of that behind a lock the audio thread could wait on. Relaunch
 /// instead. `restart` reads Info.plist, so the *bundle* comes back and keeps
