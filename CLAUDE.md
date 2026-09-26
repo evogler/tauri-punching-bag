@@ -1,7 +1,7 @@
 # tauri-punching-bag
 
 A practice tool for drummers/musicians: a metronome with programmable rhythms, a
-looper, and a real-time waveform display you play *against*. Tauri v1 app —
+looper, and a real-time waveform display you play *against*. Tauri v2 app —
 React/TypeScript frontend, Rust + CoreAudio backend. macOS only (uses
 `coreaudio-rs` directly, not `cpal`).
 
@@ -196,10 +196,11 @@ value (red field, still playing).
 - **Help**: attach with `onFocusCapture`, never `onFocus` (`useFocusedValue`
   owns `onFocus`). `Input` finds its own help entry by key. `App` provides it.
 - Shortcuts: ⌘P pause, ⌘L loop, ⌘R reroll (bails on shift; ⌘⇧R is menu
-  Restart), one listener via a ref. Menu is `Menu::os_default` + Restart
+  Restart), one listener via a ref. Menu is `Menu::default` + Restart
   (building from scratch drops Edit/copy-paste).
 - Global shortcut (off by default, ⌘⌥P, localStorage): Carbon hotkey, no TCC
-  grant; failures are silent at the source, so the panel counts presses.
+  grant; a key another app owns still fails silently, so the panel counts
+  presses. The handler fires on release too -- act on `Pressed` only.
   Registrations serialised through one promise chain (StrictMode).
 - Per-frame DOM readouts (`showFrameTime`, beat readout) write `textContent`
   directly, never through React state.
@@ -216,7 +217,8 @@ with `id`, `created`, `lastUsed`; import matches id → content hash → name. H
 is computed, never stored. Writes are temp-file + rename; a corrupt store is
 quarantined (`presets.corrupt-<stamp>.json`), never replaced. File IO goes
 through Rust commands. `yarn start` falls back to localStorage on an explicit
-`__TAURI_IPC__` check.
+`isTauri()` check (`BROWSER_DEBUG_MODE` in `env.ts`; v1's `__TAURI_IPC__` global
+no longer exists).
 
 Examples (`src/examples.json`) are preset files plus `description`/`tryThis`,
 loaded through `loadPreset`. **Never hand-write one**: build it in the app,
@@ -335,6 +337,11 @@ Each has a full section in `docs/design-notes.md`.
 
 ## macOS packaging, signing, updates
 
+- Permissions are `src-tauri/capabilities/main.json`: only what the frontend
+  calls (dialog open/save, global-shortcut register/unregister, updater).
+  Our own commands need none. A new plugin call from JS needs a line there.
+- App config dir is `~/Library/Application Support/com.vogler.dev`
+  (`audio-prefs.json`, `presets.json`) -- same as under v1; don't move it.
 - `src-tauri/Info.plist` carries `NSMicrophoneUsageDescription`;
   `Entitlements.plist` needs `com.apple.security.device.audio-input` (hardened
   runtime). Never add `com.apple.private.tcc.allow-prompting`.
@@ -348,6 +355,9 @@ Each has a full section in `docs/design-notes.md`.
   `tccutil reset Microphone com.vogler.dev`.
 - Updater: minisign key at `~/.tauri/punching-bag.key` (back it up; losing it
   strands every install), GitHub Releases endpoint (repo must stay public).
+  Tauri v2 from the first release after 0.4.0: the launch-time dialog is ours (`main.rs`), not the
+  plugin's; `createUpdaterArtifacts: "v1Compatible"` keeps v1 installs able
+  to update and must stay until none are left (*Tauri v2*).
   **Bump the version** in `tauri.conf.json` and `package.json`; **commit before
   building** (notes come from the last commit subject). The build prints
   publish commands rather than running them; publish all artifacts from one

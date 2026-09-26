@@ -51,8 +51,9 @@ pub fn quarantine(dir: &Path) -> Result<String, String> {
     Ok(name)
 }
 
-/// Import and export both go through Rust rather than the `fs` API, whose
-/// allowlist scope is `$RESOURCE/*`. The path comes from a native dialog the
+/// Import and export both go through Rust rather than a JS file API -- the `fs`
+/// plugin is not installed, and granting it arbitrary paths for this alone
+/// would be a wider permission than the feature needs. The path comes from a native dialog the
 /// user just clicked through, which is the same trust `load_drum_sample` and
 /// `set_mp3_buffer` already run on.
 pub fn read_file(path: &str) -> Result<String, String> {

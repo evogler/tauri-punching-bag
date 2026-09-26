@@ -5,7 +5,7 @@ what was tried first, and what was measured. `CLAUDE.md` is the compact
 working summary and points into the sections here by name.
 
 A practice tool for drummers/musicians: a metronome with programmable rhythms, a
-looper, and a real-time waveform display you play *against*. Tauri v1 app —
+looper, and a real-time waveform display you play *against*. Tauri v2 app —
 React/TypeScript frontend, Rust + CoreAudio backend. macOS only (uses
 `coreaudio-rs` directly, not `cpal`).
 
@@ -462,7 +462,7 @@ Rules that will bite you:
   bows out, because the menu's ⌘⇧R (Restart) arrives at the webview too.
 - **One key reaches the transport from outside the app** -- see *The global
   shortcut*, below. Off by default, and a different combination from ⌘P.
-- **The app menu carries Restart** (⌘⇧R), added to `Menu::os_default` rather
+- **The app menu carries Restart** (⌘⇧R), added to `Menu::default` rather
   than to a menu built from scratch -- building one drops Edit, and with it
   cut/copy/paste in every text field in the panel. `AppHandle::restart` reads
   Info.plist on macOS, so the *bundle* comes back rather than the bare binary,
@@ -477,16 +477,19 @@ Rules that will bite you:
 transport can be reached with a DAW or a score in front.
 
 - **It needs no Accessibility or Input Monitoring grant**, which is the whole
-  reason it is a switch rather than a permissions flow. Tauri 1.8.3's
-  `globalShortcut` endpoint goes through `tauri-runtime-wry` to tao 0.16.11,
-  whose macOS implementation calls Carbon's `RegisterEventHotKey` directly
-  (`tao-0.16.11/src/platform_impl/macos/carbon_hotkey/carbon_hotkey_binding.c`).
-  That is the old system hotkey API, not a `CGEventTap`, and TCC does not gate
-  it. Nothing was added to `Entitlements.plist` and nothing prompts.
-- **A registration failure is silent at the source, and that cannot be fixed
-  from here.** `register_hotkey` returns NULL when Carbon refuses, and tao's
-  `register` ignores the null and returns `Ok` anyway
-  (`platform_impl/macos/global_shortcut.rs:70-83`). Worse, the commonest
+  reason it is a switch rather than a permissions flow. Under Tauri v2 it is
+  `tauri-plugin-global-shortcut`, over the `global-hotkey` crate, whose macOS
+  implementation calls Carbon's `RegisterEventHotKey` directly
+  (`global-hotkey-0.8.0/src/platform_impl/macos/mod.rs`) -- as v1 did through
+  tao. That is the old system hotkey API, not a `CGEventTap`, and TCC does not
+  gate it. Nothing was added to `Entitlements.plist` and nothing prompts.
+- **The handler fires on release as well as press** under v2 (`event.state`
+  is `Pressed` or `Released`). v1 called it once per press; answering both
+  would pause and unpause on every stroke, so `GlobalShortcut.tsx` ignores
+  `Released`.
+- **A registration failure is partly silent at the source.** Under v1, tao
+  ignored a NULL from Carbon and returned `Ok`; `global-hotkey` does check the
+  status and returns an error, which the panel shows in red. But the commonest
   failure is not an error at all: when another app already owns a combination
   macOS simply delivers the press elsewhere. `isRegistered` only reports this
   app's own bookkeeping, so it cannot answer either. What *does* surface is a
@@ -769,11 +772,14 @@ rule, and what a preset cannot carry.
   preset is edited -- a derived value that can go stale is the trap the
   expression fields' `val` rules exist to avoid. It canonicalises key order
   first, or a config built fresh and one restored from JSON would never match.
-- **File IO goes through Rust commands rather than the `fs` API**, whose
-  allowlist scope is `$RESOURCE/*`. The paths come from a native dialog, which
+- **File IO goes through Rust commands rather than a JS file API** -- the `fs`
+  plugin is not installed, and v1's `fs` allowlist was scoped to `$RESOURCE/*`
+  anyway. The paths come from a native dialog, which
   is the same trust `load_drum_sample` and `set_mp3_buffer` already run on.
 - **`yarn start` falls back to localStorage**, under its own key, on an
-  explicit `__TAURI_IPC__` presence check. Deliberately not a try/catch around
+  explicit presence check -- `isTauri()` now, via `BROWSER_DEBUG_MODE`; it was
+  v1's `__TAURI_IPC__` global, which v2 does not define, and left as it was it
+  would have put the real app into browser mode wholesale. Deliberately not a try/catch around
   the command: a command *failing* in the real app must not silently split the
   store in two.
 - **A missing file names its full path**, where `drumLabel` shows the basename
@@ -942,7 +948,7 @@ were stopping it:
 
 - **`NSMicrophoneUsageDescription` was missing entirely.** Without that string
   macOS never shows the prompt, and CoreAudio returns silence rather than an
-  error -- an input of all zeroes with nothing in any log. Tauri v1 merges
+  error -- an input of all zeroes with nothing in any log. Tauri (v1 and v2) merges
   `src-tauri/Info.plist` into the generated one; that file exists now solely to
   carry this key. Verify a build with
   `plutil -p .../tauri-punching-bag.app/Contents/Info.plist | grep -i usage`.
@@ -969,8 +975,8 @@ blocks an ad-hoc un-notarized bundle outright.
   `security find-certificate -c "<name>" -p | openssl x509 -noout -subject`
   rather than from the parenthetical in the identity string, which is a
   different number on a development certificate.
-- **Tauri v1 notarizes the `.app` and not the disk image it then builds around
-  it.** The app's own ticket is stapled, so it launches; the image carries a
+- **Tauri notarizes the `.app` and not the disk image it then builds around
+  it** -- v1 did, and the v2 CLI (2.11) still does. The app's own ticket is stapled, so it launches; the image carries a
   signature and no ticket, and the image is what Gatekeeper judges *first* on a
   download -- it refuses to mount one with "Apple could not verify this is free
   of malware". `scripts/tauri.mjs` submits and staples the image after a
@@ -985,7 +991,8 @@ blocks an ad-hoc un-notarized bundle outright.
   exported variable wins over the file. Check the credentials in a second
   without a build: `xcrun notarytool history` answers `No submission history`
   when they are right and an auth error when they are not.
-- **`@tauri-apps/cli` had to go 1.0.5 -> 1.6.3 first.** 1.0.5 shells out to
+- **`@tauri-apps/cli` had to go 1.0.5 -> 1.6.3 first** (and is 2.x now -- see
+  *Tauri v2*). 1.0.5 shells out to
   `xcrun altool`, which Apple retired on 1 Nov 2023, so notarization could not
   have worked at all. Still Tauri v1 and no code migration: the Rust crate was
   already resolving to 1.8.3 and only the JS CLI was stale. `strings` on
@@ -1016,31 +1023,31 @@ chases a new disk image.
     reinstall to get back on the train. Back it up.
   - **Stealing it is worse still**: it signs code that auto-installs on other
     people's machines. It is the one secret here that is worth a password.
-- **The version has to actually move.** The updater compares `package.version`
+- **The version has to actually move.** The updater compares `version`
   against the manifest and does nothing when they match -- silently, which reads
   as a broken endpoint. Bump it in `tauri.conf.json` (and `package.json`, kept
   in step) as part of releasing, not after.
 - **The endpoint is GitHub Releases**, which works only because the repo is
-  public: v1's `UpdaterConfig` takes `active`, `dialog`, `endpoints`, `pubkey`
-  and `windows` and **no headers**, so there is no way to authenticate to a
-  private one -- a token would have to sit in the URL, baked into the binary.
-  Going private means a static host instead, or Tauri v2, whose updater plugin
-  does take headers.
-- **`dialog: true` and the manual check are independent paths**, and the flag
-  gates only the first. The launch check runs `prompt_for_install`; a JS
-  `checkUpdate()` is picked up by a listener that never reads `dialog` at all.
-  So both work at once, and the manual path raises no native dialog -- which is
-  why `Updater.tsx` renders its own line rather than reusing one.
-  - **The dialog path installs *and* asks to restart; the JS path does neither.**
-    It emits `DONE` and returns, so an update installed from the panel would sit
-    on disk unmentioned until the next launch. `Updater.tsx` calls `restart_app`
-    itself -- the same command the menu's Restart uses, so the *bundle* comes
-    back rather than the bare binary.
+  public. v1's `UpdaterConfig` took **no headers**, so the *v1 installs still
+  out there* can never authenticate to a private one -- a token would have to
+  sit in the URL. v2's updater plugin does take headers, but going private is
+  only safe once every v1 install has come across.
+- **The launch-time prompt and the manual check are independent paths.** The
+  launch check is `check_for_update_at_launch` in `main.rs`, with native
+  dialogs; `check()` from `Updater.tsx` raises none -- which is why the panel
+  renders its own line rather than reusing one.
+  - **The launch path installs *and* asks to restart; the JS path does
+    neither.** `downloadAndInstall` returns once the bundle is replaced, so an
+    update installed from the panel would sit on disk unmentioned until the
+    next launch. `Updater.tsx` calls `restart_app` itself -- the same command
+    the menu's Restart uses, so the *bundle* comes back rather than the bare
+    binary.
 - **An updater failure is silent by construction**: the app goes on working
-  perfectly and simply never updates again. `onUpdaterEvent` is listened to for
-  exactly that reason -- the *Failing loudly* argument, one layer out. The error
-  is shown in the updates section rather than the config banner, because the
-  launch check fires it every time the machine is offline.
+  perfectly and simply never updates again. The launch check's failures are
+  emitted as `update-check-failed` and the manual path's arrive as rejections;
+  both land in the updates section -- the *Failing loudly* argument, one layer
+  out. Not the config banner, because the launch check fails every time the
+  machine is offline.
 - **`scripts/tauri.mjs` writes `latest.json` and prints the publish commands
   rather than running them.** Publishing is the step that puts code on other
   people's machines; it stays something you do on purpose. A tarball with no
@@ -1080,6 +1087,75 @@ clause is the part worth keeping: it is the payoff of the Developer ID being
 stable, and it is a *stronger* result than the rebuild test it settles, because
 the bundle was replaced wholesale by a build from another machine and the grant
 still held.
+
+### Tauri v2
+
+**Migrated from v1 on 2026-09-25**, as step 1 of `docs/ios-port.md` -- v1 has
+no mobile support. Mac only, behaviour meant to be unchanged. What moved, and
+what had to be held still:
+
+- **`@tauri-apps/cli` 2.x, `tauri` 2.x, and three plugins**: dialog,
+  global-shortcut, updater. `tauri migrate` added eleven, because v1 ran with
+  `allowlist.all`; the rest (fs, shell, http, os, notification, clipboard,
+  process) were taken out again since nothing calls them. Restart is our own
+  `restart_app` command over `AppHandle::restart`, so the process plugin is not
+  needed for it.
+- **Capabilities are `src-tauri/capabilities/main.json`** and grant only what
+  the frontend calls: `core:default` (events, `getVersion`, the drag-drop
+  listener), dialog open/save, global-shortcut register/unregister, and
+  `updater:default`. The app's own `#[tauri::command]`s need no permission.
+  `src-tauri/gen/schemas` is regenerated by every compile and is gitignored.
+- **The config dir did not move, and that was checked rather than assumed.**
+  v1's `app_config_dir` and v2's `path().app_config_dir()` are both
+  `config_dir()/<identifier>` -- `~/Library/Application Support/com.vogler.dev`,
+  where `audio-prefs.json` and `presets.json` already are. `main` computes it
+  by hand with `dirs`, because the devices are opened before an app exists to
+  ask; the commands ask the app. Resources come from
+  `tauri::utils::platform::resource_dir`, the same `Contents/Resources`.
+- **localStorage did not move either**: v2 on macOS still serves the page from
+  `tauri://localhost` into WebKit's default data store, so the session,
+  `tpb.presets.v1` and the `punching-bag.*` keys are the same origin as before.
+  (`useHttpsScheme` in the config only affects Windows and Android.)
+- **v1's IPC global is gone.** `BROWSER_DEBUG_MODE` was
+  `!("__TAURI_IPC__" in window)`; under v2 that is true inside the real app, so
+  every command would have been skipped and samples faked. `isTauri()` now,
+  and `presets.ts` reads the same flag.
+- **The updater's launch dialog is ours now.** v2's plugin has no `dialog`
+  option, so `check_for_update_at_launch` in `main.rs` reproduces v1's two
+  questions -- install, then restart -- with the dialog plugin, in v1's
+  wording.
+  - **`createUpdaterArtifacts: "v1Compatible"`** writes the same
+    `.app.tar.gz` + `.sig` v1 did, so a v1 install can take this build. It is
+    what keeps friends' installs on the train, and must stay until every one of
+    them has updated past it; `true` is the v2-only format and the CLI warns
+    that the legacy one goes in v3.
+  - **`requireSignedVersion` is on** (added by `tauri migrate`): the plugin
+    refuses an update whose signature's trusted comment does not carry the
+    version the manifest announces, which closes a downgrade attack. The v2 CLI
+    writes `version:` into every signature it makes, so every release from here
+    on satisfies it -- checked on the first build's `.sig`.
+  - **The signing key's variables were renamed** (`TAURI_SIGNING_PRIVATE_KEY`,
+    `..._PASSWORD`). `scripts/tauri.mjs` maps the old names across, so
+    `.env.signing` did not have to change.
+- **Menu and events**: `Menu::os_default` became `Menu::default(app)` with the
+  same Restart insertion; `emit_all` became `emit` (the `Emitter` trait).
+- **File drop**: `onFileDropEvent` became the webview's `onDragDropEvent`
+  (`enter`/`over`/`drop`/`leave`). Its cleanup never actually unlistened --
+  it awaited the promise without calling the result -- and the effect runs on
+  every render, so v1 accumulated one listener per render, each loading the
+  dropped file. Fixed in passing.
+- **The global shortcut fires on release too** -- see *The global shortcut*.
+- **`[features] custom-protocol` was removed from `Cargo.toml`**: the v2 CLI
+  passes it itself, and leaving it in `default` would make `tauri dev` load the
+  built frontend instead of the dev server.
+
+Verified on the first build: signed, `TeamIdentifier=9KMDH5UH9Z`, hardened
+runtime, entitlement present, app and DMG both notarized and stapled,
+`spctl` `accepted`, `NSMicrophoneUsageDescription` in the bundle's Info.plist,
+`samples/` in `Contents/Resources`, and `latest.json` written with the
+signature. `tauri dev` launched, opened the devices and received `set_config`
+from the webview. **Not verified**: anything in the running app by hand, and
+the v1 -> v2 update itself, which only publishing a release can test.
 
 ### The App Store, if it ever happens
 
@@ -1189,7 +1265,10 @@ codesign -dvvv /Applications/tauri-punching-bag.app
 ```
 
 - `Format=... (x86_64)` -- wrong DMG. Current builds are `arm64`.
-- `Info.plist entries=17` -- wrong DMG. A build carrying the microphone key has 27.
+- `Info.plist entries=17` -- the 2023 x64 DMG. v1 builds carrying the
+  microphone key reported 27; **v2 builds report 18**, so the count no longer
+  separates good from bad on its own -- `plutil -p .../Info.plist | grep -i
+  usage` does.
 - `CodeDirectory v=20400` -- wrong DMG; current is `v=20500`.
 - `TeamIdentifier=not set` -- a build from before the Developer ID. Current is
   `9KMDH5UH9Z`, and this is the strongest of the four: it cannot be faked by a
@@ -3991,7 +4070,7 @@ See *Updates*.
   port unchanged. The damage is concentrated in `io_channels.rs` (428 lines, 31
   Core Audio calls) and the setup half of `main.rs`. Two blockers and three
   consequences:
-  - **Tauri v1 has no mobile support.** A v2 migration comes first: allowlist to
+  - **Tauri v1 has no mobile support.** Done 2026-09-25 -- see *Tauri v2*. It was: allowlist to
     the capabilities model, `tauri::api::path` into plugins, a new config
     schema. Mechanical but wide -- every command and the whole config file.
   - **iOS has no Core Audio HAL.** `AudioObjectGetPropertyData`, `AudioDeviceID`,

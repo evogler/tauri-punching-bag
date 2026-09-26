@@ -112,7 +112,7 @@ in the container), TestFlight, and the updater coming out on iOS.
 
 ## Progress
 
-- [ ] 1. Tauri v2 migration
+- [x] 1. Tauri v2 migration (2026-09-25; in-app testing by the owner still to do)
 - [ ] 2. Core / platform split
 - [ ] 3. In-process engine restart
 - [ ] 4. iOS backend

@@ -265,8 +265,8 @@ pub fn quarantine_presets(app_handle: tauri::AppHandle) -> Result<String, String
 }
 
 /// Both halves of import/export. The path comes from a native dialog, which is
-/// the same trust `load_drum_sample` runs on -- and the `fs` allowlist is
-/// scoped to `$RESOURCE/*`, so the JS API could not reach it anyway.
+/// the same trust `load_drum_sample` runs on -- and the `fs` plugin is not
+/// installed at all, so the JS side has no file API to reach it with anyway.
 #[tauri::command]
 pub fn import_presets(path: String) -> Result<String, String> {
     presets::read_file(&path)
