@@ -24,9 +24,8 @@ yarn build:parser   # regenerate parser2.js from parser2.peg
 ```
 
 - **Run `yarn tauri build` after every change** (owner's explicit request). It
-  compiles Rust too and takes ~30s. Three warnings are expected: `unused import:
-  std::time::Instant`, `unused imports: AudioUnit and Error`, `method hop_frames
-  is never used`.
+  compiles Rust too and takes ~30s. Two warnings are expected: `unused import:
+  std::time::Instant` and `method hop_frames is never used`.
 - `yarn tauri` runs `scripts/tauri.mjs`: forwards args, frees/refuses a mounted
   `/Volumes/tauri-punching-bag` before building, sweeps stale `.dmg`s (by time)
   after a successful build, notarizes + staples the DMG, writes `latest.json`.
@@ -56,8 +55,9 @@ f64** (f32 causes ghost trails after ~20 min).
 
 | File | Role |
 |---|---|
-| `main.rs` | Setup + the render callback; nearly all real-time logic is one closure. |
-| `io_channels.rs` | Device discovery, stream formats, input callback, per-channel queues. |
+| `main.rs` | Setup: prefs, devices, kit, shared state, builds the `Engine`, Tauri. |
+| `engine.rs` | **The audio core.** `Engine::process(input, [left, right])`: an interleaved input block in, two output slices filled. All real-time logic; knows no device. |
+| `platform/macos/` | The backend. `devices.rs`: discovery, formats, rate. `mod.rs`: the input queues, the input callback, the render callback that feeds the engine. |
 | `structs.rs` | Config, shared state, `DrumVoice`, `VisualSamples`, `BusDelay`. |
 | `commands.rs` | Tauri commands (`set_config`, `get_samples`, `load_drum_sample`, …). |
 | `constants.rs` | `sample_rate()`, backlog caps (fns, not consts), `default_config()`. |
@@ -226,15 +226,19 @@ export, then `yarn example:add exported.json`. Ids are stable slugs.
 
 ## Audio thread rules
 
-The render callback runs ~21×/s with 2048 frames.
+The render callback runs ~21×/s with 2048 frames on macOS; the engine takes
+any block up to `MAX_BLOCK_FRAMES` (4096) and is block-size invariant.
 
 - **Never allocate or free** -- per frame or per callback. Resolve rhythm
   vectors, pan gains, sample lookups, tap gains, section bounds once per
-  callback into reused locals. Display buffers are swapped for pre-sized ones
+  callback into vectors kept on the `Engine` (a `collect` per callback is still
+  the allocator). **Size for `MAX_BLOCK_FRAMES`, never the typical block.** Display buffers are swapped for pre-sized ones
   (`DrainSizes`, `MAX_VISUAL_BACKLOG`); anything heavy (stretch, WAV writing,
   correlation, dropping big buffers) happens off-thread or outside the lock.
 - The callback holds the display mutexes for its whole run; command-side work
   under them must be O(1) swaps. Lock order: config, then file.
+- **Real-time logic goes in `engine.rs`; only queueing and device specifics in
+  a backend.** iOS will call the same `process` from one RemoteIO callback.
 - **Per-frame vs per-output-channel**: the output loop runs twice per frame.
   Anything advancing time (input pops, loop buffer, beat, triggers, display
   pushes) goes outside it.
@@ -251,9 +255,9 @@ The render callback runs ~21×/s with 2048 frames.
   `get_input_output_channels` may read the rate** (watch `to_device_stereo` --
   every file decode goes through it). Frame-sized limits are fns of the rate.
 - Input is interleaved, output non-interleaved (required for multichannel in).
-- `make_buffers` hands the *same* `Arc` to producer and consumer; the callback
-  must always drain (pause/calibration included), capped by
-  `max_input_backlog()`.
+- The macOS input queues (`make_queues`) are one `Arc` shared by both ends; the
+  render callback pops a whole block every callback whatever the engine then
+  does with it (pause/calibration included), capped by `max_input_backlog()`.
 - Devices are chosen in the panel, stored by UID in `audio-prefs.json`, applied
   **at next launch** (not hot-swappable). A saved device that is missing or
   can't serve its role falls back to the default and the panel says so in red.
@@ -269,7 +273,7 @@ The render callback runs ~21×/s with 2048 frames.
      inputs        bus N      bus N+1    bus N+2
 ```
 
-- `channelLabels` order must match `main.rs`. Only inputs are pannable.
+- `channelLabels` order must match `engine.rs`. Only inputs are pannable.
 - Sample stream is flattened `{channels, beats, values}` in *packed*
   (`visibleChannels`) order; `streamSlots[channel]` translates. Everything
   user-facing is indexed by device channel. `visibleChannels` is the union of

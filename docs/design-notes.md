@@ -48,8 +48,9 @@ position, looper) derives from it.
 
 | File | Role |
 |---|---|
-| `main.rs` | Setup + the render callback. Nearly all real-time logic lives in one closure. |
-| `io_channels.rs` | Device discovery, stream formats, input callback, per-channel queues. |
+| `main.rs` | Setup: prefs, devices, kit, the shared state, the `Engine`, Tauri. |
+| `engine.rs` | The audio core: every real-time thing, handed a block in and a block out. See *The core and the platform*. |
+| `platform/macos/` | The macOS backend. `devices.rs` is device discovery, stream formats and the rate; `mod.rs` the input queues and both callbacks. |
 | `structs.rs` | Config, shared state, `DrumVoice`, `VisualSamples`. |
 | `commands.rs` | Tauri commands (`set_config`, `get_samples`, `load_drum_sample`, …). |
 | `constants.rs` | `SAMPLE_RATE`, `MAX_INPUT_BACKLOG`, `default_config()`. |
@@ -1334,7 +1335,8 @@ shows only Attributes and Access Control -- the Trust pane is on the
 
 ## Audio thread rules
 
-The render callback in `main.rs` runs ~21×/sec with 2048 frames. Inside it:
+The render callback runs ~21×/sec with 2048 frames on macOS, and everything
+it does is `Engine::process` in `engine.rs`. Inside it:
 
 - **Never allocate at all, per frame or per callback.** The display buffers
   were the exception and stopped being one: `get_samples` used `mem::take`,
@@ -1352,9 +1354,15 @@ The render callback in `main.rs` runs ~21×/sec with 2048 frames. Inside it:
   only happens between callbacks. Everything the commands do inside the lock is
   therefore O(1) by construction -- a swap, never a copy or an allocation.
 - **Never allocate per frame.** Rhythm time-vectors, pan gains, and drum sample
-  lookups are all resolved *once per callback* into locals. The click's times
-  array used to be `.collect()`ed inside the per-frame, per-channel loop — about
-  88,000 allocations/sec. Don't reintroduce that pattern.
+  lookups are all resolved *once per callback*. The click's times array used to
+  be `.collect()`ed inside the per-frame, per-channel loop — about 88,000
+  allocations/sec. Don't reintroduce that pattern.
+  - **And not into fresh locals either.** Once per callback was still a
+    `collect` -- the click times, the pans, a `Vec<Vec>` of voice times and the
+    voice samples -- so twenty-odd trips to the allocator a second, plus a
+    `Vec` of queue guards on *each* audio thread. They are fields on the
+    `Engine` now, cleared and refilled, and only grow when a rhythm gets longer
+    or a voice is added -- the policy `bounds` already had.
 - **Per-frame vs per-output-channel.** The output loop runs twice per frame
   (stereo). Anything advancing sample time — input pops, the loop buffer, the
   beat, triggers, display pushes — belongs *outside* it. Things that legitimately
@@ -1366,6 +1374,87 @@ The render callback in `main.rs` runs ~21×/sec with 2048 frames. Inside it:
   gap between representable values outgrows a screen pixel after ~20 minutes and
   the waveform stops being redrawn densely enough to erase the previous pass —
   ghost trails. Fixed once; don't reintroduce a cast.
+
+### The core and the platform
+
+`engine.rs` and `platform/`, split on 2026-09-25 as step 2 of
+`docs/ios-port.md`. What had been one closure in `main.rs`, owning its state by
+capture, is a struct with one method:
+
+```rust
+Engine::new(shared: EngineShared, input_channels: usize, sample_rate: f64)
+Engine::process(&mut self, input: &[f32], output: [&mut [f32]; 2])
+```
+
+*Here are n frames of input, interleaved and `input_channels` wide; fill n
+frames of each output side.* `n` is `output[0].len()`, anything up to
+`MAX_BLOCK_FRAMES`. `EngineShared` is the set of `Arc`s the core shares with
+the commands -- the same ones `main` hands Tauri as managed state.
+
+- **The line is drawn by what iOS needs, not by what macOS happens to do.**
+  RemoteIO delivers input and wants output in *one* callback, so anything that
+  must happen on both platforms lives in the engine: the pause and the
+  not-yet-configured silence, the level meter at the top, the calibration and
+  the bleed measurement taking the callback over. What stays in the macOS
+  backend is only what exists because AUHAL's input and output are separate
+  units: the per-channel queues, the input callback that fills them, the
+  backlog trim, and assembling an interleaved block from them.
+- **The backend always takes a whole block off the queues**, whatever the
+  engine is about to do with it. That replaced three separate "every channel
+  must be drained or the queue grows" loops -- the pause, the calibration and
+  the bleed measurement each had one, because each returned early before the
+  ordinary pop. Draining unconditionally in one place makes forgetting it
+  impossible, and the engine's paths only read. A short queue reads as zeroes,
+  exactly what `pop_front().unwrap_or(0.0)` gave.
+- **Output is two non-interleaved slices**, because that is what the macOS
+  output unit is set to and what RemoteIO can be set to. The old loop handled
+  "more than two channels" by giving extras the right side; the stream format
+  has always been two, so that path was dead and is gone.
+- **The engine is block-size invariant, and that is checked, not assumed.** A
+  temporary test (run, then deleted) put eight seconds of a deterministic
+  config -- looper with three echoes and a record cycle, sections with an
+  order and a hidden section, a drum voice with an offset, shift, gains and
+  chances, the file with A-B repeat, the high pass, the loop guard, analysis at
+  the 256 window -- through the engine in blocks of 2048, 4096, 64, `1,2,3`
+  and `256,1000,17,4096,1,3000,2048,511`. Output, final beat, sample stamps
+  and values, and every analysis stream came out **bit-identical**. What is
+  *not* invariant is only what is deliberately per callback: when a config
+  change, a reset or a measurement's start lands, when the levels are
+  published, and the bleed readout's smoothing, which is per callback and so
+  would read smoother at iOS's smaller blocks.
+- **`MAX_BLOCK_FRAMES` is 4096 and everything downstream is sized for it.**
+  The display drain floors (`VISUAL_RESERVE_FRAMES` is two of them, times the
+  row width; `ANALYSIS_RESERVE_HOPS` four at the shortest hop, times the bins
+  and the channels), the recorder (two seconds, far over), the input backlog
+  and the queues' capacity. A backend handed more splits it and calls
+  `process` per piece -- exact, by the invariance above. macOS asks for 2048,
+  with a `const` assert that it fits.
+  - **The visual floor was wrong before this**: in raw values rather than
+    frames times width, so it held two callbacks for one channel and *less
+    than one* for three -- and since a poll usually lands between callbacks and
+    drains nothing, the floor is what the next callback actually gets. Three
+    visible channels meant the callback growing the vector itself. `DrainSizes`
+    now carries the width.
+- **One lock over all the input queues**, not one per channel. Both callbacks
+  used to build a `Vec` of guards every callback -- an allocation on each audio
+  thread -- and one lock is also what keeps the channels in step: they are
+  pushed and popped a frame at a time together. The queues are built with
+  capacity for the backlog cap plus two blocks, and the input callback drops
+  the oldest sample rather than growing past it -- which only happens if the
+  render side has stopped altogether.
+- **The rng is a `StdRng`, not `thread_rng`.** `ThreadRng` reseeds from the OS
+  every 64 KiB of output -- a system call on the audio thread every few seconds
+  of click -- and is `!Send`, so an engine holding it could not be built on
+  one thread and handed to another, which is exactly what step 3's in-process
+  restart does. Same ChaCha12 underneath. A `const` assert keeps `Engine`
+  `Send`.
+- **The rate is handed in**, not read from `sample_rate()`: the engine, its
+  `Analyzer` and its `LoopGuard`s take the number they were built with. The
+  global is still what the commands, `get_loop_spacing`, the calibration and
+  the decoders read -- step 3's job -- but the engine is already per-rate.
+- **A drum hit past `MAX_SOUNDING` (512) ringing at once is dropped** rather
+  than the vector grown. The only behaviour change, and only reachable when
+  something has gone wrong enough that one missing hit is not the problem.
 
 ### The high pass
 
@@ -1758,10 +1847,12 @@ The input and output devices are chosen in the panel (signal tab → *device*) a
 applied **at the next launch**, not live. `restart_app` is the button; ⌘⇧R is
 the same thing from the menu.
 
-- **Not hot-swappable, on purpose.** `set_render_callback` at `main.rs:188` is a
-  `move` closure that *owns* `input_frame`, `loop_visual`, `analyzer`,
-  `bus_delay`, `drum_last_beats`, `tap_gains` and the consumer queues -- all of
-  them sized from `input_channels`. Swapping a device means resizing every one
+- **Not hot-swappable, on purpose.** The `Engine` (`engine.rs`) *owns*
+  `input_frame`, `loop_visual`, `analyzer`, `bus_delay`, `drum_last_beats`,
+  `tap_gains`, and the render callback owns it and the consumer queues -- all
+  of them sized from `input_channels`. (Since the core/platform split the way
+  out is a fresh `Engine` built off-thread and swapped in, which is step 3 of
+  `docs/ios-port.md`.) Swapping a device means resizing every one
   of them from outside the callback, which means a lock the audio thread can
   wait on. That is precisely the hazard `DrainSizes` and the pre-sized swap
   buffers exist to remove. A two-second relaunch is the cheaper trade.
@@ -2788,7 +2879,7 @@ are **synthetic buses**, in the order the frontend labels them:
      inputs        bus N      bus N+1    bus N+2
 ```
 
-The frontend's `channelLabels` order **must** match how `main.rs` fills them.
+The frontend's `channelLabels` order **must** match how `engine.rs` fills them.
 Only real inputs are pannable — the buses aren't routed.
 
 The sample stream is flattened — `{channels, beats, values}`, one beat per frame
@@ -3306,7 +3397,7 @@ cargo run --release --example onsets -- synth samples/snare.wav --at 20000,60000
 ```
 
 - **It drives the real `Analyzer`, frame by frame, in exactly the order
-  `main.rs` does** -- `push`, `note_hop_beat`, `analyze_into`, `pick_onset`,
+  `engine.rs` does** -- `push`, `note_hop_beat`, `analyze_into`, `pick_onset`,
   `advance_hop`. What it reports is what the app would have drawn.
 - **Onsets come out in frames because `beats_per_sample` is 1.** The analyzer
   stamps in beats, so feeding it 1 and a hop stamp in frames makes "beats" *be*
@@ -4068,7 +4159,8 @@ See *Updates*.
   `get_loop_buffer_size.rs` -- about 1500 lines, including the beat clock, the
   FFT, the flux, the onset picker and the matched filter -- are pure logic and
   port unchanged. The damage is concentrated in `io_channels.rs` (428 lines, 31
-  Core Audio calls) and the setup half of `main.rs`. Two blockers and three
+  Core Audio calls) and the setup half of `main.rs` -- since 2026-09-25 both are
+  `platform/macos/`, behind `engine.rs`. Two blockers and three
   consequences:
   - **Tauri v1 has no mobile support.** Done 2026-09-25 -- see *Tauri v2*. It was: allowlist to
     the capabilities model, `tauri::api::path` into plugins, a new config
