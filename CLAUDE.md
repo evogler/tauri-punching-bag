@@ -10,6 +10,8 @@ first, what was measured. This file is the working summary; *Italic names* below
 are section headings there. Other long versions: `docs/presets.md`,
 `docs/calibration.md`, `docs/onsets.md`, `docs/pane-layout.md`,
 `docs/drum-grid.md`, `docs/approachability.md`.
+**`docs/ios-port.md` is the current plan of work** -- read it before touching the
+audio layer, the Tauri config or the build.
 
 ## Commands
 
