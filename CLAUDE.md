@@ -383,12 +383,19 @@ Each has a full section in `docs/design-notes.md`.
 
 - **Looper**: multi-tap delay, one buffer per input, `loop_echoes` taps with
   compounding `loop_echo_gain` (gain 0 silences echoes after the first -- check
-  this first when echoes "do nothing"). `loop_written` voids pre-restart audio
-  (and picture: a tap landing on `p` is a whole buffer back, not 0).
-  Record cycles gate the *write* with silence, asked of the visual beat, list
-  starts silent.
+  this first when echoes "do nothing"). `loop_written` = 0 voids the take
+  (audio and picture: a tap landing on `p` is a whole buffer back, not 0) --
+  **only when its meaning changes**: `loop_meaning_changed` (bpm,
+  beatsToLoop, loopEchoes, bufferCompensation) makes `set_config`
+  `remeasure` the buffer and bump `LoopBuffer::generation`, which the
+  callback compares once per callback; and Restart. **Not at a practice-cycle
+  wrap** -- the looper runs straight through. Record cycles and a section's
+  `record: false` gate the *write* with silence (ANDed), asked of the visual
+  beat; the record-cycle list starts silent.
 - **Practice cycle** (`sections`, `sectionsOn`, `sectionOrder`): at the wrap
-  `beat = 0`, file/analyzer reset, frontend rerolls. Everything including
+  `beat = 0`, file/analyzer reset, frontend rerolls; the looper is *not*
+  voided. `Section.record` (default true, serde default) turns the looper's
+  write off for that section. Everything including
   `display_start` is gated on `sectionsOn`. Drum voices are gated on the section
   the hit *sounds* in. `sections[].drums` indexes voices and is **not**
   re-indexed on voice delete (known bug).

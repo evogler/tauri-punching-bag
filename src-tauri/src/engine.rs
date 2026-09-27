@@ -113,12 +113,16 @@ pub struct EngineShared {
 ///   frontend rerolls on.
 /// - `loop_written` only when the loop buffer is kept -- a buffer cleared by
 ///   the restart has nothing written in it, which is what 0 says.
+/// - `loop_generation`, the `LoopBuffer::generation` last acted on, so a
+///   remeasure landing between the old engine's last block and the new one's
+///   first still voids the take.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Carry {
     pub beat: f64,
     pub last_beat: isize,
     pub cycle_count: u64,
     pub loop_written: usize,
+    pub loop_generation: u64,
 }
 
 impl Default for Carry {
@@ -128,6 +132,7 @@ impl Default for Carry {
             last_beat: -1,
             cycle_count: 0,
             loop_written: 0,
+            loop_generation: 0,
         }
     }
 }
@@ -140,6 +145,7 @@ pub struct EngineCarry {
     last_beat: AtomicI64,
     cycle_count: AtomicU64,
     loop_written: AtomicUsize,
+    loop_generation: AtomicU64,
 }
 
 impl EngineCarry {
@@ -150,6 +156,7 @@ impl EngineCarry {
             last_beat: AtomicI64::new(c.last_beat as i64),
             cycle_count: AtomicU64::new(c.cycle_count),
             loop_written: AtomicUsize::new(c.loop_written),
+            loop_generation: AtomicU64::new(c.loop_generation),
         }
     }
 
@@ -159,6 +166,7 @@ impl EngineCarry {
             last_beat: self.last_beat.load(Ordering::Acquire) as isize,
             cycle_count: self.cycle_count.load(Ordering::Acquire),
             loop_written: self.loop_written.load(Ordering::Acquire),
+            loop_generation: self.loop_generation.load(Ordering::Acquire),
         }
     }
 
@@ -167,6 +175,7 @@ impl EngineCarry {
         self.last_beat.store(c.last_beat as i64, Ordering::Release);
         self.cycle_count.store(c.cycle_count, Ordering::Release);
         self.loop_written.store(c.loop_written, Ordering::Release);
+        self.loop_generation.store(c.loop_generation, Ordering::Release);
     }
 }
 
@@ -214,11 +223,17 @@ pub struct Engine {
     bounds: Vec<(f64, usize)>,
     // The same, for the looper's record cycle, and reused for the same reason.
     record_bounds: Vec<(f64, bool)>,
-    // How many frames have been written to the loop buffer since the cycle last
-    // restarted, saturating at its length. Clearing the buffer on a restart
-    // would be a multi-megabyte memset on the audio thread; suppressing the
-    // taps that would read across the restart is the same thing in O(1).
+    // How many frames have been written to the loop buffer since the take was
+    // last voided, saturating at its length. Clearing the buffer would be a
+    // multi-megabyte memset on the audio thread; suppressing the taps that
+    // would read across the void is the same thing in O(1). Voided when the
+    // recording stops meaning what it did -- a new tempo, loop length, echo
+    // count or compensation (`loop_generation`), or a Restart moving the bar
+    // under it -- and *not* at a practice-cycle wrap, which is the bar
+    // carrying on: the looper runs straight through.
     loop_written: usize,
+    // `LoopBuffer::generation` as last seen; a mismatch voids the take.
+    loop_generation: u64,
     cycle_count: u64,
     // One filter for the live signal and one for the looper's summed echoes.
     // Sized at construction because a device change builds a new engine, so
@@ -285,6 +300,7 @@ impl Engine {
             bounds: Vec::new(),
             record_bounds: Vec::new(),
             loop_written: carry.loop_written,
+            loop_generation: carry.loop_generation,
             cycle_count: carry.cycle_count,
             input_high_pass: (0..input_channels).map(|_| HighPass::new()).collect(),
             loop_high_pass: (0..input_channels).map(|_| HighPass::new()).collect(),
@@ -351,6 +367,7 @@ impl Engine {
             last_beat: self.last_beat,
             cycle_count: self.cycle_count,
             loop_written: self.loop_written,
+            loop_generation: self.loop_generation,
         });
     }
 
@@ -381,6 +398,7 @@ impl Engine {
             bounds,
             record_bounds,
             loop_written,
+            loop_generation,
             cycle_count,
             input_high_pass,
             loop_high_pass,
@@ -403,10 +421,25 @@ impl Engine {
         let beats_per_sample: f64 = config.bpm / sample_rate / 60f64;
         let mut mp3 = shared.mp3.lock().unwrap();
 
+        // `set_config` remeasured the buffer: a new tempo, loop length, echo
+        // count or compensation. What was recorded was played against the old
+        // one, so none of it may come back. Checked before any early return,
+        // so a change made while paused is acted on too.
+        if loop_buffer.generation != *loop_generation {
+            *loop_generation = loop_buffer.generation;
+            *loop_written = 0;
+        }
+
         if shared.reset_beat.load(std::sync::atomic::Ordering::Relaxed) {
             *beat = 0.0;
             *transport_epoch += 1;
             mp3.pos = 0.0;
+            // Restart moves the bar under the take: a phrase played on beat 3
+            // would come back one loop later on whatever beat that now is. So
+            // unlike a practice-cycle wrap -- where the bar simply carries on
+            // -- the take is voided. `pos` is left alone; only the distance
+            // back matters, and `loop_written` is what bounds it.
+            *loop_written = 0;
             // The cuts describe a room at a volume; nothing recorded before the
             // restart is going to play back, so they describe nothing.
             loop_guard.iter_mut().for_each(|g| g.reset());
@@ -751,6 +784,15 @@ impl Engine {
                 // learned from being at beat 7004, and resetting is what puts
                 // the drums, the file and the display cursor back on one.
                 //
+                // The looper is the exception and runs straight through: a
+                // wrap is the bar carrying on, not moving, so what was played
+                // in the last section comes back in the first one exactly a
+                // loop later. It used to be voided here ("the old tempo") --
+                // which, with two sections a loop long, threw away every
+                // second section's playing as if a record cycle were on. A
+                // reroll that really does change the tempo or the loop voids
+                // it through `loop_generation` instead, a few ms in.
+                //
                 // The reroll cannot happen here: parameters live in the
                 // frontend, which is told by way of `cycle` on the sample
                 // stream. That lands a few milliseconds into the new cycle, so
@@ -764,10 +806,6 @@ impl Engine {
                     // A window stitched across the jump is a spectral edge
                     // nobody played, the same as at a manual reset.
                     analyzer.reset();
-                    // Nothing recorded before the restart may be played back:
-                    // it was at the old tempo, against a different bar.
-                    *loop_written = 0;
-                    loop_buffer.pos = 0;
                     *cycle_count += 1;
                     state_vec.cycle = *cycle_count;
                 }
@@ -941,8 +979,16 @@ impl Engine {
                 // be written is what was played `buffer_compensation` frames
                 // ago: gating on the output clock would record a window ~98 ms
                 // off from the beats it names, which is most of a 16th.
-                let loop_recording = !record_cycle_on
-                    || recording_at(&record_bounds, visual_beat, record_cycle);
+                //
+                // A section with `record` off writes silence the same way, and
+                // the two combine as AND. Also the visual beat, like `show`: a
+                // negative one just after a wrap reduces into the last section,
+                // which is where that audio was played.
+                let loop_recording = (!record_cycle_on
+                    || recording_at(&record_bounds, visual_beat, record_cycle))
+                    && (!sections_on
+                        || section_at(&bounds, visual_beat, cycle_beats)
+                            .map_or(true, |i| config.sections[i].record));
                 let loop_len = loop_buffer.channels.first().map_or(0, |c| c.len());
                 if loop_len > 0 {
                     let p = loop_buffer.pos;

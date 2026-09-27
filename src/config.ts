@@ -159,6 +159,13 @@ export type Section = {
   // the playing does. Optional, so a section written before this loads
   // unchanged -- the same treatment `VisualGrid.alpha` gets.
   show?: boolean;
+  // Whether the looper takes in what is played during this stretch. Off, it
+  // writes silence -- the record cycle's rule, ANDed with it -- so a turn
+  // played along with the drums comes back in a silent section without the
+  // silent section's playing coming back over the next turn. Optional and read
+  // through `sectionRecords`, so every section written before this records, and
+  // Rust defaults it to true for the same reason.
+  record?: boolean;
   // Which drum voices sound, by index, the same convention a pane's `channels`
   // uses. So a count-off is an ordinary voice with its own rhythm, and nothing
   // here needs a rhythm or a sound of its own.
@@ -166,6 +173,7 @@ export type Section = {
 };
 
 export const sectionShown = (section: Section) => section.show !== false;
+export const sectionRecords = (section: Section) => section.record !== false;
 
 // One cell of a drum grid: how likely that column is to sound, and how loud.
 //

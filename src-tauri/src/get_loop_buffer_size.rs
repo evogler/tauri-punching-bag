@@ -34,3 +34,15 @@ pub fn get_loop_buffer_size(config: &Config, sample_rate: f64) -> usize {
     // history has to be that long.
     get_loop_spacing(config, sample_rate) * loop_echo_count(config)
 }
+
+/// Whether a new config changes what a recorded frame *means*: its length in
+/// frames, how far back the taps read, or where against the bar it was played.
+/// Exactly these void the take (`LoopBuffer::remeasure`); anything else -- a
+/// reroll that leaves them alone, a section switch, the looper's own on/off --
+/// keeps it playing.
+pub fn loop_meaning_changed(old: &Config, new: &Config) -> bool {
+    new.bpm != old.bpm
+        || new.beats_to_loop != old.beats_to_loop
+        || new.loop_echoes != old.loop_echoes
+        || new.buffer_compensation != old.buffer_compensation
+}

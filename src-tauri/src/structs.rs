@@ -190,6 +190,14 @@ pub struct Section {
     /// existed loads unchanged -- the same treatment `DrumVoice::shift` gets.
     #[serde(default = "drawn")]
     pub show: bool,
+    /// Whether the looper takes in what is played during this stretch. Off,
+    /// silence is written instead -- the record cycle's rule, and ANDed with
+    /// it -- so a phrase played in a recorded section comes back over this one
+    /// without what is played here coming back later. Asked of the visual
+    /// beat, like `show`. Defaulted true for the same reason `show` is: every
+    /// section written before this recorded.
+    #[serde(default = "drawn")]
+    pub record: bool,
     /// Which drum voices sound, by index into `Config::drums` -- the same
     /// convention a pane's `channels` uses. A count-off is therefore an
     /// ordinary voice with its own rhythm, which is why nothing here needs a
@@ -204,6 +212,27 @@ fn drawn() -> bool {
 pub struct LoopBuffer {
     pub channels: Vec<Vec<f32>>,
     pub pos: usize,
+    /// Bumped whenever what the recording *means* changes -- the tempo, the
+    /// loop length or echo count, `buffer_compensation` -- which is also when
+    /// `set_config` resizes it. The engine compares it once per callback and
+    /// voids everything written before (`loop_written = 0`), so a phrase
+    /// played at the old tempo never comes back at the new one. A counter
+    /// under the lock the callback already takes, rather than a flag the
+    /// callback would have to clear: no new lock, and a restart's new engine
+    /// learns it from `Carry` without a race.
+    pub generation: u64,
+}
+
+impl LoopBuffer {
+    /// Resize for a new meaning, and say so. The old contents stay in the
+    /// prefix; nothing reads them, because the generation voids them.
+    pub fn remeasure(&mut self, size: usize) {
+        for channel in self.channels.iter_mut() {
+            channel.resize(size, 0.0);
+        }
+        self.pos = 0;
+        self.generation = self.generation.wrapping_add(1);
+    }
 }
 
 pub struct LoopBufferState(pub Arc<Mutex<LoopBuffer>>);

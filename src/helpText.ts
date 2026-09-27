@@ -270,7 +270,7 @@ export const HELP: Record<string, HelpEntry> = {
 
   sectionsOn: {
     title: "Run the cycle",
-    body: "Plays the sections below in order, then starts over: every random parameter rerolled, the beat back to 1, the looper cleared. Off, everything sounds continuously.",
+    body: "Plays the sections below in order, then starts over: every random parameter rerolled and the beat back to 1. The looper carries on across the restart -- it only starts afresh if the tempo or the loop length changes. Off, everything sounds continuously.",
   },
   "sections.on": {
     title: "Use this section",
@@ -288,6 +288,10 @@ export const HELP: Record<string, HelpEntry> = {
   "sections.show": {
     title: "Show",
     body: "Whether this stretch is drawn. Off, the cursor holds still through it -- a count-off with Show off means the groove starts at the top of the pane.",
+  },
+  "sections.record": {
+    title: "Record",
+    body: "Whether the looper takes in what you play during this section. Off, it records silence here, so what you played in a recorded section comes back over this one and what you play here never comes back. Combines with Record in cycles: both have to say record.",
   },
   "sections.drums": {
     title: "What sounds",

@@ -947,6 +947,17 @@ fields, all eight examples). The two originals are byte-identical.
     negative visual beat reduces into the last (silent) section. That is the
     open *Whether this belongs on `Section`* question under *Recording in
     cycles*, and this example is a concrete case for it.
+  - **Superseded the same day.** The owner rebuilt it on the practice cycle
+    after all (two `cycle`-beat sections, drums in the first, loop `cycle`),
+    which exposed the wrap voiding the looper; the wrap no longer voids and
+    `Section.record` exists (see *The practice cycle*). The shipped example's
+    silent section has `record: false` -- edited in the JSON by hand, which is
+    fine for a boolean (the never-hand-write rule is about `inputText`/`val`
+    pairs). Driven through the real `Engine` from the example's own config at
+    44.1 and 48 kHz with compensation 4330 and 2200, looper on: every echo
+    frame came from the drums half and was exactly one loop late; the silent
+    half was fully covered after the first cycle; at most 2 boundary frames
+    of echo landed in the drums half.
 - **Found while testing: a drum voice whose first note is not at 0 fires a
   stray hit at beat 0** at launch, after Restart and at every practice-cycle
   wrap. The transport-start seeding (`hit - 1`) assumes the hit current at
@@ -2623,7 +2634,7 @@ practice session is long.
 ### The practice cycle
 
 `sections: Section[]` plus `sectionsOn`, in the Rust config. A section is *how
-long, and what sounds*: `{ on, beats, click, drums[] }`. They run in order and
+long, and what sounds*: `{ on, beats, click, show, record, drums[] }`. They run in order and
 then start again from the top. A count-off is a section, a groove is a section,
 a pause is a section with nothing on.
 
@@ -2693,13 +2704,60 @@ a pause is a section with nothing on.
 - **At the wrap, time genuinely restarts**: `beat = 0`, the file position, the
   analyzer. Nothing is learned from being at beat 7004, and resetting is what
   puts the drums, the file and the display cursor back on one.
-- **Nothing recorded before a restart may play back** -- it was at the old
-  tempo, against a different bar. Clearing the loop buffer would be a
-  multi-megabyte memset on the audio thread, so `loop_written` counts frames
-  since the restart and a tap reading further back than that contributes
-  nothing. Same effect, O(1). The read distance is computed from the resolved
-  index rather than from `back`, because the audio taps are offset by
-  `buffer_compensation` and read a different distance than the visual ones.
+- **...except the looper, which runs straight through the wrap** (2026-09-27,
+  the owner's call). The rule used to be *nothing recorded before a restart
+  may play back* -- "it was at the old tempo, against a different bar" -- and
+  every wrap set `loop_written = 0` and `loop_buffer.pos = 0`. But a wrap is
+  the bar *carrying on*, and the old tempo is only old if a reroll changed it.
+  What it did in practice: with two sections a loop long, section 1 echoed
+  into section 2 and section 2's playing was thrown away at every wrap, which
+  looked exactly like a record cycle nobody had switched on. Resetting `pos`
+  was wrong on its own account too -- the taps read a *distance* back from it.
+- **Voiding is now tied to what the recording means, not to the wrap.**
+  `loop_meaning_changed` in `get_loop_buffer_size.rs` names the four things
+  that change it -- `bpm`, `beatsToLoop`, `loopEchoes`, `bufferCompensation`
+  -- which are exactly the ones `set_config` already resized the buffer on.
+  That resize is now `LoopBuffer::remeasure`, which also bumps
+  `LoopBuffer::generation`; the engine compares it with the generation it
+  last saw once per callback, under the loop-buffer lock it already takes, and
+  a mismatch is `loop_written = 0`. No new lock, no allocation, and a reroll
+  that lands a few ms after a wrap voids the take only if it moved one of the
+  four. The generation rides in `Carry`, so a remeasure between an old
+  engine's last block and a new one's first (an audio restart) is not lost.
+  `loop_written` is still how the void works: clearing the buffer would be a
+  multi-megabyte memset on the audio thread; a tap reading further back than
+  `loop_written` contributes nothing. The read distance is computed from the
+  resolved index rather than from `back`, because the audio taps are offset
+  by `buffer_compensation` and read a different distance than the visual ones.
+- **Restart (`reset_beat`) now voids too**, which it never did -- the design
+  notes had already recorded the half after a Restart replaying "up to a turn
+  of what was recorded before it, out of place", while the code beside the
+  loop guard's reset claimed nothing recorded before it would play. A Restart
+  is the one transport event that moves the bar *under* the take (a phrase
+  played on beat 3 would come back on whatever beat that now is), so under the
+  new rule it is exactly a change of meaning. `pos` is left alone.
+- **A section can stop the looper recording** (`record`, default true). Off,
+  the looper writes silence during it -- the record cycle's rule, and ANDed
+  with the record cycle -- so what was played in a recording section comes
+  back over it and what is played in it never comes back. Asked of the visual
+  beat, like `show`: a negative visual beat just after a wrap reduces into the
+  last section, which is where that audio was played. `#[serde(default)]` in
+  Rust and optional in TS (`sectionRecords`), so every existing session,
+  preset and example records in every section with no migration.
+  - Temp-tested through the real `Engine` (run, then deleted), 1024 Hz at
+    60 bpm so a beat is exactly 1024 frames, two 4-beat sections, a 4-beat
+    loop, one echo, compensation 300, input frame *m* carrying the value
+    *m+1*: with both sections recording every output frame after the first
+    loop is input from exactly one loop earlier, section 2 heard in the next
+    cycle's section 1; with section 2 off only section 1 comes back, in
+    section 2, and section 1 hears silence; bpm / beatsToLoop / echoes /
+    compensation changes and a Restart just after a wrap leave nothing from
+    before playing back, while a looper-neutral change keeps it; the picture
+    at *n* equals the sound at *n - compensation* everywhere except the
+    compensation frames after a Restart (1 and 3 echoes, six wraps); a record
+    cycle of `2` and section 2 off combine frame for frame as AND; and with
+    sections off the output is a plain delay, identical whatever the section
+    flags say and identical to sections on with everything recording.
 - **The reroll cannot happen in the callback**, because parameters live in the
   frontend. The callback counts wraps into `VisualSamples::cycle`; the frontend
   already polls that stream 100 times a second and rerolls when the number
@@ -2789,8 +2847,9 @@ suppressing it, and gives up continuous recording to do it.
   the recursive-feedback looper this one was deliberately not built as. Zeroing
   costs the same store and is exactly what the looper-off branch already does.
 - **`loop_written` needs nothing.** Every position is still written every frame,
-  so "this far back is post-restart" still holds, and a beat restart still voids
-  everything before it whatever phase the cycle was in.
+  so "this far back is still the same take" still holds, and a void (see *The
+  practice cycle*) still voids everything before it whatever phase the record
+  cycle was in.
 - **Asked of the *visual* beat, not `beat`.** What is about to be written is
   what was played `buffer_compensation` frames ago, so gating on the output
   clock would record a window ~98 ms off from the beats the field names -- most
@@ -2809,13 +2868,13 @@ suppressing it, and gives up continuous recording to do it.
 - **Nothing usable means record.** An empty or nonsense list must not quietly
   stop the looper taking anything in -- the failure you can hear is the safer
   one. Like `sectionOrder`, the field cannot be typed back to empty.
-- **Whether this belongs on `Section` is still open**, and is deliberately left
-  that way. A section is already "for this many beats, these sound" and already
-  takes a list, and two independent cycle mechanisms both gating the looper is
-  the tangle `clickToggle` was retired to avoid. But a section wrap also
-  restarts the beat, rerolls the parameters and voids the loop buffer, and a
-  record cycle that has to run *across* those cannot be a section. Standalone
-  keys for now, so the decision is still available.
+- **Whether this belongs on `Section` -- answered 2026-09-27: both.** A
+  section now has its own `record` switch (see *The practice cycle*), which
+  covers the common case -- record the groove, not the silence -- without a
+  second list to keep in step with the sections. The record cycle stays for a
+  pattern that runs *across* sections or with none, and the two combine as
+  AND. What made the section flag possible is that a wrap no longer voids the
+  loop buffer.
 
 #### Stopping the loop running away
 

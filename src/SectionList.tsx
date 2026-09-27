@@ -6,6 +6,7 @@ import {
   cycleSteps,
   drumLabel,
   sectionBeats,
+  sectionRecords,
   sectionShown,
 } from "./config";
 import { Params, evaluate, parseNumberList } from "./expression";
@@ -25,6 +26,7 @@ export const makeSection = (drums: DrumVoice[]): Section => ({
   beats: { inputText: "4", val: 4 },
   click: true,
   show: true,
+  record: true,
   // A new section starts with everything sounding, which is the section you
   // most often want; a count-off or a pause is then a matter of turning things
   // off rather than hunting for what to turn on.
@@ -66,7 +68,9 @@ const SectionRow = ({
     });
 
   return (
-    <div style={{ ...rowStyle, opacity: section.on ? 1 : 0.45 }}>
+    // A lane: below 1000px the drum parts take a line of their own, and on a
+    // phone the switches do too (`.section-switches` in index.css).
+    <div style={{ ...rowStyle, opacity: section.on ? 1 : 0.45 }} className="lane">
       <input
         type="checkbox"
         checked={section.on}
@@ -92,32 +96,54 @@ const SectionRow = ({
         {...help("sections.beats")}
         style={{ width: "5em", ...invalidBorder(invalid) }}
       />
-      <label
-        style={{ display: "flex", alignItems: "center", gap: "2px" }}
-        {...help("sections.click")}
+      {/* One group, so a phone can give the three switches a line of
+          their own rather than letting Record and the remove button
+          fall wherever the row happens to break. */}
+      <div
+        style={{ display: "flex", alignItems: "center", gap: "4px" }}
+        className="section-switches"
       >
-        <input
-          type="checkbox"
-          checked={section.click}
-          onChange={() => onChange({ ...section, click: !section.click })}
-        />
-        <span style={{ fontSize: "0.85em" }}>Click</span>
-      </label>
-      <label
-        style={{ display: "flex", alignItems: "center", gap: "2px" }}
-        {...help("sections.show")}
-      >
-        <input
-          type="checkbox"
-          checked={sectionShown(section)}
-          onChange={() =>
-            onChange({ ...section, show: !sectionShown(section) })
-          }
-        />
-        <span style={{ fontSize: "0.85em" }}>Show</span>
-      </label>
+        <label
+          style={{ display: "flex", alignItems: "center", gap: "2px" }}
+          {...help("sections.click")}
+        >
+          <input
+            type="checkbox"
+            checked={section.click}
+            onChange={() => onChange({ ...section, click: !section.click })}
+          />
+          <span style={{ fontSize: "0.85em" }}>Click</span>
+        </label>
+        <label
+          style={{ display: "flex", alignItems: "center", gap: "2px" }}
+          {...help("sections.show")}
+        >
+          <input
+            type="checkbox"
+            checked={sectionShown(section)}
+            onChange={() =>
+              onChange({ ...section, show: !sectionShown(section) })
+            }
+          />
+          <span style={{ fontSize: "0.85em" }}>Show</span>
+        </label>
+        <label
+          style={{ display: "flex", alignItems: "center", gap: "2px" }}
+          {...help("sections.record")}
+        >
+          <input
+            type="checkbox"
+            checked={sectionRecords(section)}
+            onChange={() =>
+              onChange({ ...section, record: !sectionRecords(section) })
+            }
+          />
+          <span style={{ fontSize: "0.85em" }}>Record</span>
+        </label>
+      </div>
       <div
         style={{ display: "flex", gap: "2px", flex: 1, flexWrap: "wrap" }}
+        className="lane-field"
         {...help("sections.drums")}
       >
         {drums.map((voice, i) => (
@@ -181,7 +207,10 @@ export const SectionList = ({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
       {sections.length > 0 && (
-        <div style={{ ...rowStyle, color: ui.text.muted, fontSize: "0.8em" }}>
+        <div
+          style={{ ...rowStyle, color: ui.text.muted, fontSize: "0.8em" }}
+          className="lane-headings"
+        >
           <span style={{ width: "1.2em" }} />
           <span style={{ width: "2em" }} {...help("sections.number")}>#</span>
           <span style={{ width: "5em" }} {...help("sections.beats")}>Beats</span>
@@ -228,7 +257,8 @@ export const SectionList = ({
           <span style={{ color: ui.text.muted, fontSize: "0.8em" }}>
             {steps.map((s) => s.section + 1).join(" ") || "nothing"} --{" "}
             {Number(cycle.toPrecision(6))} beats, then it starts again: every
-            random parameter rerolled, the beat back to one, the looper cleared.
+            random parameter rerolled and the beat back to one. The looper runs
+            straight through.
           </span>
         ) : (
           <span style={{ color: ui.text.muted, fontSize: "0.8em" }}>

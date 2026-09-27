@@ -2,7 +2,7 @@ use crate::analysis::{BINS, MAX_ANALYSIS_CHANNELS};
 use crate::audio_host::AudioHostState;
 use crate::calibration::{analyze, CalibrationPhase, CalibrationResult};
 use crate::constants::{ANALYSIS_RESERVE_HOPS, ONSET_RESERVE, VISUAL_RESERVE_FRAMES};
-use crate::get_loop_buffer_size::get_loop_buffer_size;
+use crate::get_loop_buffer_size::{get_loop_buffer_size, loop_meaning_changed};
 use crate::platform::{list_devices, ActiveDevices, AudioDeviceInfo};
 use crate::structs::AudioStatus;
 use crate::prefs::{load as load_prefs, save as save_prefs, AudioPrefs};
@@ -563,10 +563,7 @@ pub fn set_config(app_handle: tauri::AppHandle, new_config: Config) {
         host.0.rate()
     };
 
-    let should_update_loop_buffer = new_config.bpm != config.bpm
-        || new_config.beats_to_loop != config.beats_to_loop
-        || new_config.loop_echoes != config.loop_echoes
-        || new_config.buffer_compensation != config.buffer_compensation;
+    let should_update_loop_buffer = loop_meaning_changed(&config, &new_config);
     #[cfg(target_os = "ios")]
     let paused_changed = new_config.paused != config.paused;
     *config = new_config;
@@ -597,10 +594,10 @@ pub fn set_config(app_handle: tauri::AppHandle, new_config: Config) {
         let new_buffer_size = get_loop_buffer_size(&c, rate);
         let loop_buffer_state: tauri::State<LoopBufferState> = app_handle.state();
         let mut loop_buffer = loop_buffer_state.0.lock().unwrap();
-        for channel in loop_buffer.channels.iter_mut() {
-            channel.resize(new_buffer_size, 0.0);
-        }
-        loop_buffer.pos = 0;
+        // Voids the take as well as resizing: each of these four changes
+        // what a recorded frame means against the bar, whenever it happens --
+        // a reroll lands here a few ms after a practice-cycle wrap.
+        loop_buffer.remeasure(new_buffer_size);
         log::info!("new loop buffer size: {}", new_buffer_size);
     }
 

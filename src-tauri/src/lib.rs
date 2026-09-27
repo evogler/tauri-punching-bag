@@ -343,6 +343,7 @@ pub fn run() {
     let loop_buffer = LoopBuffer {
         channels: vec![vec![0f32; loop_buffer_size]; input_channels],
         pos: 0,
+        generation: 0,
     };
     let loop_buffer_mutex_arc = Arc::new(Mutex::new(loop_buffer));
     let loop_buffer_state = LoopBufferState(loop_buffer_mutex_arc.clone());

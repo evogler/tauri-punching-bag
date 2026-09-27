@@ -204,8 +204,8 @@ const migrateRust = (rust: Record<string, unknown>): Record<string, unknown> => 
       ? (out.drums as unknown[]).map((_, i) => i)
       : [];
     out.sections = [
-      { on: true, beats, click: true, show: true, drums },
-      { on: true, beats, click: false, show: true, drums: [] },
+      { on: true, beats, click: true, show: true, record: true, drums },
+      { on: true, beats, click: false, show: true, record: true, drums: [] },
     ];
     out.sectionsOn = true;
   }

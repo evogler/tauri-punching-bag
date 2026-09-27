@@ -405,6 +405,12 @@ label {
     width: auto !important;
     min-width: 0;
   }
+  /* A practice-cycle section's Click / Show / Record: a line of their own
+     between the length and the drum parts, which is what fits at 375px. */
+  .lane > .section-switches {
+    order: 1;
+    flex: 1 1 100%;
+  }
   /* No keyboard shortcut is reachable from a phone, so neither the rail nor
      the scene list spends width on the digits, and the rail spends less on
      padding. */
