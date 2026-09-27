@@ -502,6 +502,9 @@ silently doing nothing, everywhere.
 ## Known issues
 
 - `sections[].drums` isn't re-indexed when a drum voice is deleted.
+- A drum voice whose first note isn't at 0 (`1 r, 1`, a shift) fires a stray
+  hit at beat 0 at launch, Restart and every cycle wrap; the oldest *visual*
+  loop tap is never voided by a wrap. See *The six added 2026-09-27*.
 - Device picker `describe()` shows input channel count in the output list.
 - Output channel count `2` is a magic literal; untangle before channel work.
 - Click counter ticks twice per frame (`400` is really 200 frames).

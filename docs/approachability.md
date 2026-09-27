@@ -90,19 +90,23 @@ Read-only presets bundled with the app, each one teaching one idea, each with a
 title, a one-line description and a "try this" line.
 
 **Started 2026-09-19**: the picker, the store and the authoring script are
-built, with the first two examples in. The rest of this table is the queue --
-each one is now an afternoon in the app rather than a piece of code. See
-*Built-in examples* in CLAUDE.md for the mechanism.
+built, with the first two examples in. **Six more added 2026-09-27** (for
+sending the app to a friend), generated the same way. The table is in picker
+order; the last two rows are still the queue. See *Built-in examples* in
+CLAUDE.md for the mechanism.
 
-| Example | Teaches | Try this |
-|---|---|---|
-| Just a metronome | tempo, click, pause | change the bpm |
-| 16ths against the grid | rows, grids, what the picture means | play on the lines |
-| 3 against 4 | two panes, different rulings | watch one phrase against both |
-| Count-off, then groove | the practice cycle | change the order |
-| Loop yourself | looper, echoes | play a phrase, then play over it |
-| Play along with a song | file player, file beats, a–b repeat | choose a file |
-| Speakers, not headphones | speaker bleed | measure, then play |
+| Example | Teaches | Try this | |
+|---|---|---|---|
+| Just a metronome | tempo, click, pause | change the bpm | built |
+| 16ths against the grid | rows, grids, what the picture means | set `n` to 12 | built |
+| Basic backbeat | the built-in kit, one bar per row | play the snare part on the yellow lines | built |
+| Basic swing | a swung pulse from one parameter | set `swing` to 0.67, or 0.5 | built |
+| Count-off, then groove | the practice cycle | change the order to `1, 2, 3` | built |
+| Loop yourself | looper, echoes | play a phrase, then play over it | built |
+| Backbeat on/off | looper + record cycle, one parameter | set `bars` to 1 or 4 | built |
+| 3 against 4 | two panes, different rulings | play the three, watch both panes | built |
+| Play along with a song | file player, file beats, a–b repeat | choose a file | |
+| Speakers, not headphones | speaker bleed | measure, then play | |
 
 Advanced, listed after a divider in the picker:
 

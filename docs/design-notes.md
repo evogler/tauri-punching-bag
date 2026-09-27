@@ -893,6 +893,79 @@ towards and why examples come before a tour.
 - **Not collapsed, unlike Presets and Parameters.** The one part of the panel
   whose whole job is to be found by somebody who has just opened the app.
 
+#### The six added 2026-09-27
+
+Basic backbeat, basic swing, count-off then groove, loop yourself, backbeat
+on/off and 3 against 4 -- for sending the app to a friend, so kit sounds only,
+input 0 only, one idea each. Generated like the first two: from the real
+defaults through `parser2`, `parseNumberList`, `rowPerNotePatch` and
+`resolveConfigs` in a temp test, merged with `yarn example:add`, then every
+`inputText` re-parsed against its `val` after a simulated `loadPreset` (552
+fields, all eight examples). The two originals are byte-identical.
+
+- **Swing is `swing = 0.6`**, the long note's share of each beat: audibly
+  swung but short of triplet swing (0.67), which the try-this line offers along
+  with 0.5 for straight. The hi-hat is `swing, 1-swing`, the rows
+  `rowPerNotePatch` of the same division, and only the target grid is kept --
+  the half-way marker of a swung pair is written as literals and would stop
+  following `swing`.
+- **3 against 4 draws each ruling in both panes**, its own solid and the other
+  at half alpha, so the three is seen walking across the rows of the four and
+  vice versa. Click is the 4, snare the 3 (`3:bar`).
+- **Backbeat on/off does not use the practice cycle, and cannot.** The obvious
+  build -- a drums section and a silent section of `bars*4` each, the looper at
+  the same length, a record cycle of `bars*4` -- fails twice over: a record
+  cycle starts silent, so it records the *silent* half and plays nothing back
+  (simulated: 3 of 470,400 playback frames carried an echo); and without the
+  record cycle the section wrap has to void the loop, which it does, except
+  that the negative visual beats after every wrap land in the record cycle's
+  tail, which is always a recording phase -- ~`buffer_compensation` of the
+  previous cycle comes back at the end of every drums half. What ships instead
+  has no sections: each drum voice's `chances` is `0 x 2*bars, 1 x 2*bars`
+  (hats `8*bars`), so the kit is silent for `bars` bars and plays for `bars`
+  bars; the record cycle `bars*4` starts silent and so records exactly the
+  drums half; the loop is `bars*4`, so the echo lands exactly in the next
+  silent half. The cost is that it opens with `bars` bars of click before the
+  drums come in, which the description calls getting ready.
+  - **Driven through the real `Engine`** (temp Rust test, run and deleted) at
+    44.1 and 48 kHz, `bars` 1/2/3, compensation 4330 and 2200, over 2.5 cycles:
+    every echo frame was exactly one loop after it was played, came from a
+    drums half and sounded in a drums-off half; the drums-off halves were
+    covered bar at most two boundary frames; the drums sounded only in their
+    half, with the right hit counts. The configs came from resolving the
+    preset with `bars` changed, so the one-parameter claim is what was tested.
+  - **Edges.** The first `buffer_compensation` frames after launch fall in the
+    record cycle's tail (recording), so ~98 ms of whatever the mic heard at
+    launch plays at the very end of the opening click-only half, once. Restart
+    leaves the loop buffer alone (`reset_beat` does not touch `loop_written`),
+    so the half after a Restart can replay up to a turn of what was recorded
+    before it, out of place -- simulated at three quarters through a drums
+    half, 54k frames of it.
+  - **The smallest change that would let sections do it** is a `record` flag
+    on `Section`, asked of the visual beat like `show`: record in the drums
+    section, not in the silent one, and the wrap's void does the rest -- a
+    negative visual beat reduces into the last (silent) section. That is the
+    open *Whether this belongs on `Section`* question under *Recording in
+    cycles*, and this example is a concrete case for it.
+- **Found while testing: a drum voice whose first note is not at 0 fires a
+  stray hit at beat 0** at launch, after Restart and at every practice-cycle
+  wrap. The transport-start seeding (`hit - 1`) assumes the hit current at
+  beat 0 is a note *at* beat 0; for `1 r, 1` it is the previous cycle's last
+  note, index -1, and it fires. At a wrap the index jumps back and fires the
+  same way. A shift or a nudge does it too. (Launch simulated; the wrap and
+  Restart cases by reading.) Heard as an extra snare on the
+  first downbeat of *Basic backbeat* and *Backbeat on/off* (in the second it
+  lands in the click-only opening); *Count-off* is spared because its first
+  section mutes the drums. Not fixed here: the fix is in the seeding, to fire
+  at transport start only when the current hit's note sounds at or after
+  beat 0, and to reseed the same way on a wrap and a Restart.
+- **Also by reading, not tested: the oldest visual loop tap is never voided
+  after a restart.** `back = ((k+1) * spacing) % loop_len` is 0 for the last
+  tap, so its distance reads as 0 and always passes `<= loop_written`; the
+  audio taps are offset by the compensation and are voided correctly. With
+  one echo that is every visual echo, so after a practice-cycle wrap the pane
+  draws the previous cycle's last pass as an echo for one loop.
+
 ## Rhythm syntax
 
 Only ever documented in a comment at the top of the generated `parser2.js`, so
