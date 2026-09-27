@@ -17,6 +17,16 @@ import {
   isJsConfigKey,
   isRustConfigKey,
   usableRhythmVal,
+  BUSES,
+  ChannelGains,
+  ChannelId,
+  ChannelStyles,
+  getLegacyInputCount,
+  isBus,
+  isInputId,
+  legacyChannelId,
+  legacyDefaultColor,
+  setLegacyInputCount,
 } from "./config";
 import { formatNumberList } from "./expression";
 import { Rect, fitViews, readingOrderRect } from "./paneLayout";
@@ -286,14 +296,114 @@ export const hasPlacement = (view: unknown) =>
     Number.isFinite((view as Record<string, unknown>)[k] as number)
   );
 
+// Channels used to be named by device position, with the drums, click and file
+// buses at `inputs + 0/1/2` -- so the same number meant a different channel on
+// every device with a different input count. They are fixed ids now (see
+// `ChannelId` in config.ts), and the keys that held the old numbers were
+// renamed rather than reinterpreted, so an older build reading a new session
+// finds nothing it knows instead of misreading the drums as an input:
+//
+//   views[i].channels -> views[i].channelIds
+//   channelStyles     -> channelStyleById   (an array became a map by id)
+//   channelGains      -> channelGainById
+//   visibleChannels   -> packedChannels     (rust; derived, so only read here)
+//
+// The old numbers are read against the input count running when this first
+// sees them (`getLegacyInputCount`), which is what the old code assumed on
+// every launch. What it gets wrong: a session or preset saved on a device with
+// a different input count than the one running at the upgrade -- a pane saved
+// on a 4-input interface showing `ch 3`, migrated with the 1-input mic open,
+// becomes the click. The count was never recorded, so nothing can do better;
+// after this it is recorded by construction.
+const legacyChannelIds = (list: unknown[]): ChannelId[] =>
+  cleanChannelIds(
+    list
+      .map((i) => legacyChannelId(i, getLegacyInputCount()))
+      .filter((id): id is ChannelId => id !== null)
+  );
+
+// A new-style list, kept as it is -- an input the device doesn't have is kept,
+// never rewritten -- less anything that is not a channel at all, deduplicated
+// and in order.
+const cleanChannelIds = (list: unknown[]): ChannelId[] =>
+  Array.from(
+    new Set(
+      list.filter(
+        (id): id is ChannelId =>
+          typeof id === "number" && (isInputId(id) || isBus(id))
+      )
+    )
+  ).sort((a, b) => a - b);
+
+const isStyle = (s: unknown): s is { color: string; alpha: number } =>
+  typeof s === "object" &&
+  s !== null &&
+  typeof (s as { color?: unknown }).color === "string" &&
+  typeof (s as { alpha?: unknown }).alpha === "number";
+
+const migrateChannelKeys = (js: Record<string, unknown>) => {
+  const out = { ...js };
+  const inputs = getLegacyInputCount();
+  if (!("channelStyleById" in out) && Array.isArray(out.channelStyles)) {
+    const styles: ChannelStyles = {};
+    (out.channelStyles as unknown[]).forEach((style, i) => {
+      const id = legacyChannelId(i, inputs);
+      if (id !== null && isStyle(style)) styles[id] = style;
+    });
+    // A bus nobody coloured was drawn in the palette entry after the inputs.
+    // The buses have defaults of their own now, so the colour it was showing
+    // is written down -- the upgrade should not repaint the drums.
+    BUSES.forEach((id, k) => {
+      if (!styles[id])
+        styles[id] = { color: legacyDefaultColor(inputs + k), alpha: 1 };
+    });
+    out.channelStyleById = styles;
+  }
+  if (!("channelGainById" in out) && Array.isArray(out.channelGains)) {
+    const gains: ChannelGains = {};
+    (out.channelGains as unknown[]).forEach((gain, i) => {
+      const id = legacyChannelId(i, inputs);
+      if (id !== null && typeof gain === "number" && Number.isFinite(gain))
+        gains[id] = gain;
+    });
+    out.channelGainById = gains;
+  }
+  delete out.channelStyles;
+  delete out.channelGains;
+  return out;
+};
+
+// Whether a raw preset carries any of the old channel keys -- what decides
+// that the store is rewritten once after loading, so the old numbers are read
+// against one device, once, rather than against whichever is open at each
+// launch.
+const hasLegacyChannels = (raw: unknown) => {
+  if (typeof raw !== "object" || raw === null) return false;
+  const { rust, js } = raw as { rust?: Record<string, unknown>; js?: Record<string, unknown> };
+  if (rust && typeof rust === "object" && "visibleChannels" in rust) return true;
+  if (!js || typeof js !== "object") return false;
+  if (!("channelStyleById" in js) && "channelStyles" in js) return true;
+  if (!("channelGainById" in js) && "channelGains" in js) return true;
+  return (
+    Array.isArray(js.views) &&
+    (js.views as unknown[]).some(
+      (v) =>
+        typeof v === "object" &&
+        v !== null &&
+        "channels" in v &&
+        !("channelIds" in v)
+    )
+  );
+};
+
 // Merging over the defaults is what lets a view saved by an older build pick up
 // keys added since, the same way the top-level config already worked.
 const normalizeView = (
   view: unknown,
-  // What the session's channels were when every pane shared one list. A view
-  // saved before the split has none of its own, and defaulting it to channel 0
-  // would quietly drop whatever was on screen.
-  legacyChannels: number[],
+  // What the session's channels were when every pane shared one list, already
+  // as channel ids. A view saved before the split has none of its own, and
+  // defaulting it to channel 0 would quietly drop whatever was on screen.
+  legacyChannels: ChannelId[],
   // Where this pane sat before placement existed: its position in the array,
   // read left to right and then down. The defaults put every pane in the top
   // left cell, and merging a placement-less saved pane over that would stack
@@ -302,17 +412,26 @@ const normalizeView = (
   // layout. Derived rather than defaulted for exactly that reason.
   fallback: Rect
 ): ViewConfig => {
-  const base = { ...defaultViewConfig(), channels: legacyChannels };
+  const base = { ...defaultViewConfig(), channelIds: legacyChannels };
   if (typeof view !== "object" || view === null) return { ...base, ...fallback };
-  const merged = { ...base, ...(view as Partial<ViewConfig>) };
+  const { channels: oldChannels, ...rest } = view as Partial<ViewConfig> & {
+    channels?: unknown;
+  };
+  const merged = { ...base, ...rest };
   return {
     ...merged,
+    // The renamed key wins; the old one is read only when it is all there is,
+    // against the input count of the device running now.
+    channelIds: Array.isArray(rest.channelIds)
+      ? cleanChannelIds(rest.channelIds)
+      : Array.isArray(oldChannels)
+      ? legacyChannelIds(oldChannels)
+      : base.channelIds,
     ...(hasPlacement(view) ? {} : fallback),
     // A pane saved before names existed has none, and the merge above already
     // gives it the default; the guard is for a stored value of the wrong shape,
     // which the draw path would otherwise hand to `fillText`.
     name: typeof merged.name === "string" ? merged.name : base.name,
-    channels: Array.isArray(merged.channels) ? merged.channels : base.channels,
     beatsPerRow: wrapList(merged.beatsPerRow, base.beatsPerRow),
     rowColumns: clampRowColumns(merged.rowColumns),
     rowColorPattern: wrapList(merged.rowColorPattern, base.rowColorPattern),
@@ -349,16 +468,16 @@ const migratedChromeColors = (js: Record<string, unknown>) => {
 // puts the result through the one function that enforces the layout invariant.
 const migrateViews = (
   js: Record<string, unknown>,
-  legacyChannels: number[]
+  legacyChannels: ChannelId[]
 ): Record<string, unknown> => {
-  const out = migratedChromeColors(js);
+  const out = migrateChannelKeys(migratedChromeColors(js));
 
   if (!Array.isArray(out.views)) {
     const legacy: Partial<ViewConfig> = {};
     for (const key of LEGACY_VIEW_KEYS) {
       if (key in out) (legacy as Record<string, unknown>)[key] = out[key];
     }
-    out.views = [{ ...defaultViewConfig(), channels: legacyChannels, ...legacy }];
+    out.views = [{ ...defaultViewConfig(), channelIds: legacyChannels, ...legacy }];
     out.viewCols = 1;
     out.viewRows = 1;
   }
@@ -426,10 +545,11 @@ const sanitizePreset = (preset: unknown): Preset | null => {
       : {}
   );
   // The panes' channel lists are migrated from the rust side's, which is where
-  // channel visibility lived before it became per-pane.
+  // channel visibility lived before it became per-pane -- in the old numbering,
+  // since nothing new is ever written there.
   const legacyChannels = Array.isArray(rustOut.visibleChannels)
-    ? (rustOut.visibleChannels as number[])
-    : defaultRustConfig.visibleChannels;
+    ? legacyChannelIds(rustOut.visibleChannels as unknown[])
+    : defaultRustConfig.packedChannels;
   return {
     rust: pickKnownKeys<Partial<RustConfig>>(
       rustOut,
@@ -518,6 +638,8 @@ export type ParsedPresetFile = {
   skipped: number;
   /** Set when the *file* is unusable, in which case nothing is offered. */
   error?: string;
+  /** Entries that carried the old channel numbering and were migrated. */
+  legacy?: number;
 };
 
 /// A corrupt file is refused; a corrupt *entry* inside a good file is skipped
@@ -544,8 +666,10 @@ export const parsePresetFile = (text: string): ParsedPresetFile => {
 
   const presets: StoredPreset[] = [];
   let skipped = 0;
+  let legacy = 0;
   for (const entry of file.presets) {
     const raw = entry as Partial<StoredPreset> | null;
+    if (hasLegacyChannels(raw)) legacy++;
     const sanitized = raw ? sanitizePreset(raw) : null;
     if (!sanitized || typeof raw?.name !== "string" || !raw.name.trim()) {
       skipped++;
@@ -560,7 +684,7 @@ export const parsePresetFile = (text: string): ParsedPresetFile => {
       lastUsed: typeof raw.lastUsed === "string" ? raw.lastUsed : undefined,
     });
   }
-  return { presets, skipped };
+  return { presets, skipped, legacy };
 };
 
 export const formatPresetFile = (presets: StoredPreset[], app?: string) =>
@@ -654,6 +778,11 @@ export const loadStore = async (): Promise<StoreLoad> => {
       note: `presets.json could not be read (${parsed.error}); the old one is kept as ${moved}`,
     };
   }
+  // Old channel numbers are read against the device open now; written back at
+  // once so they are read against *one* device rather than a different one at
+  // every launch. Not when something was skipped: rewriting would drop the
+  // entries that could not be read, and this file is the only copy.
+  if (parsed.legacy && !parsed.skipped) await saveStore(parsed.presets);
   return {
     presets: parsed.presets,
     note: parsed.skipped
@@ -694,6 +823,23 @@ export const defaultPreset = (): Preset =>
 // by an older build can't drag dead keys back in. Transient keys are excluded by
 // makePreset, which is why relaunching never comes back paused or with a stale
 // canvas size.
+// Asked of Rust before the first render, because `readSession` runs in it and
+// may have old channel numbers to read -- against the device open now. On iOS
+// the session may not have reported its route yet and this answers the
+// placeholder of 1, which is also what a phone's built-in mic is.
+export const initLegacyInputCount = async () => {
+  if (BROWSER_DEBUG_MODE) {
+    // What App fakes in the browser.
+    setLegacyInputCount(2);
+    return;
+  }
+  try {
+    setLegacyInputCount(await invoke<number>("get_input_channel_count"));
+  } catch {
+    // Keeps the default of 1.
+  }
+};
+
 export const readSession = (): Preset | null => {
   try {
     const raw = window.localStorage.getItem(SESSION_KEY);

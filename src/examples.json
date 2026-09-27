@@ -70,7 +70,7 @@
           "inputText": "0",
           "val": 0
         },
-        "visibleChannels": [
+        "packedChannels": [
           0
         ],
         "channelPans": [],
@@ -150,7 +150,7 @@
         }
       },
       "js": {
-        "channelStyles": [],
+        "channelStyleById": {},
         "parameters": [],
         "drumGrids": [],
         "views": [
@@ -161,7 +161,7 @@
             "rowSpan": 1,
             "name": "the beat",
             "kind": "waveform",
-            "channels": [
+            "channelIds": [
               0
             ],
             "spectrogramChannel": 0,
@@ -225,7 +225,7 @@
             "splitChannels": false
           }
         ],
-        "channelGains": [],
+        "channelGainById": {},
         "viewCols": 1,
         "viewRows": 1,
         "viewsSequential": false,
@@ -304,7 +304,7 @@
           "inputText": "0",
           "val": 0
         },
-        "visibleChannels": [
+        "packedChannels": [
           0
         ],
         "channelPans": [],
@@ -384,7 +384,7 @@
         }
       },
       "js": {
-        "channelStyles": [],
+        "channelStyleById": {},
         "parameters": [
           {
             "name": "bar",
@@ -404,7 +404,7 @@
             "rowSpan": 1,
             "name": "one row per 16th",
             "kind": "waveform",
-            "channels": [
+            "channelIds": [
               0
             ],
             "spectrogramChannel": 0,
@@ -501,7 +501,7 @@
             "splitChannels": false
           }
         ],
-        "channelGains": [],
+        "channelGainById": {},
         "viewCols": 1,
         "viewRows": 1,
         "viewsSequential": false,
