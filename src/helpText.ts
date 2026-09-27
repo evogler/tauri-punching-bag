@@ -613,6 +613,10 @@ export const HELP: Record<string, HelpEntry> = {
     title: "Updates",
     body: "The version running, and a check for a newer one. Installing restarts the app.",
   },
+  logFile: {
+    title: "Log file",
+    body: "What the app has said about itself: which devices it opened, audio restarts, errors and crashes. If something goes wrong, reveal it and send it along. Kept under 4 MB, and it holds no audio.",
+  },
 
   // ---- analysis ----
   highPassOn: {

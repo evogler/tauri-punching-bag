@@ -1,4 +1,5 @@
 mod analysis;
+mod applog;
 mod audio_host;
 mod bleed;
 mod commands;
@@ -28,7 +29,7 @@ use crate::commands::{
     export_presets, get_presets, import_presets, list_audio_devices, load_drum_sample,
     get_recording_status, quarantine_presets, reset_beat, restart_app, restart_audio,
     set_audio_prefs, set_config, set_mp3_buffer, set_presets, start_calibration, start_recording,
-    stop_recording, get_platform,
+    stop_recording, get_platform, log_message, get_log_path, reveal_log,
 };
 use crate::audio_host::{spawn_supervisor, AudioHost, AudioHostState, HostHandles};
 use crate::calibration::Calibration;
@@ -158,7 +159,7 @@ fn load_kit(resource_dir: &str) -> Vec<KitSound> {
     {
         Ok(kit) => kit,
         Err(e) => {
-            println!("built-in kit manifest {} unusable: {}", path, e);
+            log::warn!("built-in kit manifest {} unusable: {}", path, e);
             vec![]
         }
     }
@@ -197,29 +198,37 @@ pub fn run() {
     let prefs_dir = dirs::config_dir()
         .map(|dir| dir.join(&context.config().identifier))
         .unwrap_or_else(|| std::path::PathBuf::from("."));
+    // First, so that everything after it -- the device setup above all, which
+    // is the likeliest thing to fail on somebody else's machine -- is in the
+    // file. The Mac only: iOS has nowhere a person could go and find it, and
+    // its stdout already reaches the unified log.
+    #[cfg(target_os = "macos")]
+    applog::init(Some(&prefs_dir), &context.package_info().version.to_string());
+    #[cfg(not(target_os = "macos"))]
+    applog::init(None, &context.package_info().version.to_string());
     let audio_prefs = prefs::load(&prefs_dir);
     // There is no window to show this in and there never will be, so the
-    // message is the whole report. A bare `unwrap` here was a backtrace naming
-    // a line number and an enum variant -- nothing about which device, or which
-    // role it was being asked to play.
+    // message is the whole report -- an alert, and the log. A bare `unwrap`
+    // here was a backtrace naming a line number and an enum variant -- nothing
+    // about which device, or which role it was being asked to play.
+    let prefs_advice = format!(
+        "Choose different devices in {}, or delete it to go back to the system defaults.",
+        prefs_dir.join("audio-prefs.json").display()
+    );
     let mut setup = match get_input_output_channels(&audio_prefs) {
         Ok(setup) => setup,
-        Err(message) => {
-            eprintln!("audio setup failed: {}", message);
-            eprintln!(
-                "Choose different devices in {}, or delete it to go back to the system defaults.",
-                prefs_dir.join("audio-prefs.json").display()
-            );
-            std::process::exit(1);
-        }
+        Err(message) => applog::fatal(
+            "Microtime could not set up its audio",
+            &format!("{}\n\n{}", message, prefs_advice),
+        ),
     };
 
     let sample_rate = setup.sample_rate;
 
     // load mp3
     let path: String = "/Users/eric/Music/Logic/tauri-file.wav".into();
-    println!("app_config_dir: {:?}", app_config_dir);
-    println!("resource_dir: {:?}", &resource_dir);
+    log::info!("app_config_dir: {:?}", app_config_dir);
+    log::info!("resource_dir: {:?}", &resource_dir);
     let data = decode_audio_file(&path).map(|file| to_device_stereo(&file, sample_rate));
     let loaded_path = if data.is_ok() { path.clone() } else { String::new() };
     // Whether a file is loaded is asked of the buffer every callback, not
@@ -259,7 +268,7 @@ pub fn run() {
                 sample_buffers.insert(sound.id.clone(), Arc::new(to_device_stereo(&source, sample_rate)));
                 sample_sources.insert(sound.id.clone(), Arc::new(source));
             }
-            Err(e) => println!("built-in sample {} failed to load: {:?}", sound.id, e),
+            Err(e) => log::warn!("built-in sample {} failed to load: {:?}", sound.id, e),
         }
     }
     let kit_state = KitState(kit);
@@ -384,8 +393,10 @@ pub fn run() {
     // Same account as a failed setup: there is no window yet.
     #[cfg(target_os = "macos")]
     if let Err(message) = host.launch(setup) {
-        eprintln!("audio start failed: {}", message);
-        std::process::exit(1);
+        applog::fatal(
+            "Microtime could not start its audio",
+            &format!("{}\n\n{}", message, prefs_advice),
+        );
     }
     // On iOS nothing was opened: the setup above only sized everything at a
     // provisional rate, and the first real start is a restart from nothing
@@ -430,7 +441,7 @@ pub fn run() {
                 let app = app.handle().clone();
                 std::thread::spawn(move || {
                     if let Err(message) = crate::platform::start_session(&app, hint) {
-                        println!("audio session failed: {}", message);
+                        log::error!("audio session failed: {}", message);
                         use tauri::Emitter;
                         let _ = app.emit(audio_host::AUDIO_RESTART_FAILED_EVENT, message);
                         return;
@@ -489,9 +500,12 @@ pub fn run() {
             stop_recording,
             get_recording_status,
             get_platform,
+            log_message,
+            get_log_path,
+            reveal_log,
         ])
         .run(context)
         .expect("error while running tauri application");
 
-    println!("next line after tauri builder");
+    log::info!("tauri event loop returned");
 }

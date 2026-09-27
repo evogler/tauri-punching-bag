@@ -1278,6 +1278,17 @@ const App = () => {
   // Set when the audio thread has refused the config, i.e. when what you see in
   // the panel is not what is playing.
   const [configError, setConfigError] = useState<string | null>(null);
+  // Into the log file as well as the banner: a refused push is exactly what a
+  // friend would describe as "it stopped responding", and the banner is gone
+  // by the time anyone asks. Once per distinct message, since a bad field is
+  // refused again on every keystroke.
+  useEffect(() => {
+    if (configError && !BROWSER_DEBUG_MODE)
+      invoke("log_message", {
+        level: "error",
+        message: `set_config refused: ${configError}`,
+      }).catch(() => {});
+  }, [configError]);
 
   const updateRustConfig = (args: Partial<RustConfig>) => {
     // console.log("calling set_config");
@@ -1327,6 +1338,8 @@ const App = () => {
     const capped = new Promise((done) => setTimeout(done, FIRST_PUSH_WAIT_MS));
     Promise.race([kit, capped]).then(() =>
       invoke("set_config", { newConfig: snakeCaseKeys(unwrapValues(rustConfig)) })
+        .then(() => setConfigError(null))
+        .catch((e) => setConfigError(String(e)))
     );
   });
 

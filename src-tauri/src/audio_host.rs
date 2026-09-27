@@ -381,7 +381,7 @@ impl AudioHost {
         let converted = match decode_audio_file(&path) {
             Ok(file) => to_device_stereo(&file, rate),
             Err(e) => {
-                println!(
+                log::warn!(
                     "could not decode {} again ({}); converting the loaded copy from {} Hz instead",
                     path, e, old_rate
                 );
@@ -458,7 +458,7 @@ impl AudioHost {
     ) -> Result<AudioStatus, String> {
         match outcome {
             Ok(Some(event)) => {
-                println!(
+                log::info!(
                     "audio restarted ({}): {} -> {}, {} input(s) at {} Hz",
                     reason,
                     event.status.active.input_name,
@@ -471,7 +471,7 @@ impl AudioHost {
             }
             Ok(None) => Ok(lock(&self.status).clone()),
             Err(message) => {
-                println!("audio restart failed ({}): {}", reason, message);
+                log::error!("audio restart failed ({}): {}", reason, message);
                 let _ = app.emit(AUDIO_RESTART_FAILED_EVENT, message.clone());
                 Err(message)
             }
@@ -491,7 +491,7 @@ impl AudioHost {
         if let Some(running) = inner.running.as_mut() {
             running.suspend();
         }
-        println!("audio suspended: interrupted");
+        log::info!("audio suspended: interrupted");
         let _ = app.emit(
             AUDIO_SUSPENDED_EVENT,
             "interrupted by another app or a call -- the audio comes back when it ends, or when you return to the app",
@@ -512,14 +512,14 @@ impl AudioHost {
                 Some(running) if !force => match running.resume() {
                     Ok(()) => true,
                     Err(e) => {
-                        println!("audio could not resume ({}); rebuilding it", e);
+                        log::warn!("audio could not resume ({}); rebuilding it", e);
                         false
                     }
                 },
                 _ => false,
             };
             if was_suspended && resumed {
-                println!("audio resumed");
+                log::info!("audio resumed");
                 let _ = app.emit(AUDIO_RESUMED_EVENT, ());
             }
             // Nothing running needs no forcing: `restart_with` goes ahead
@@ -555,7 +555,7 @@ pub fn spawn_supervisor(host: Arc<AudioHost>, app: AppHandle, hints: Receiver<Hi
             }
         });
     if let Err(e) = spawned {
-        println!("could not start the audio supervisor ({}); device changes need a relaunch", e);
+        log::error!("could not start the audio supervisor ({}); device changes need a relaunch", e);
     }
 }
 

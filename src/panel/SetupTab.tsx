@@ -9,6 +9,7 @@ import { Help } from "../help";
 import { Input } from "../Input";
 import { IosRoute } from "../IosRoute";
 import { isIOS } from "../platform";
+import { LogFile } from "../LogFile";
 import { Updater } from "../Updater";
 import { Section } from "./chrome";
 import { PanelProps } from "./types";
@@ -118,6 +119,17 @@ export const SetupTab = (p: PanelProps) => {
         <Section label="Updates">
           <Help id="updates">
             <Updater />
+          </Help>
+        </Section>
+      )}
+
+      {/* Beside updates: both are about this install, and the log is what to
+          send when it misbehaves on somebody else's Mac. Not on iOS, where
+          there is no log file and no Finder to reveal it in. */}
+      {!BROWSER_DEBUG_MODE && !isIOS() && (
+        <Section label="Log">
+          <Help id="logFile">
+            <LogFile />
           </Help>
         </Section>
       )}

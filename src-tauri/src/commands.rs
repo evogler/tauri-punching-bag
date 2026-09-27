@@ -306,6 +306,45 @@ pub fn get_platform() -> &'static str {
     std::env::consts::OS
 }
 
+/// A line from the frontend into the log file -- for what only the frontend
+/// sees, such as a `set_config` Tauri refused before the command ever ran.
+#[tauri::command]
+pub fn log_message(level: String, message: String) {
+    match level.as_str() {
+        "error" => log::error!("frontend: {}", message),
+        "warn" => log::warn!("frontend: {}", message),
+        _ => log::info!("frontend: {}", message),
+    }
+}
+
+/// Where the log file is, or nothing when there is none (iOS).
+#[tauri::command]
+pub fn get_log_path() -> Option<String> {
+    crate::applog::path().map(|p| p.display().to_string())
+}
+
+/// Shows the log file selected in Finder, so it can be dragged into an email.
+/// `open -R` rather than the opener plugin: one line, and nothing to grant.
+#[tauri::command]
+pub fn reveal_log() -> Result<(), String> {
+    let path = crate::applog::path().ok_or("there is no log file")?;
+    #[cfg(target_os = "macos")]
+    {
+        log::logger().flush();
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(path)
+            .status()
+            .map_err(|e| e.to_string())
+            .and_then(|s| if s.success() { Ok(()) } else { Err(format!("open -R failed ({})", s)) })
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = path;
+        Err("revealing a file is only supported on the Mac".into())
+    }
+}
+
 #[tauri::command]
 pub fn restart_app(app_handle: tauri::AppHandle) {
     app_handle.restart();
@@ -507,7 +546,7 @@ pub fn set_config(app_handle: tauri::AppHandle, new_config: Config) {
             },
         )
         .unwrap();
-    println!("set_config called: {:?}", new_config);
+    log::debug!("set_config called: {:?}", new_config);
     // The audio callback stays silent until this goes true, so the built-in
     // default is never sounded. Set before the config is installed, not after:
     // by the time the next callback reads the flag the new config is already
@@ -546,14 +585,14 @@ pub fn set_config(app_handle: tauri::AppHandle, new_config: Config) {
             let on = !config.paused;
             std::thread::spawn(move || {
                 if let Err(e) = tauri_plugin_audio_session::keep_awake(&app, on) {
-                    println!("keep awake: {}", e);
+                    log::warn!("keep awake: {}", e);
                 }
             });
         }
     }
 
     if should_update_loop_buffer {
-        println!("updating loop buffer");
+        log::info!("updating loop buffer");
         let c = config.clone();
         let new_buffer_size = get_loop_buffer_size(&c, rate);
         let loop_buffer_state: tauri::State<LoopBufferState> = app_handle.state();
@@ -562,7 +601,7 @@ pub fn set_config(app_handle: tauri::AppHandle, new_config: Config) {
             channel.resize(new_buffer_size, 0.0);
         }
         loop_buffer.pos = 0;
-        println!("new_buffer_size: {}", new_buffer_size);
+        log::info!("new loop buffer size: {}", new_buffer_size);
     }
 
     // Tempo, length in beats and the switch itself all move the stretch ratio,

@@ -55,7 +55,7 @@ fn prefs_path(dir: &Path) -> PathBuf {
 pub fn load(dir: &Path) -> AudioPrefs {
     match std::fs::read_to_string(prefs_path(dir)) {
         Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
-            println!("audio prefs unreadable ({}), using defaults", e);
+            log::warn!("audio prefs unreadable ({}), using defaults", e);
             AudioPrefs::default()
         }),
         Err(_) => AudioPrefs::default(),

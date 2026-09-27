@@ -267,7 +267,7 @@ fn store(snapshot: SessionSnapshot) {
 pub fn start_session(app: &tauri::AppHandle, hint: &'static HintSender) -> Result<(), String> {
     let snapshot = tauri_plugin_audio_session::configure(app, &PREFERENCES, move |event: SessionEvent| {
         // On Swift's queue: store and signal, nothing else.
-        println!(
+        log::info!(
             "audio session: {} {} (active {}, {} Hz, {:?} -> {:?})",
             event.kind,
             event.reason,
@@ -288,7 +288,7 @@ pub fn start_session(app: &tauri::AppHandle, hint: &'static HintSender) -> Resul
             let _ = hint.send(h);
         }
     })?;
-    println!(
+    log::info!(
         "audio session: {} Hz, IO buffer {:.2} ms, latency in {:.2} ms out {:.2} ms, {} in / {} out, mic {}, mode {}",
         snapshot.sample_rate,
         snapshot.io_buffer_duration * 1000.0,

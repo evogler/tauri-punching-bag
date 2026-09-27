@@ -155,7 +155,7 @@ pub fn decode_audio_file(filename: &String) -> Result<AudioFile, String> {
                         channels,
                     });
                 } else {
-                    println!(
+                    log::warn!(
                         "there was an error while reading an audio file: {:?}",
                         err.to_string()
                     );

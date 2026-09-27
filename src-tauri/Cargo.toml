@@ -31,12 +31,20 @@ serde_json = "1.0"
 symphonia = { version = "0.5.1", features = ["mp3"] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+# The log file (`applog.rs`). Both already in the tree through tauri.
+log = "0.4"
+libc = "0.2"
 
 # Desktop only: iOS has no system-wide keys to register, and an iOS app updates
 # through the App Store or TestFlight, never by downloading its own code.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-updater = "2"
+
+# The alert a launch failure raises before any window exists (`applog.rs`).
+# Already in the tree through the dialog plugin, at this version.
+[target.'cfg(target_os = "macos")'.dependencies]
+rfd = { version = "0.16", default-features = false }
 
 # The iOS audio session, configured in Swift. See plugins/audio-session.
 [target.'cfg(target_os = "ios")'.dependencies]

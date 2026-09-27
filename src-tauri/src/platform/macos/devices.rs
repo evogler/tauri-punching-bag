@@ -276,7 +276,7 @@ fn open_unit(
                 get_device_name(device_id).unwrap_or_else(|_| "unknown".to_string()),
                 e
             );
-            println!("{}", reason);
+            log::warn!("{}", reason);
             let unit = audio_unit_from_device_id(default_id, is_input).map_err(|e| {
                 format!(
                     "neither the chosen {} device nor the system default {:?} could be opened ({:?})",
@@ -362,7 +362,7 @@ pub fn watch_device_changes(app: tauri::AppHandle, hint: &'static HintSender) {
             // Not fatal: the picker still refreshes when it is opened and when
             // the window regains focus, and choosing a device restarts the
             // audio directly. What is lost is following the default by itself.
-            println!("could not watch for device changes ({}, selector {})", status, selector);
+            log::warn!("could not watch for device changes ({}, selector {})", status, selector);
         }
     }
 }
@@ -414,7 +414,7 @@ pub fn watch_rate(device: AudioDeviceID, hint: &'static HintSender) -> Option<Ra
         )
     };
     if status != kAudioHardwareNoError as i32 {
-        println!("could not watch the input device's rate ({})", status);
+        log::warn!("could not watch the input device's rate ({})", status);
         return None;
     }
     Some(RateWatch { device, hint })
@@ -527,8 +527,8 @@ pub struct AudioSetup {
 pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, String> {
     let devices = get_audio_device_ids();
     devices.unwrap().iter().for_each(|d| {
-        println!("device: {:?}", get_device_name(*d));
-        println!("{:?}", get_supported_physical_stream_formats(*d));
+        log::debug!("device: {:?}", get_device_name(*d));
+        log::debug!("{:?}", get_supported_physical_stream_formats(*d));
     });
 
     // A saved device that is no longer present -- or that is present and cannot
@@ -545,10 +545,10 @@ pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Strin
         default_output_id,
     } = resolve(prefs)?;
     if let Some(why) = &input_reason {
-        println!("{}, using default", why);
+        log::warn!("{}, using default", why);
     }
     if let Some(why) = &output_reason {
-        println!("{}, using default", why);
+        log::warn!("{}, using default", why);
     }
 
     // Opened before the rate is settled, because a retry can land on a
@@ -571,9 +571,9 @@ pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Strin
         input_fallback_reason: input_reason.unwrap_or_default(),
         output_fallback_reason: output_reason.unwrap_or_default(),
     };
-    println!("using input {:?}, output {:?}", active.input_name, active.output_name);
+    log::info!("using input {:?}, output {:?}", active.input_name, active.output_name);
     let input_channels = get_device_input_channels(input_device_id).max(1);
-    println!("input device offers {} channel(s)", input_channels);
+    log::info!("input device offers {} channel(s)", input_channels);
 
     // Take the input device's rate rather than imposing one. AUHAL will not
     // convert on the way in: point it at a 48 kHz microphone while asking for
@@ -583,7 +583,7 @@ pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Strin
     // enforced by there being nothing to read until this returns it.
     let device_rate = get_device_sample_rate(input_device_id).unwrap_or(DEFAULT_SAMPLE_RATE);
     let out_device_rate = get_device_sample_rate(output_device_id).unwrap_or(device_rate);
-    println!(
+    log::info!(
         "input device rate {} Hz, output device rate {} Hz",
         device_rate, out_device_rate
     );
@@ -594,7 +594,7 @@ pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Strin
         // resample on the way out, which is the ordinary "play 44.1 on a 48 kHz
         // device" path. Separate devices still drift -- see the aggregate-device
         // note in CLAUDE.md.
-        println!(
+        log::warn!(
             "input and output devices disagree on rate; running at {} Hz and letting the output unit convert",
             device_rate
         );
@@ -630,10 +630,10 @@ pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Strin
     };
 
     let mut result_log = vec![];
-    println!("input={:#?}", &in_stream_format);
-    println!("output={:#?}", &out_stream_format);
-    println!("input_asbd={:#?}", &in_stream_format.to_asbd());
-    println!("output_asbd={:#?}", &out_stream_format.to_asbd());
+    log::debug!("input={:#?}", &in_stream_format);
+    log::debug!("output={:#?}", &out_stream_format);
+    log::debug!("input_asbd={:#?}", &in_stream_format.to_asbd());
+    log::debug!("output_asbd={:#?}", &out_stream_format.to_asbd());
     result_log.push(format!("{:#?}", &in_stream_format));
     result_log.push(format!("{:#?}", &out_stream_format));
     result_log.push(format!("{:#?}", &in_stream_format.to_asbd()));
@@ -648,7 +648,7 @@ pub fn get_input_output_channels(prefs: &AudioPrefs) -> Result<AudioSetup, Strin
         .set_property(id, Scope::Output, Element::Input, Some(&asbd))
         .is_err()
     {
-        println!(
+        log::warn!(
             "device rejected {} input channels, falling back to mono",
             input_channels
         );

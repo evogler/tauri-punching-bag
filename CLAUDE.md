@@ -99,6 +99,7 @@ f64** (f32 causes ghost trails after ~20 min).
 | `stretch.rs` | WSOLA time stretch for the file player, rendered off-thread. |
 | `recorder.rs` | WAV recording via a writer thread. |
 | `prefs.rs` | `audio-prefs.json`: device choice + per-pair latency. Not config. |
+| `applog.rs` | The log file (`microtime.log`), the panic hook, and `fatal` -- the alert + exit for a launch failure. |
 | `presets.rs` | `presets.json` IO only -- moves text, knows nothing of presets. |
 
 `src-tauri/examples/onsets.rs` runs the real `Analyzer` over a WAV
@@ -122,7 +123,7 @@ f64** (f32 causes ghost trails after ~20 min).
 | `examples.json` / `examples.ts` / `ExampleBar.tsx` | Built-in read-only example presets. |
 | `help.tsx` / `helpText.ts` | Help area mechanism / all help text (keyed by config key or dotted id). |
 | `theme.ts` + `index.css` | Colour tokens and control styling. |
-| `SetupWizard.tsx`, `GlobalShortcut.tsx`, `Updater.tsx` | First-launch setup, global pause key, manual update check. |
+| `SetupWizard.tsx`, `GlobalShortcut.tsx`, `Updater.tsx`, `LogFile.tsx` | First-launch setup, global pause key, manual update check, *Reveal log file*. |
 | `platform.ts` / `IosRoute.tsx` | `isIOS()` (asked of Rust before first render; an iPad's user agent says Mac) / the iOS route panel shown instead of the device picker. |
 | `parser2.js` | **Generated** from `parser2.peg` -- don't hand-edit. `parser1.js` is legacy with no source. |
 
@@ -484,6 +485,19 @@ shows the new one. `JSON.stringify(NaN)` is `null`, which serde refuses for
 `f64`. Keep the `.catch` banner; `sanitizeRhythm` repairs restored rhythms;
 `resolveRhythm` refuses degenerate re-parses. Prefer surfacing an error over
 silently doing nothing, everywhere.
+
+- **Log with `log::info!`/`warn!`/`error!`, not `println!`** (*The log
+  file*). `applog.rs` installs a `log` logger first thing in `run`, before the
+  devices open: every line goes to stdout/stderr as before *and* (Info and up,
+  Mac only) to `~/Library/Application Support/com.vogler.dev/microtime.log`,
+  rotated at 2 MB to `microtime.1.log`. `debug!` is terminal-only (the
+  per-keystroke config dump). Panics are logged by a hook. **Never log from the
+  audio thread** (lock, allocation, disk) -- nothing in `engine.rs` or the
+  render callbacks does. The frontend logs through `log_message` (refused
+  `set_config`s); Setup → *Log* reveals the file.
+- **A launch failure before any window is `applog::fatal`**: logs, shows a
+  native alert (rfd, Mac) naming the error, the prefs advice and the log path,
+  exits 1. iOS just logs and exits, as before.
 
 ## Known issues
 

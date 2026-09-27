@@ -4283,6 +4283,56 @@ exactly as before.
   every lock the IPC thread needs, which is the worst failure available here.
   Both are O(1) and neither depends on the frontend having validated anything.
 
+### The log file, and saying why a launch failed
+
+**Added 2026-09-27**, before the app went to a friend. A bundled app's stdout
+and stderr go nowhere anybody can read, so two things were silent: the launch
+failures (audio setup, audio start -- both before any window exists, both
+`eprintln!` then `exit(1)`, which looked like the Dock icon bouncing once and
+vanishing), and everything else the app ever printed.
+
+- **The alert is `rfd`'s blocking `MessageDialog`** (`applog::fatal`). Chosen
+  over an `NSAlert` written by hand because rfd is already in the tree at 0.16
+  through the dialog plugin, it is built to show a modal with no event loop
+  running, and it sets the activation policy itself so the alert comes to the
+  front of an app that has not finished launching. Over `osascript -e
+  'display alert'` because that puts the alert in another process, where it
+  can open behind whatever was in front. It names the error, the
+  `audio-prefs.json` advice, and the log's path. **Tested in isolation** by a
+  temporary example that called `fatal` itself (logger, file, alert): the
+  alert came up frontmost with all three, and the line was in the file.
+  Deleted afterwards. iOS has no alert without a window, so it logs and exits
+  as before.
+- **A `log` logger of our own, not `tauri-plugin-log`.** The plugin exists only
+  once the Tauri builder runs, and the failures most worth keeping happen
+  before that. `applog::init` runs straight after the config dir is known and
+  before `prefs::load`. Every `println!`/`eprintln!` in the Rust side became a
+  `log::` call; the logger prints them to stdout/stderr exactly as before (so
+  `yarn dev` and the iOS unified log are unchanged) and appends Info and up to
+  the file. `debug!` stays out of the file -- it is where `set_config`'s whole
+  config dump goes, on every keystroke -- and so do the stream-format dumps.
+  Other crates' lines (tauri, the updater) are kept from Warn up.
+- **Where**: `~/Library/Application Support/com.vogler.dev/microtime.log`,
+  beside `audio-prefs.json`. Rotated to `microtime.1.log` at 2 MB, at open and
+  while running, so it never exceeds 4 MB. Local time, because the question is
+  "what happened at about eight". Mac only; iOS has nowhere to find it.
+  Rotation and the panic hook were temp-tested (5 MB written, one rotation, a
+  thread's panic with its backtrace in the file).
+- **A panic hook** writes the panic, its thread and a backtrace, then chains to
+  the default hook. It takes the sink with `try_lock`, so a panic inside a
+  write cannot deadlock. It runs on whichever thread panicked, which is the one
+  time a line may be written from the audio thread: by then the audio is lost
+  anyway.
+- **Never log from the audio thread.** A line locks, allocates and writes to
+  disk. Checked when this went in: nothing in `engine.rs`, the macOS render or
+  input callbacks, or `remote_io.rs` printed, so nothing had to be moved.
+- **Refused `set_config`s are logged** through a `log_message` command, once
+  per distinct message (an effect on the banner's state), since Tauri refuses
+  them before our command runs and only the frontend ever sees one. The first
+  push on mount gained the same `.catch` as every later one; it had none.
+- **Setup → *Log*** prints the path and has *Reveal log file*, which is
+  `open -R` -- one line, and no opener plugin to grant.
+
 ## Known issues / latent bugs
 
 - ~~**Mono audio files play at double speed.**~~ -- **fixed 2026-09-06.**
