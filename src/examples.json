@@ -517,22 +517,22 @@
       "id": "basic-backbeat",
       "name": "Basic backbeat",
       "created": "2026-09-27T00:00:00.000Z",
-      "description": "Kick on 1 and 3, snare on 2 and 4, hi-hat on the eighths -- the plainest groove there is, from the built-in kit. One bar per row, with the backbeat (2 and 4) marked in yellow.",
-      "tryThis": "Play the snare part with it and watch whether your 2 and 4 sit on the yellow lines.",
+      "description": "A backbeat from the built-in kit at 99: accented sixteenths on the hi-hat, snare on 2 and 4, kick on 1 with the odd pickup into the next bar. One row per sixteenth, so each note you aim at is a straight line down the pane.",
+      "tryThis": "Play the snare part along with it and watch whether your 2 and 4 land on the line.",
       "rust": {
         "audioInGain": {
-          "inputText": "1",
-          "val": 1
+          "inputText": ".2",
+          "val": 0.2
         },
-        "highPassOn": false,
+        "highPassOn": true,
         "highPassHz": {
-          "inputText": "800",
-          "val": 800
+          "inputText": "400",
+          "val": 400
         },
         "highPassAudio": false,
-        "bleedCancelOn": false,
+        "bleedCancelOn": true,
         "bleedTrackOn": true,
-        "bleedCancelAudioOn": false,
+        "bleedCancelAudioOn": true,
         "loopFeedbackGuardOn": false,
         "audioMonitorOn": false,
         "beatsToLoop": {
@@ -555,10 +555,10 @@
           ]
         },
         "bpm": {
-          "inputText": "90",
-          "val": 90
+          "inputText": "99",
+          "val": 99
         },
-        "analysisOn": true,
+        "analysisOn": false,
         "analysisBandLow": {
           "inputText": "30",
           "val": 30
@@ -580,9 +580,6 @@
           "inputText": "-4",
           "val": -4
         },
-        "packedChannels": [
-          0
-        ],
         "channelPans": [],
         "clickOn": false,
         "sectionsOn": false,
@@ -592,8 +589,8 @@
           "val": []
         },
         "clickVolume": {
-          "inputText": "0.3",
-          "val": 0.3
+          "inputText": "3",
+          "val": 3
         },
         "clickShift": {
           "inputText": "0",
@@ -644,29 +641,70 @@
         "visualMonitorOn": true,
         "drums": [
           {
-            "path": "kick",
+            "path": "hi-hat",
             "on": true,
             "volume": 1,
             "offset": 0,
             "shift": 0,
             "gains": {
-              "inputText": "1",
+              "inputText": "1,0.3,0.6,0.3,1,0.3,0.6,0.3",
               "val": [
-                1
+                1,
+                0.3,
+                0.6,
+                0.3,
+                1,
+                0.3,
+                0.6,
+                0.3
               ]
             },
             "rhythm": {
-              "inputText": "1, 1 r",
+              "inputText": "[0.25]x8",
               "val": {
                 "notes": [
                   {
                     "time": 0
+                  },
+                  {
+                    "time": 0.25
+                  },
+                  {
+                    "time": 0.5
+                  },
+                  {
+                    "time": 0.75
+                  },
+                  {
+                    "time": 1
+                  },
+                  {
+                    "time": 1.25
+                  },
+                  {
+                    "time": 1.5
+                  },
+                  {
+                    "time": 1.75
                   }
                 ],
                 "start": 0,
                 "end": 2
               },
               "type": "parser2"
+            },
+            "chances": {
+              "inputText": "1x8",
+              "val": [
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1
+              ]
             }
           },
           {
@@ -682,46 +720,118 @@
               ]
             },
             "rhythm": {
-              "inputText": "1 r, 1",
-              "val": {
-                "notes": [
-                  {
-                    "time": 1
-                  }
-                ],
-                "start": 0,
-                "end": 2
-              },
-              "type": "parser2"
-            }
-          },
-          {
-            "path": "hi-hat",
-            "on": true,
-            "volume": 0.6,
-            "offset": 0,
-            "shift": 0,
-            "gains": {
-              "inputText": "1",
-              "val": [
-                1
-              ]
-            },
-            "rhythm": {
-              "inputText": "2:1",
+              "inputText": "[0.25]x8",
               "val": {
                 "notes": [
                   {
                     "time": 0
                   },
                   {
+                    "time": 0.25
+                  },
+                  {
                     "time": 0.5
+                  },
+                  {
+                    "time": 0.75
+                  },
+                  {
+                    "time": 1
+                  },
+                  {
+                    "time": 1.25
+                  },
+                  {
+                    "time": 1.5
+                  },
+                  {
+                    "time": 1.75
                   }
                 ],
                 "start": 0,
-                "end": 1
+                "end": 2
               },
               "type": "parser2"
+            },
+            "chances": {
+              "inputText": "0x4,1,0x3",
+              "val": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0
+              ]
+            }
+          },
+          {
+            "path": "kick",
+            "on": true,
+            "volume": 1,
+            "offset": 0,
+            "shift": 0,
+            "gains": {
+              "inputText": "1x4,0.3,1x2,0.5",
+              "val": [
+                1,
+                1,
+                1,
+                1,
+                0.3,
+                1,
+                1,
+                0.5
+              ]
+            },
+            "rhythm": {
+              "inputText": "[0.25]x8",
+              "val": {
+                "notes": [
+                  {
+                    "time": 0
+                  },
+                  {
+                    "time": 0.25
+                  },
+                  {
+                    "time": 0.5
+                  },
+                  {
+                    "time": 0.75
+                  },
+                  {
+                    "time": 1
+                  },
+                  {
+                    "time": 1.25
+                  },
+                  {
+                    "time": 1.5
+                  },
+                  {
+                    "time": 1.75
+                  }
+                ],
+                "start": 0,
+                "end": 2
+              },
+              "type": "parser2"
+            },
+            "chances": {
+              "inputText": "1,0x3,1,0x2,0.2",
+              "val": [
+                1,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0.2
+              ]
             }
           }
         ],
@@ -742,17 +852,124 @@
         }
       },
       "js": {
-        "channelStyleById": {},
         "parameters": [],
         "parameterScenes": [],
-        "drumGrids": [],
+        "drumGrids": [
+          {
+            "columns": 8,
+            "pulse": {
+              "inputText": ".25",
+              "val": [
+                0.25
+              ]
+            },
+            "restart": true,
+            "rows": [
+              {
+                "voice": 0,
+                "cells": [
+                  {
+                    "chance": 1
+                  },
+                  {
+                    "chance": 1,
+                    "gain": 0.3
+                  },
+                  {
+                    "chance": 1,
+                    "gain": 0.6
+                  },
+                  {
+                    "chance": 1,
+                    "gain": 0.3
+                  },
+                  {
+                    "chance": 1
+                  },
+                  {
+                    "chance": 1,
+                    "gain": 0.3
+                  },
+                  {
+                    "chance": 1,
+                    "gain": 0.6
+                  },
+                  {
+                    "chance": 1,
+                    "gain": 0.3
+                  }
+                ]
+              },
+              {
+                "voice": 1,
+                "cells": [
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 1
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 0
+                  }
+                ]
+              },
+              {
+                "voice": 2,
+                "cells": [
+                  {
+                    "chance": 1
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 1,
+                    "gain": 0.3
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 0.2,
+                    "gain": 0.5
+                  }
+                ]
+              }
+            ]
+          }
+        ],
         "views": [
           {
             "col": 0,
             "row": 0,
             "colSpan": 1,
             "rowSpan": 1,
-            "name": "one bar per row",
+            "name": "",
             "kind": "waveform",
             "channelIds": [
               0
@@ -761,46 +978,41 @@
             "spectrogramGain": 1,
             "spectrogramFloor": 0.15,
             "beatsPerRow": {
-              "inputText": "4x4",
+              "inputText": ".25x16",
               "val": [
-                4,
-                4,
-                4,
-                4
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25
               ]
             },
             "rowColumns": 1,
             "marginLeft": {
-              "inputText": "1/4",
-              "val": 0.25
+              "inputText": ".05",
+              "val": 0.05
             },
             "marginRight": {
-              "inputText": "-(1/4)",
-              "val": -0.25
+              "inputText": "-.05",
+              "val": -0.05
             },
             "grids": [
               {
-                "color": "#ffcc00",
+                "color": "#008cb4",
                 "alpha": 1,
                 "subdivisions": {
-                  "inputText": "1 r, 1",
-                  "val": {
-                    "notes": [
-                      {
-                        "time": 1
-                      }
-                    ],
-                    "start": 0,
-                    "end": 2
-                  },
-                  "type": "parser2"
-                }
-              },
-              {
-                "color": "#0088ff",
-                "alpha": 1,
-                "subdivisions": {
-                  "inputText": "1",
+                  "inputText": ".25",
                   "val": {
                     "notes": [
                       {
@@ -808,22 +1020,56 @@
                       }
                     ],
                     "start": 0,
-                    "end": 1
+                    "end": 0.25
                   },
                   "type": "parser2"
+                },
+                "shift": {
+                  "inputText": "0",
+                  "val": 0
+                }
+              },
+              {
+                "color": "#791a3e",
+                "alpha": 1,
+                "subdivisions": {
+                  "inputText": ".25",
+                  "val": {
+                    "notes": [
+                      {
+                        "time": 0
+                      }
+                    ],
+                    "start": 0,
+                    "end": 0.25
+                  },
+                  "type": "parser2"
+                },
+                "shift": {
+                  "inputText": ".125",
+                  "val": 0.125
                 }
               }
             ],
             "visualGain": {
-              "inputText": "10",
-              "val": 10
+              "inputText": "2",
+              "val": 2
             },
             "barColorMode": false,
             "refreshAtCycleEnd": false,
             "rowColors": [],
             "rowColorPattern": {
-              "inputText": "",
-              "val": []
+              "inputText": "1x div, 2x div",
+              "val": [
+                1,
+                1,
+                1,
+                1,
+                2,
+                2,
+                2,
+                2
+              ]
             },
             "rowColorPatternDown": {
               "inputText": "",
@@ -835,38 +1081,60 @@
             "splitChannels": false
           }
         ],
-        "channelGainById": {},
         "viewCols": 1,
         "viewRows": 1,
         "viewsSequential": false,
         "filePath": "",
-        "waveformBackground": "#0F1214",
+        "waveformBackground": "#000000",
         "paneGap": 2,
         "paneGapColor": "#1C2225",
         "gridWidth": 1,
-        "showFrameTime": false
+        "showFrameTime": false,
+        "channelStyleById": {
+          "0": {
+            "color": "#0056d6",
+            "alpha": 1
+          },
+          "1000": {
+            "color": "#00a3d7",
+            "alpha": 1
+          },
+          "1001": {
+            "color": "#33cc66",
+            "alpha": 1
+          },
+          "1002": {
+            "color": "#ffcc00",
+            "alpha": 1
+          }
+        },
+        "channelGainById": {
+          "0": 4,
+          "1000": 1,
+          "1001": 4
+        }
       }
     },
     {
       "id": "basic-swing",
       "name": "Basic swing",
       "created": "2026-09-27T00:00:00.000Z",
-      "description": "Swung eighths on the hi-hat, one row per eighth note. The parameter swing is the long note's share of each beat -- 0.5 is straight, 0.67 is triplet swing -- and the hi-hat, the rows and the grid all follow it.",
-      "tryThis": "Set swing to 0.67 for triplet swing, or 0.5 to straighten it out, and play the eighths along with the hi-hat.",
+      "description": "A jazz ride pattern at 240 -- spang, spang-a-lang -- with the hi-hat on 2 and 4, one row per swung eighth. The parameter swing is the long note's share of each pair: 0.5 is straight, 0.67 is triplet swing. beats sets how many pairs each pane holds.",
+      "tryThis": "Set swing to 0.67 for triplet swing, or 0.5 to straighten it out -- the ride, the hi-hat and the rows all follow it.",
       "rust": {
         "audioInGain": {
-          "inputText": "1",
-          "val": 1
+          "inputText": ".2",
+          "val": 0.2
         },
-        "highPassOn": false,
+        "highPassOn": true,
         "highPassHz": {
-          "inputText": "800",
-          "val": 800
+          "inputText": "400",
+          "val": 400
         },
         "highPassAudio": false,
-        "bleedCancelOn": false,
+        "bleedCancelOn": true,
         "bleedTrackOn": true,
-        "bleedCancelAudioOn": false,
+        "bleedCancelAudioOn": true,
         "loopFeedbackGuardOn": false,
         "audioMonitorOn": false,
         "beatsToLoop": {
@@ -889,10 +1157,10 @@
           ]
         },
         "bpm": {
-          "inputText": "90",
-          "val": 90
+          "inputText": "240",
+          "val": 240
         },
-        "analysisOn": true,
+        "analysisOn": false,
         "analysisBandLow": {
           "inputText": "30",
           "val": 30
@@ -914,11 +1182,8 @@
           "inputText": "-4",
           "val": -4
         },
-        "packedChannels": [
-          0
-        ],
         "channelPans": [],
-        "clickOn": true,
+        "clickOn": false,
         "sectionsOn": false,
         "sections": [],
         "sectionOrder": {
@@ -926,8 +1191,8 @@
           "val": []
         },
         "clickVolume": {
-          "inputText": "0.3",
-          "val": 0.3
+          "inputText": "3",
+          "val": 3
         },
         "clickShift": {
           "inputText": "0",
@@ -978,19 +1243,22 @@
         "visualMonitorOn": true,
         "drums": [
           {
-            "path": "hi-hat",
+            "path": "ride",
             "on": true,
             "volume": 1,
             "offset": 0,
             "shift": 0,
             "gains": {
-              "inputText": "1",
+              "inputText": "1x2,1.2,0.9",
               "val": [
-                1
+                1,
+                1,
+                1.2,
+                0.9
               ]
             },
             "rhythm": {
-              "inputText": "swing, 1-swing",
+              "inputText": "0.6,0.4,0.6,0.4",
               "val": {
                 "notes": [
                   {
@@ -998,12 +1266,74 @@
                   },
                   {
                     "time": 0.6000000000000001
+                  },
+                  {
+                    "time": 1
+                  },
+                  {
+                    "time": 1.6
                   }
                 ],
                 "start": 0,
-                "end": 1
+                "end": 2
               },
               "type": "parser2"
+            },
+            "chances": {
+              "inputText": "1,0,1x2",
+              "val": [
+                1,
+                0,
+                1,
+                1
+              ]
+            }
+          },
+          {
+            "path": "hi-hat",
+            "on": true,
+            "volume": 1,
+            "offset": 0,
+            "shift": 0,
+            "gains": {
+              "inputText": "1x2,0.3,1",
+              "val": [
+                1,
+                1,
+                0.3,
+                1
+              ]
+            },
+            "rhythm": {
+              "inputText": "0.6,0.4,0.6,0.4",
+              "val": {
+                "notes": [
+                  {
+                    "time": 0
+                  },
+                  {
+                    "time": 0.6000000000000001
+                  },
+                  {
+                    "time": 1
+                  },
+                  {
+                    "time": 1.6
+                  }
+                ],
+                "start": 0,
+                "end": 2
+              },
+              "type": "parser2"
+            },
+            "chances": {
+              "inputText": "0x2,1,0",
+              "val": [
+                0,
+                0,
+                1,
+                0
+              ]
             }
           }
         ],
@@ -1024,22 +1354,78 @@
         }
       },
       "js": {
-        "channelStyleById": {},
         "parameters": [
           {
+            "name": "beats",
+            "value": 8,
+            "inputText": "8"
+          },
+          {
             "name": "swing",
-            "value": 0.6
+            "value": 0.6,
+            "inputText": ".6"
           }
         ],
         "parameterScenes": [],
-        "drumGrids": [],
+        "drumGrids": [
+          {
+            "columns": 4,
+            "pulse": {
+              "inputText": "[swing, 1-swing]",
+              "val": [
+                0.6,
+                0.4
+              ]
+            },
+            "restart": true,
+            "rows": [
+              {
+                "voice": 0,
+                "cells": [
+                  {
+                    "chance": 1
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 1,
+                    "gain": 1.2
+                  },
+                  {
+                    "chance": 1,
+                    "gain": 0.9
+                  }
+                ]
+              },
+              {
+                "voice": 1,
+                "cells": [
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 1,
+                    "gain": 0.3
+                  },
+                  {
+                    "chance": 0
+                  }
+                ]
+              }
+            ]
+          }
+        ],
         "views": [
           {
             "col": 0,
             "row": 0,
             "colSpan": 1,
             "rowSpan": 1,
-            "name": "one row per eighth",
+            "name": "",
             "kind": "waveform",
             "channelIds": [
               0
@@ -1048,8 +1434,16 @@
             "spectrogramGain": 1,
             "spectrogramFloor": 0.15,
             "beatsPerRow": {
-              "inputText": "[swing, 1-swing] x 4",
+              "inputText": "[swing,(1-swing)]x beats",
               "val": [
+                0.6,
+                0.4,
+                0.6,
+                0.4,
+                0.6,
+                0.4,
+                0.6,
+                0.4,
                 0.6,
                 0.4,
                 0.6,
@@ -1062,45 +1456,96 @@
             },
             "rowColumns": 1,
             "marginLeft": {
-              "inputText": "0.125",
-              "val": 0.125
+              "inputText": ".1",
+              "val": 0.1
             },
             "marginRight": {
-              "inputText": "-0.125",
-              "val": -0.125
+              "inputText": "-.1",
+              "val": -0.1
             },
             "grids": [
               {
-                "color": "#33cc66",
+                "color": "#008cb4",
                 "alpha": 1,
                 "subdivisions": {
-                  "inputText": "[swing, 1-swing]:1",
+                  "inputText": "[swing,(1-swing)]x beats",
                   "val": {
                     "notes": [
                       {
                         "time": 0
                       },
                       {
-                        "time": 0.6000000000000001
+                        "time": 0.5999999999999996
+                      },
+                      {
+                        "time": 1
+                      },
+                      {
+                        "time": 1.5999999999999996
+                      },
+                      {
+                        "time": 2
+                      },
+                      {
+                        "time": 2.5999999999999996
+                      },
+                      {
+                        "time": 3
+                      },
+                      {
+                        "time": 3.5999999999999996
+                      },
+                      {
+                        "time": 4
+                      },
+                      {
+                        "time": 4.6
+                      },
+                      {
+                        "time": 5
+                      },
+                      {
+                        "time": 5.6
+                      },
+                      {
+                        "time": 6
+                      },
+                      {
+                        "time": 6.6
+                      },
+                      {
+                        "time": 7
+                      },
+                      {
+                        "time": 7.6
                       }
                     ],
                     "start": 0,
-                    "end": 1
+                    "end": 8
                   },
                   "type": "parser2"
                 }
               }
             ],
             "visualGain": {
-              "inputText": "10",
-              "val": 10
+              "inputText": "2",
+              "val": 2
             },
             "barColorMode": false,
             "refreshAtCycleEnd": false,
             "rowColors": [],
             "rowColorPattern": {
-              "inputText": "",
-              "val": []
+              "inputText": "1x div, 2x div",
+              "val": [
+                1,
+                1,
+                1,
+                1,
+                2,
+                2,
+                2,
+                2
+              ]
             },
             "rowColorPatternDown": {
               "inputText": "",
@@ -1112,16 +1557,38 @@
             "splitChannels": false
           }
         ],
-        "channelGainById": {},
         "viewCols": 1,
         "viewRows": 1,
         "viewsSequential": false,
         "filePath": "",
-        "waveformBackground": "#0F1214",
+        "waveformBackground": "#000000",
         "paneGap": 2,
         "paneGapColor": "#1C2225",
         "gridWidth": 1,
-        "showFrameTime": false
+        "showFrameTime": false,
+        "channelStyleById": {
+          "0": {
+            "color": "#0056d6",
+            "alpha": 1
+          },
+          "1000": {
+            "color": "#00a3d7",
+            "alpha": 1
+          },
+          "1001": {
+            "color": "#33cc66",
+            "alpha": 1
+          },
+          "1002": {
+            "color": "#ffcc00",
+            "alpha": 1
+          }
+        },
+        "channelGainById": {
+          "0": 4,
+          "1000": 1,
+          "1001": 4
+        }
       }
     },
     {
@@ -1716,26 +2183,26 @@
       "id": "backbeat-on-off",
       "name": "Backbeat on/off",
       "created": "2026-09-27T00:00:00.000Z",
-      "description": "The backbeat plays while the looper records you, then drops out for just as long and you hear what you played, against the click alone. The parameter bars sets the length of each turn, and it opens with that many bars of click to get ready. Use headphones.",
-      "tryThis": "Set bars to 1 for quick turns or 4 for long ones -- the drums, the loop length and the record cycle all follow it.",
+      "description": "The practice cycle as call and response: the backbeat and click for a turn, then the same length of silence. The parameter cycle sets how many beats each turn lasts. With the looper on, what you played during the groove comes back in the silence. Use headphones.",
+      "tryThis": "Switch on Looper in the top bar, play along with the backbeat, then listen to yourself in the silence.",
       "rust": {
         "audioInGain": {
-          "inputText": "1",
-          "val": 1
+          "inputText": ".2",
+          "val": 0.2
         },
-        "highPassOn": false,
+        "highPassOn": true,
         "highPassHz": {
-          "inputText": "800",
-          "val": 800
+          "inputText": "400",
+          "val": 400
         },
         "highPassAudio": false,
-        "bleedCancelOn": false,
+        "bleedCancelOn": true,
         "bleedTrackOn": true,
-        "bleedCancelAudioOn": false,
+        "bleedCancelAudioOn": true,
         "loopFeedbackGuardOn": false,
         "audioMonitorOn": false,
         "beatsToLoop": {
-          "inputText": "bars*4",
+          "inputText": "loop",
           "val": 8
         },
         "loopEchoes": {
@@ -1746,18 +2213,18 @@
           "inputText": "1",
           "val": 1
         },
-        "loopRecordCycleOn": true,
+        "loopRecordCycleOn": false,
         "loopRecordCycle": {
-          "inputText": "bars*4",
+          "inputText": "4",
           "val": [
-            8
+            4
           ]
         },
         "bpm": {
-          "inputText": "90",
-          "val": 90
+          "inputText": "99",
+          "val": 99
         },
-        "analysisOn": true,
+        "analysisOn": false,
         "analysisBandLow": {
           "inputText": "30",
           "val": 30
@@ -1779,27 +2246,49 @@
           "inputText": "-4",
           "val": -4
         },
-        "packedChannels": [
-          0
-        ],
         "channelPans": [],
-        "clickOn": true,
-        "sectionsOn": false,
-        "sections": [],
+        "clickOn": false,
+        "sectionsOn": true,
+        "sections": [
+          {
+            "on": true,
+            "beats": {
+              "inputText": "cycle",
+              "val": 8
+            },
+            "click": true,
+            "show": true,
+            "drums": [
+              0,
+              1,
+              2
+            ]
+          },
+          {
+            "on": true,
+            "beats": {
+              "inputText": "cycle",
+              "val": 8
+            },
+            "click": false,
+            "show": true,
+            "drums": []
+          }
+        ],
         "sectionOrder": {
           "inputText": "",
           "val": []
         },
         "clickVolume": {
-          "inputText": "0.3",
-          "val": 0.3
+          "inputText": "3",
+          "val": 3
         },
         "clickShift": {
           "inputText": "0",
           "val": 0
         },
         "drumOn": true,
-        "loopingOn": true,
+        "loopingOn": false,
         "playFile": false,
         "fileVolume": {
           "inputText": "1",
@@ -1843,23 +2332,51 @@
         "visualMonitorOn": true,
         "drums": [
           {
-            "path": "kick",
+            "path": "hi-hat",
             "on": true,
             "volume": 1,
             "offset": 0,
             "shift": 0,
             "gains": {
-              "inputText": "1",
+              "inputText": "1,0.3,0.6,0.3,1,0.3,0.6,0.3",
               "val": [
-                1
+                1,
+                0.3,
+                0.6,
+                0.3,
+                1,
+                0.3,
+                0.6,
+                0.3
               ]
             },
             "rhythm": {
-              "inputText": "1, 1 r",
+              "inputText": "[0.25]x8",
               "val": {
                 "notes": [
                   {
                     "time": 0
+                  },
+                  {
+                    "time": 0.25
+                  },
+                  {
+                    "time": 0.5
+                  },
+                  {
+                    "time": 0.75
+                  },
+                  {
+                    "time": 1
+                  },
+                  {
+                    "time": 1.25
+                  },
+                  {
+                    "time": 1.5
+                  },
+                  {
+                    "time": 1.75
                   }
                 ],
                 "start": 0,
@@ -1868,12 +2385,12 @@
               "type": "parser2"
             },
             "chances": {
-              "inputText": "0 x 2*bars, 1 x 2*bars",
+              "inputText": "1x8",
               "val": [
-                0,
-                0,
-                0,
-                0,
+                1,
+                1,
+                1,
+                1,
                 1,
                 1,
                 1,
@@ -1894,11 +2411,32 @@
               ]
             },
             "rhythm": {
-              "inputText": "1 r, 1",
+              "inputText": "[0.25]x8",
               "val": {
                 "notes": [
                   {
+                    "time": 0
+                  },
+                  {
+                    "time": 0.25
+                  },
+                  {
+                    "time": 0.5
+                  },
+                  {
+                    "time": 0.75
+                  },
+                  {
                     "time": 1
+                  },
+                  {
+                    "time": 1.25
+                  },
+                  {
+                    "time": 1.5
+                  },
+                  {
+                    "time": 1.75
                   }
                 ],
                 "start": 0,
@@ -1907,82 +2445,83 @@
               "type": "parser2"
             },
             "chances": {
-              "inputText": "0 x 2*bars, 1 x 2*bars",
+              "inputText": "0x4,1,0x3",
               "val": [
                 0,
                 0,
                 0,
                 0,
                 1,
-                1,
-                1,
-                1
+                0,
+                0,
+                0
               ]
             }
           },
           {
-            "path": "hi-hat",
+            "path": "kick",
             "on": true,
-            "volume": 0.6,
+            "volume": 1,
             "offset": 0,
             "shift": 0,
             "gains": {
-              "inputText": "1",
+              "inputText": "1x4,0.3,1x2,0.5",
               "val": [
-                1
+                1,
+                1,
+                1,
+                1,
+                0.3,
+                1,
+                1,
+                0.5
               ]
             },
             "rhythm": {
-              "inputText": "2:1",
+              "inputText": "[0.25]x8",
               "val": {
                 "notes": [
                   {
                     "time": 0
                   },
                   {
+                    "time": 0.25
+                  },
+                  {
                     "time": 0.5
+                  },
+                  {
+                    "time": 0.75
+                  },
+                  {
+                    "time": 1
+                  },
+                  {
+                    "time": 1.25
+                  },
+                  {
+                    "time": 1.5
+                  },
+                  {
+                    "time": 1.75
                   }
                 ],
                 "start": 0,
-                "end": 1
+                "end": 2
               },
               "type": "parser2"
             },
             "chances": {
-              "inputText": "0 x 8*bars, 1 x 8*bars",
+              "inputText": "1,0x3,1,0x2,0.2",
               "val": [
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
+                1,
                 0,
                 0,
                 0,
                 1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1
+                0,
+                0,
+                0.2
               ]
             }
           }
@@ -2004,22 +2543,130 @@
         }
       },
       "js": {
-        "channelStyleById": {},
         "parameters": [
           {
-            "name": "bars",
-            "value": 2
+            "name": "cycle",
+            "value": 8,
+            "inputText": "8"
           }
         ],
         "parameterScenes": [],
-        "drumGrids": [],
+        "drumGrids": [
+          {
+            "columns": 8,
+            "pulse": {
+              "inputText": ".25",
+              "val": [
+                0.25
+              ]
+            },
+            "restart": true,
+            "rows": [
+              {
+                "voice": 0,
+                "cells": [
+                  {
+                    "chance": 1
+                  },
+                  {
+                    "chance": 1,
+                    "gain": 0.3
+                  },
+                  {
+                    "chance": 1,
+                    "gain": 0.6
+                  },
+                  {
+                    "chance": 1,
+                    "gain": 0.3
+                  },
+                  {
+                    "chance": 1
+                  },
+                  {
+                    "chance": 1,
+                    "gain": 0.3
+                  },
+                  {
+                    "chance": 1,
+                    "gain": 0.6
+                  },
+                  {
+                    "chance": 1,
+                    "gain": 0.3
+                  }
+                ]
+              },
+              {
+                "voice": 1,
+                "cells": [
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 1
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 0
+                  }
+                ]
+              },
+              {
+                "voice": 2,
+                "cells": [
+                  {
+                    "chance": 1
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 1,
+                    "gain": 0.3
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 0
+                  },
+                  {
+                    "chance": 0.2,
+                    "gain": 0.5
+                  }
+                ]
+              }
+            ]
+          }
+        ],
         "views": [
           {
             "col": 0,
             "row": 0,
             "colSpan": 1,
             "rowSpan": 1,
-            "name": "played back, then with the drums",
+            "name": "",
             "kind": "waveform",
             "channelIds": [
               0
@@ -2028,29 +2675,57 @@
             "spectrogramGain": 1,
             "spectrogramFloor": 0.15,
             "beatsPerRow": {
-              "inputText": "4 x bars*2",
+              "inputText": ".25x(cycle * 4)",
               "val": [
-                4,
-                4,
-                4,
-                4
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25,
+                0.25
               ]
             },
             "rowColumns": 1,
             "marginLeft": {
-              "inputText": "1/4",
-              "val": 0.25
+              "inputText": ".05",
+              "val": 0.05
             },
             "marginRight": {
-              "inputText": "-(1/4)",
-              "val": -0.25
+              "inputText": "-.05",
+              "val": -0.05
             },
             "grids": [
               {
-                "color": "#0088ff",
+                "color": "#008cb4",
                 "alpha": 1,
                 "subdivisions": {
-                  "inputText": "1",
+                  "inputText": ".25",
                   "val": {
                     "notes": [
                       {
@@ -2058,22 +2733,56 @@
                       }
                     ],
                     "start": 0,
-                    "end": 1
+                    "end": 0.25
                   },
                   "type": "parser2"
+                },
+                "shift": {
+                  "inputText": "0",
+                  "val": 0
+                }
+              },
+              {
+                "color": "#791a3e",
+                "alpha": 1,
+                "subdivisions": {
+                  "inputText": ".25",
+                  "val": {
+                    "notes": [
+                      {
+                        "time": 0
+                      }
+                    ],
+                    "start": 0,
+                    "end": 0.25
+                  },
+                  "type": "parser2"
+                },
+                "shift": {
+                  "inputText": ".125",
+                  "val": 0.125
                 }
               }
             ],
             "visualGain": {
-              "inputText": "10",
-              "val": 10
+              "inputText": "2",
+              "val": 2
             },
             "barColorMode": false,
             "refreshAtCycleEnd": false,
             "rowColors": [],
             "rowColorPattern": {
-              "inputText": "",
-              "val": []
+              "inputText": "1x div, 2x div",
+              "val": [
+                1,
+                1,
+                1,
+                1,
+                2,
+                2,
+                2,
+                2
+              ]
             },
             "rowColorPatternDown": {
               "inputText": "",
@@ -2085,16 +2794,38 @@
             "splitChannels": false
           }
         ],
-        "channelGainById": {},
         "viewCols": 1,
         "viewRows": 1,
         "viewsSequential": false,
         "filePath": "",
-        "waveformBackground": "#0F1214",
+        "waveformBackground": "#000000",
         "paneGap": 2,
         "paneGapColor": "#1C2225",
         "gridWidth": 1,
-        "showFrameTime": false
+        "showFrameTime": false,
+        "channelStyleById": {
+          "0": {
+            "color": "#0056d6",
+            "alpha": 1
+          },
+          "1000": {
+            "color": "#00a3d7",
+            "alpha": 1
+          },
+          "1001": {
+            "color": "#33cc66",
+            "alpha": 1
+          },
+          "1002": {
+            "color": "#ffcc00",
+            "alpha": 1
+          }
+        },
+        "channelGainById": {
+          "0": 4,
+          "1000": 1,
+          "1001": 4
+        }
       }
     },
     {
