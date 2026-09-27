@@ -383,7 +383,8 @@ Each has a full section in `docs/design-notes.md`.
 
 - **Looper**: multi-tap delay, one buffer per input, `loop_echoes` taps with
   compounding `loop_echo_gain` (gain 0 silences echoes after the first -- check
-  this first when echoes "do nothing"). `loop_written` voids pre-restart audio.
+  this first when echoes "do nothing"). `loop_written` voids pre-restart audio
+  (and picture: a tap landing on `p` is a whole buffer back, not 0).
   Record cycles gate the *write* with silence, asked of the visual beat, list
   starts silent.
 - **Practice cycle** (`sections`, `sectionsOn`, `sectionOrder`): at the wrap
@@ -393,7 +394,10 @@ Each has a full section in `docs/design-notes.md`.
   re-indexed on voice delete (known bug).
 - **Drums**: `shift` (beats, musical) vs `offset` (ms, look-ahead trigger).
   `gains`/`chances` indexed by hit count with `rem_euclid`. A lost roll keeps
-  its slot. Kit in `samples/kit.json`; ids are never renamed. Drum grid
+  its slot. At a restart (launch, Restart, wrap) a voice fires only if its
+  current note sounds at or after beat 0 -- `hit_start` -- and a look-ahead past
+  a wrap reads the restarted rhythm (`transport_epoch`). Kit in
+  `samples/kit.json`; ids are never renamed. Drum grid
   (`drumGrids`) compiles to ordinary rhythm/gains/chances; unchecked = chance 0.
 - **File player**: read position derived from `beat` (`fileBeats` > 0
   phase-locks; 0 free-runs). `fileStretch` renders WSOLA off-thread with a
@@ -502,9 +506,6 @@ silently doing nothing, everywhere.
 ## Known issues
 
 - `sections[].drums` isn't re-indexed when a drum voice is deleted.
-- A drum voice whose first note isn't at 0 (`1 r, 1`, a shift) fires a stray
-  hit at beat 0 at launch, Restart and every cycle wrap; the oldest *visual*
-  loop tap is never voided by a wrap. See *The six added 2026-09-27*.
 - Device picker `describe()` shows input channel count in the output list.
 - Output channel count `2` is a magic literal; untangle before channel work.
 - Click counter ticks twice per frame (`400` is really 200 frames).

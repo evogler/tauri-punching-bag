@@ -1,4 +1,4 @@
-fn bisect<T: std::cmp::PartialOrd>(arr: &Vec<T>, val: T) -> isize {
+fn bisect<T: std::cmp::PartialOrd>(arr: &[T], val: T) -> isize {
     let mut lo = 0;
     let mut hi = arr.len();
     while lo < hi {
@@ -12,22 +12,32 @@ fn bisect<T: std::cmp::PartialOrd>(arr: &Vec<T>, val: T) -> isize {
     lo as isize - 1
 }
 
-pub fn beat_bisect(subdivisions: &Vec<f64>, beat: f64) -> isize {
-    let default_subdivisions = &vec![0.0, 1.0];
-    // A cycle of no length can't be bisected: `beat / 0` is an infinite loop
-    // count, which saturates to isize::MAX on the cast and then overflows to
-    // isize::MIN on the way out -- a constant, so the click or the voice simply
-    // stops triggering, with nothing anywhere saying why. The frontend rejects
-    // a zero-length rhythm now, but a hand-written preset can still carry one,
-    // and the audio thread shouldn't depend on somebody else's validation.
-    // Only the span is checked, which is O(1): an interior time can't be
-    // non-finite, because JSON has no NaN and serde won't take a null.
+/// The rhythm `beat_bisect` actually walks: the one given, or a one-beat
+/// cycle of one note when that cannot be bisected.
+///
+/// A cycle of no length can't be bisected: `beat / 0` is an infinite loop
+/// count, which saturates to isize::MAX on the cast and then overflows to
+/// isize::MIN on the way out -- a constant, so the click or the voice simply
+/// stops triggering, with nothing anywhere saying why. The frontend rejects
+/// a zero-length rhythm now, but a hand-written preset can still carry one,
+/// and the audio thread shouldn't depend on somebody else's validation.
+/// Only the span is checked, which is O(1): an interior time can't be
+/// non-finite, because JSON has no NaN and serde won't take a null.
+///
+/// The fallback is a static rather than a `vec!`, which allocated on every
+/// call -- per frame, for the click and for every drum voice.
+fn usable_subdivisions(subdivisions: &[f64]) -> &[f64] {
+    static DEFAULT: [f64; 2] = [0.0, 1.0];
     let span = *subdivisions.last().unwrap_or(&0.0);
-    let subdivisions = if subdivisions.len() < 2 || !(span > 0.0) || !span.is_finite() {
-        &default_subdivisions
+    if subdivisions.len() < 2 || !(span > 0.0) || !span.is_finite() {
+        &DEFAULT
     } else {
         subdivisions
-    };
+    }
+}
+
+pub fn beat_bisect(subdivisions: &[f64], beat: f64) -> isize {
+    let subdivisions = usable_subdivisions(subdivisions);
     if !beat.is_finite() {
         return 0;
     }
@@ -38,6 +48,19 @@ pub fn beat_bisect(subdivisions: &Vec<f64>, beat: f64) -> isize {
     let sub_beat = beat - (loop_count as f64 * subdivision_len);
     let bisection = bisect(subdivisions, sub_beat);
     loop_count * beats_per_loop + bisection
+}
+
+/// Where hit `hit` begins, in the same coordinates `beat_bisect` was asked in
+/// -- its inverse. A beat before a rhythm's first note belongs to the previous
+/// pass's last one, so the hit current at beat 0 of `1 r, 1` begins at -1:
+/// that is what tells a note written *on* a restart from the tail of one
+/// written before it.
+pub fn hit_start(subdivisions: &[f64], hit: isize) -> f64 {
+    let subdivisions = usable_subdivisions(subdivisions);
+    let beats_per_loop = subdivisions.len() as isize - 1;
+    let span = subdivisions[subdivisions.len() - 1];
+    hit.div_euclid(beats_per_loop) as f64 * span
+        + subdivisions[hit.rem_euclid(beats_per_loop) as usize]
 }
 
 pub fn mod_add(a: usize, b: usize, max: usize) -> usize {

@@ -952,19 +952,26 @@ fields, all eight examples). The two originals are byte-identical.
   wrap. The transport-start seeding (`hit - 1`) assumes the hit current at
   beat 0 is a note *at* beat 0; for `1 r, 1` it is the previous cycle's last
   note, index -1, and it fires. At a wrap the index jumps back and fires the
-  same way. A shift or a nudge does it too. (Launch simulated; the wrap and
-  Restart cases by reading.) Heard as an extra snare on the
+  same way. A shift or a nudge does it too. Heard as an extra snare on the
   first downbeat of *Basic backbeat* and *Backbeat on/off* (in the second it
   lands in the click-only opening); *Count-off* is spared because its first
-  section mutes the drums. Not fixed here: the fix is in the seeding, to fire
-  at transport start only when the current hit's note sounds at or after
-  beat 0, and to reseed the same way on a wrap and a Restart.
-- **Also by reading, not tested: the oldest visual loop tap is never voided
-  after a restart.** `back = ((k+1) * spacing) % loop_len` is 0 for the last
-  tap, so its distance reads as 0 and always passes `<= loop_written`; the
-  audio taps are offset by the compensation and are voided correctly. With
-  one echo that is every visual echo, so after a practice-cycle wrap the pane
-  draws the previous cycle's last pass as an echo for one loop.
+  section mutes the drums. **Fixed the same day** -- see *A hit written on
+  beat 0 sounds at launch*, under *Drums*, for what was wrong and the fix.
+- **Also found: the oldest visual loop tap was never voided after a
+  restart.** `back = ((k+1) * spacing) % loop_len` is 0 for the last tap
+  whenever `echoes * spacing` is the buffer, so its read distance came out as
+  0 and always passed `<= loop_written`; the audio taps are offset by the
+  compensation and were voided correctly. With one echo that is every visual
+  echo, so after a practice-cycle wrap the pane drew the previous cycle's last
+  pass as an echo nobody heard, for one loop. **Fixed the same day**: a visual
+  tap landing on `p` reads a whole buffer back -- the write comes after the
+  read -- so its distance is `loop_len`, not 0. Driven through the real
+  `Engine` (temp test, run and deleted) with one echo and three, across three
+  wraps and a Restart: the picture at frame *n* now equals the sound at
+  *n - buffer_compensation* on every frame outside the `buffer_compensation`
+  frames right after a wrap (where the picture's stamps are negative and
+  the two cannot agree by construction); before, 66,000 frames drew an echo
+  that did not sound. The audio taps are untouched.
 
 ## Rhythm syntax
 
@@ -2702,9 +2709,13 @@ a pause is a section with nothing on.
     *first* click sounds at the restart either way, and every interval after it
     is at the new tempo -- and an interval is what carries a tempo. If it ever
     reads as wrong, emitting one section early is the fix.
-  - The same latency means the first hit of a cycle can't use its offset
-    look-ahead: there is no time before beat 0 to fire it in, so that one lands
-    `offset_beats` late.
+  - A drum voice's look-ahead *can* reach across the wrap, and does: past
+    `cycle_beats` it reads the restarted rhythm, so the first hit of the next
+    cycle fires `offset_beats` early like any other and lands on the beat. It
+    is only after a launch or a Restart, where there is no time before beat 0
+    to fire it in, that the first hit lands `offset_beats` late. (Until
+    2026-09-27 the look-ahead read on into the *old* cycle and the wrap then
+    fired the new cycle's first note as well -- a flam at every wrap.)
 - **`section_bounds` writes into a reused vector** and returns the cycle length,
   once per callback next to the pan gains. It walks the *order*, so a section
   appearing eight times costs eight entries and no allocation after the first.
@@ -3668,9 +3679,62 @@ eaten. Making the transport start silent is what exposed them.
   part half way through a phrase doesn't sound it instantly. At the *start* of
   the transport that rule is wrong: nothing has been missed, and a hit on beat 0
   is one you asked to hear. The seed is `hit - 1` when the callback began with
-  `beat == 0.0`, which makes the ordinary change test fire it. `beat` only
-  leaves 0 by accumulating, so that condition is also true after `reset_beat`
-  and after a practice-cycle wrap, which is what you want in all three cases.
+  `beat == 0.0`, which makes the ordinary change test fire it.
+- **...but only when that hit is a note *on* beat 0** (fixed 2026-09-27). The
+  seeding assumed the hit current at the restart was a note sounding there.
+  Before a rhythm's first note it is not: `beat_bisect` answers the
+  *previous* pass's last note (index -1 for `1 r, 1`, begun at beat -1), and
+  seeding under it fired that as a stray hit on beat 0. So `1 r, 1`, any
+  `shift`, and a grid whose column 0 is unchecked but whose rhythm starts
+  late all played an extra hit at launch. The same happened at every Restart
+  and every wrap, where the old code did not reseed at all and relied on the
+  hit index jumping -- which fires whatever the index jumped *to*.
+  - **The test is where the note sounds.** `hit_start` (in `util.rs`, the
+    inverse of `beat_bisect`) gives where the current hit begins; plus the
+    `shift` that is where it sounds in beats of the restarted run. It fires
+    only if that is at or after 0 (and not before now, so a voice switched
+    back on mid-phrase after a restart does not fire either). Otherwise the
+    hit's slot is recorded and nothing sounds -- no roll is taken for a note
+    that never begins, and `gains` and `chances` are indexed by hit, so they
+    stay in phase regardless. A note on beat 0 with chance 0 is an ordinary
+    trigger that loses its roll, exactly as before.
+  - **All three restarts are the same case now.** `transport_epoch` is bumped
+    by `reset_beat` and by a wrap, and each voice remembers the epoch its
+    last hit was taken in; a mismatch reseeds by the rule above. Relying on
+    the index jumping had a second failure, the opposite way round: a cycle
+    shorter than a rhythm's first span (a 0.5-beat cycle over a note every 2)
+    lands on the *same* index after the wrap, so the real beat-0 hit was
+    swallowed at every wrap but the first. Launch keeps the `beat == 0.0`
+    test, for a voice seen for the first time; an epoch cannot be fooled into
+    reseeding every callback by a stalled clock (bpm 0), which `beat == 0.0`
+    could.
+  - **A look-ahead past the wrap reads the restarted rhythm.** With an
+    `offset`, the trigger for the note at the top of the next cycle fires
+    `offset_beats` before the wrap. It used to read on into the old cycle --
+    firing the note that would have fallen at `cycle_beats` had time not
+    restarted -- and then the wrap fired the new cycle's own first note: a
+    flam the width of the offset at every wrap. Past `cycle_beats` the query
+    is now taken in the next cycle's beats and the epoch it belongs to is the
+    next one, so the wrap finds that voice already seeded and fires nothing.
+    Bonus: the first hit of a wrapped cycle is now on time rather than
+    `offset_beats` late (launch and Restart still cannot look ahead).
+  - Driven through the real `Engine` (temp test, run and deleted), 120 bpm,
+    impulse samples, frame by frame. Before: `1 r, 1` hit at 0, 1, 3 at
+    launch, again at the Restart, and at 0 in every 4-beat cycle; `shift 1`
+    and `shift -0.5` the same; a 10 ms offset flammed at every wrap (3.98
+    then 0.0); a 0.5-beat cycle over `2`-beat notes sounded once in four
+    wraps. After: `1 r, 1` hits exactly 1 and 3 at launch, after Restart and
+    in each of three cycles, with an offset at 0.98 and 2.98; a note on 0
+    still sounds at launch, after Restart, at an aligned and an unaligned
+    (3-beat) wrap and at every 0.5-beat wrap; with the offset, once per wrap
+    at 3.98 and never again at 0; a whole-cycle shift (2) still plays on 0;
+    and a grid `0,1,1,1` with gains `1,.25,.5,.75` sounds 1/2/3 at .25/.5/.75
+    in every cycle, after a Restart and across a 3-beat wrap -- column 0
+    silent, in phase throughout. The click is untouched.
+- **`beat_bisect` allocated on every call** -- its fallback cycle was a
+  `vec!`, built per frame for the click and for every voice -- and it and
+  `hit_start` now share a static one (`usable_subdivisions`). Found while
+  writing the second.
 - **The click.** `last_beat` started at 0, which is exactly `beat_bisect`'s
   answer for beat 0, so the first click was compared equal and dropped. It
   starts at -1 -- the subdivision before the first. Unlike a drum voice the

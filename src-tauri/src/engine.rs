@@ -34,7 +34,7 @@ use crate::structs::{
 };
 use crate::types::S;
 use crate::util::{
-    beat_bisect, display_start, mod_add, record_cycle_bounds, recording_at, section_at,
+    beat_bisect, display_start, hit_start, mod_add, record_cycle_bounds, recording_at, section_at,
     section_bounds,
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -191,6 +191,13 @@ pub struct Engine {
     // happens on the crossing rather than every frame. isize::MIN means "not
     // primed yet", which stops a newly added voice firing immediately.
     drum_last_beats: Vec<isize>,
+    // Which transport run each voice's `drum_last_beats` was taken in, against
+    // `transport_epoch`. A mismatch is how a voice learns the rhythm restarted
+    // under it -- see the seeding in the frame loop.
+    drum_epochs: Vec<u64>,
+    // Bumped whenever the rhythm restarts from beat 0 -- `reset_beat` and a
+    // practice-cycle wrap. Only ever compared for equality.
+    transport_epoch: u64,
     // Gain per echo, resolved once per callback so the per-frame tap loop isn't
     // raising loop_echo_gain to a power for every frame and channel.
     tap_gains: Vec<f32>,
@@ -268,6 +275,8 @@ impl Engine {
             voice_times: Vec::with_capacity(VOICE_RESERVE),
             voice_samples: Vec::with_capacity(VOICE_RESERVE),
             drum_last_beats: vec![],
+            drum_epochs: vec![],
+            transport_epoch: 0,
             tap_gains: vec![],
             input_raw: vec![0f32; input_channels],
             input_frame: vec![0f32; input_channels],
@@ -362,6 +371,8 @@ impl Engine {
             voice_times,
             voice_samples,
             drum_last_beats,
+            drum_epochs,
+            transport_epoch,
             tap_gains,
             input_raw,
             input_frame,
@@ -394,6 +405,7 @@ impl Engine {
 
         if shared.reset_beat.load(std::sync::atomic::Ordering::Relaxed) {
             *beat = 0.0;
+            *transport_epoch += 1;
             mp3.pos = 0.0;
             // The cuts describe a room at a volume; nothing recorded before the
             // restart is going to play back, so they describe nothing.
@@ -590,6 +602,7 @@ impl Engine {
         // Growing keeps the existing voices primed, so adding one doesn't
         // retrigger the others.
         drum_last_beats.resize(config.drums.len(), isize::MIN);
+        drum_epochs.resize(config.drums.len(), 0);
         bus_delay.resize(config.buffer_compensation);
 
         // The practice cycle: count-off, groove, pause, whatever is in the
@@ -670,11 +683,12 @@ impl Engine {
         };
 
         // Whether the transport is still sitting on beat 0 as this callback
-        // begins -- true on the first callback after launch, after `reset_beat`
-        // and after a practice-cycle wrap, since `beat` only leaves 0 by
-        // accumulating. It is what tells a voice being seen for the first time
-        // apart from a voice that has simply not moved yet; see the seeding
-        // below.
+        // begins -- true on the first callback after launch, since `beat` only
+        // leaves 0 by accumulating. It tells a voice seen for the first time
+        // at launch (a restart: fire a note on beat 0) from one added mid-
+        // phrase (don't). Restarts after launch -- `reset_beat` and a wrap --
+        // are told apart by `transport_epoch` instead, which a stalled clock
+        // (a bpm of 0) cannot mistake for a restart every callback.
         let at_transport_start = *beat == 0.0;
         let loop_spacing = get_loop_spacing(&config, sample_rate);
         // Once per callback, next to the tap gains: the cycle only moves when
@@ -745,6 +759,7 @@ impl Engine {
                 // that carries the tempo.
                 if sections_on && *beat >= cycle_beats {
                     *beat = 0.0;
+                    *transport_epoch += 1;
                     mp3.pos = 0.0;
                     // A window stitched across the jump is a spectral edge
                     // nobody played, the same as at a manual reset.
@@ -961,7 +976,25 @@ impl Engine {
                                 // different from `back`. Anything older than the
                                 // restart is silence rather than a phrase played
                                 // at the previous tempo.
-                                if (p + loop_len - v_at) % loop_len <= *loop_written {
+                                //
+                                // A visual tap reading a whole buffer back --
+                                // the oldest one, whenever echoes * spacing is
+                                // the buffer -- lands on `p` itself, which
+                                // still holds what was written `loop_len`
+                                // frames ago (the write comes after the read).
+                                // Taken mod the buffer that distance is 0 and
+                                // passed the test on every frame, so after a
+                                // wrap the picture drew the previous cycle's
+                                // last pass as an echo nobody could hear --
+                                // with one echo, every visual echo. The audio
+                                // taps are offset by the compensation and never
+                                // land on `p`, and are left exactly as they
+                                // were.
+                                let v_back = match (p + loop_len - v_at) % loop_len {
+                                    0 => loop_len,
+                                    d => d,
+                                };
+                                if v_back <= *loop_written {
                                     visual_sum += buf[v_at] * gain;
                                 }
                                 if (p + loop_len - a_at) % loop_len <= *loop_written {
@@ -1047,22 +1080,59 @@ impl Engine {
                         // early: its transient then lands on the beat instead of
                         // however far into the file it happens to sit.
                         let offset_beats = voice.offset / 1000.0 * config.bpm / 60.0;
+                        let ahead = *beat + offset_beats;
+                        // A look-ahead reaching past a practice-cycle wrap
+                        // reads the rhythm as it will be *after* the wrap --
+                        // restarted from its top -- because that is what will
+                        // be playing when the hit sounds. Reading on into the
+                        // old cycle fired the note that would have fallen at
+                        // the wrap had time not restarted, and then the
+                        // restarted rhythm's own first note on top of it: a
+                        // flam at every wrap, the width of the offset.
+                        let wrapped_ahead = sections_on && ahead >= cycle_beats;
+                        let query = if wrapped_ahead { ahead - cycle_beats } else { ahead };
                         // Subtracting the shift reads the rhythm from earlier in
                         // the cycle, which is what puts the part later. Negative
                         // beats are fine -- beat_bisect floors into the cycle.
-                        let hit = beat_bisect(&voice_times[v], *beat + offset_beats - voice.shift);
+                        let hit = beat_bisect(&voice_times[v], query - voice.shift);
+                        // Which run of the rhythm `query` is in: this one, or
+                        // (past a wrap) the next.
+                        let epoch = *transport_epoch + wrapped_ahead as u64;
                         // A voice seen for the first time records where the
                         // beat already is rather than firing, so adding a part
                         // half way through a phrase doesn't sound it instantly.
-                        // At the *start* of the transport that rule is wrong:
-                        // nothing has been missed, and a hit written on beat 0
-                        // is one you asked to hear. Seeding one hit earlier
-                        // makes the comparison below fire it. This was
-                        // inaudible while Rust sounded its own defaults during
-                        // launch -- the drums were already mid-phrase by the
-                        // time the saved config arrived.
-                        if drum_last_beats[v] == isize::MIN {
-                            drum_last_beats[v] = if at_transport_start { hit - 1 } else { hit };
+                        //
+                        // At a *restart* -- launch, `reset_beat`, a wrap --
+                        // nothing has been missed, and a note written on beat
+                        // 0 is one you asked to hear, so it is seeded one hit
+                        // earlier and the comparison below fires it. But only
+                        // when the current hit really is a note sounding at
+                        // or after the restart. Before the first note of a
+                        // pass (`1 r, 1`, a shift, a nudge) the current hit
+                        // is the *previous* pass's last note, begun before
+                        // the restart, and seeding under it used to fire it
+                        // as a stray hit on beat 0 at every launch, Restart
+                        // and wrap. It is still skipped rather than dropped:
+                        // its slot is recorded, so `gains` and `chances` stay
+                        // in phase, and the next note fires as usual.
+                        //
+                        // "At or after the restart" is asked in beats of the
+                        // restarted run: the note sounds at its start plus
+                        // the shift, and must not be before 0 -- nor before
+                        // now, which is what keeps a voice that was off
+                        // through a restart from firing mid-phrase when it
+                        // comes back on.
+                        let first_seen = drum_last_beats[v] == isize::MIN;
+                        if first_seen || drum_epochs[v] != epoch {
+                            let restart = !first_seen || at_transport_start;
+                            let sounds_at = hit_start(&voice_times[v], hit) + voice.shift;
+                            let now = query - offset_beats;
+                            drum_last_beats[v] = if restart && sounds_at >= now.max(0.0) - 1e-9 {
+                                hit - 1
+                            } else {
+                                hit
+                            };
+                            drum_epochs[v] = epoch;
                         }
                         if hit != drum_last_beats[v] {
                             // Indexed by hit rather than by position in the
