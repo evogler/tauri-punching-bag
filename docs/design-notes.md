@@ -1128,7 +1128,9 @@ chases a new disk image.
   and a fresh signature, so a manifest from one build with a tarball from
   another verifies on nobody's machine. Rebuild, and re-copy all three.
 - **The platform key is derived, not typed** (`darwin-aarch64`). The updater
-  matches it exactly, and an x86_64 or universal build needs its own entry.
+  matches it exactly. Since the universal build the one tarball is listed
+  under both `darwin-aarch64` and `darwin-x86_64`, derived from the target
+  directory the tarball came out of (see *The universal build*).
 - **`notes` comes from the last commit subject, so commit before building a
   release.** Build first and the release notes describe the commit *before* the
   work being released -- which is wrong in a way nobody would notice until a
@@ -1275,6 +1277,43 @@ hand afterwards is harmless. A fresh install from the disk image is
 `Microtime.app`, and one machine can end up with both if someone drags the new
 image over an old install -- same id, so they share settings; delete the old.
 
+### The universal build
+
+**Since 2026-09-27 `yarn tauri build` makes one universal bundle**, arm64 and
+x86_64, so a friend on an Intel Mac gets the same download. `scripts/tauri.mjs`
+adds `--target universal-apple-darwin` to any `build` that names no target, so
+the command did not change; the CLI builds both slices, `lipo`s them, and signs,
+notarizes and staples the result exactly as before.
+
+- **Artifacts moved** to `src-tauri/target/universal-apple-darwin/release/bundle/`
+  (`macos/Microtime.app`, `macos/Microtime.app.tar.gz` + `.sig`,
+  `dmg/Microtime_<version>_universal.dmg`, and `latest.json` beside them). The
+  script finds everything by walking `target`, so only the manifest's location
+  needed changing.
+- **One tarball, two manifest keys.** The updater picks its entry by
+  `darwin-<arch>` of the running binary, and a universal tarball serves both,
+  so `latest.json` lists the same URL and signature under `darwin-aarch64` and
+  `darwin-x86_64`. A v1 install and a v2 one ask for the same keys. An old
+  arm64-only install that updates gets the universal bundle, which is harmless.
+- **The sweep now takes stale updater tarballs and signatures too**, not only
+  disk images: the rename and this move each left a complete signed set under
+  `target/release/`, and a signed tarball of the wrong build is as easy to
+  publish by mistake as a stale image.
+- **What it costs.** Measured on this machine: the bundle went 19 MB -> 37 MB,
+  the disk image 8.5 -> 14 MB, the updater tarball 7.5 -> 14 MB. A warm build
+  compiles the Rust side twice (~17 s each) and took 115 s against ~92 s for
+  arm64 alone, most of either being the two notarization round trips. The
+  first build after adding `x86_64-apple-darwin` compiled every dependency
+  again and took 3 min.
+- **Verified mechanically, 2026-09-27**: `lipo -archs` gives `x86_64 arm64`,
+  `codesign --verify --strict --arch` passes for each slice, TeamIdentifier
+  `9KMDH5UH9Z`, `flags=0x10000(runtime)`, the audio-input entitlement is
+  present, `spctl -a` accepts both the app and the image as `Notarized
+  Developer ID`, and the usage string is in `Info.plist`. **The x86_64 slice
+  has never run** -- `arch -x86_64` under Rosetta on an Apple Silicon Mac, or a
+  real Intel Mac, is the test. Core Audio and the engine are the same code on
+  both, so what could differ is only what the compiler did.
+
 ### Installing on a second Mac
 
 **The build now sweeps stale disk images, so there should only ever be one.**
@@ -1371,7 +1410,8 @@ grant took effect without restarting it).
 codesign -dvvv /Applications/tauri-punching-bag.app
 ```
 
-- `Format=... (x86_64)` -- wrong DMG. Current builds are `arm64`.
+- `Format=... (x86_64)` alone -- wrong DMG. Builds from 2026-09-27 are
+  `Mach-O universal (x86_64 arm64)`; before that, `arm64`.
 - `Info.plist entries=17` -- the 2023 x64 DMG. v1 builds carrying the
   microphone key reported 27; **v2 builds report 18**, so the count no longer
   separates good from bad on its own -- `plutil -p .../Info.plist | grep -i

@@ -79,13 +79,38 @@ const dmgsUnder = (dir) => filesUnder(dir, ".dmg");
 // other one. Time rather than a name pattern: the bundler's `rw.` scratch image
 // is only the case we happen to know about, and the 13 MB x64 image that
 // actually caused trouble was named exactly like a real artifact.
+//
+// Updater tarballs and their signatures go the same way. The rename to
+// Microtime and the move to a universal build each left a complete, signed
+// set of release files under a path the next build no longer writes to, and a
+// signed tarball of the wrong build is exactly as easy to publish by mistake
+// as a stale disk image.
 const sweep = (startedAt) => {
-  for (const dmg of dmgsUnder(target)) {
-    if (statSync(dmg).mtimeMs >= startedAt) continue;
-    unlinkSync(dmg);
-    console.log(`removed stale disk image ${dmg.slice(root.length + 1)}`);
+  const stale = [
+    ...dmgsUnder(target),
+    ...filesUnder(target, ".app.tar.gz"),
+    ...filesUnder(target, ".app.tar.gz.sig"),
+  ];
+  for (const file of stale) {
+    if (statSync(file).mtimeMs >= startedAt) continue;
+    unlinkSync(file);
+    console.log(`removed stale ${file.slice(root.length + 1)}`);
   }
 };
+
+// One bundle for both kinds of Mac. `lipo` joins an arm64 and an x86_64
+// build into one binary, the bundler signs and notarizes it exactly as it did
+// the single-arch one, and the updater tarball it makes serves both -- so a
+// friend never has to know which chip they have. Added here rather than typed
+// so the command stays `yarn tauri build`; a `--target` given explicitly wins.
+// Costs a second full compile of the Rust side, for the x86_64 half.
+const UNIVERSAL = "universal-apple-darwin";
+const withUniversalTarget = (args) =>
+  args[0] === "build" &&
+  process.platform === "darwin" &&
+  !args.some((a) => a === "--target" || a === "-t" || a.startsWith("--target="))
+    ? [...args, "--target", UNIVERSAL]
+    : args;
 
 loadSigningEnv();
 
@@ -219,11 +244,21 @@ const writeReleaseManifest = (startedAt) => {
     readFileSync(join(root, "src-tauri", "tauri.conf.json"), "utf8")
   );
   const version = conf.version;
+  // Not renamed with the app: the updater endpoint every install already
+  // asks is under this repo.
   const repo = "evogler/tauri-punching-bag";
 
-  // The updater matches on this exactly, so it is derived rather than typed.
-  // An x86_64 or universal build would need its own entry beside this one.
-  const platform = process.arch === "arm64" ? "darwin-aarch64" : "darwin-x86_64";
+  // The updater matches its own `darwin-<arch>` key exactly, so the keys are
+  // derived from which build the tarball came out of, never typed. A
+  // universal tarball runs on both, so it is listed under both.
+  const platformsFor = (tarball) =>
+    tarball.includes(`/${UNIVERSAL}/`)
+      ? ["darwin-aarch64", "darwin-x86_64"]
+      : tarball.includes("/x86_64-apple-darwin/")
+      ? ["darwin-x86_64"]
+      : tarball.includes("/aarch64-apple-darwin/")
+      ? ["darwin-aarch64"]
+      : [process.arch === "arm64" ? "darwin-aarch64" : "darwin-x86_64"];
 
   let notes = "";
   try {
@@ -247,13 +282,15 @@ const writeReleaseManifest = (startedAt) => {
       );
       return;
     }
-    platforms[platform] = {
-      signature,
-      url: `https://github.com/${repo}/releases/download/v${version}/${name}`,
-    };
+    for (const platform of platformsFor(tarball))
+      platforms[platform] = {
+        signature,
+        url: `https://github.com/${repo}/releases/download/v${version}/${name}`,
+      };
   }
 
-  const manifest = join(target, "release", "bundle", "latest.json");
+  // Beside the bundles it describes: `.../bundle/latest.json`.
+  const manifest = join(dirname(dirname(tarballs[0])), "latest.json");
   writeFileSync(
     manifest,
     JSON.stringify(
@@ -291,7 +328,7 @@ const writeReleaseManifest = (startedAt) => {
 if (args[0] === "build" && !freeDiskImageVolumes()) process.exit(1);
 
 const startedAt = Date.now();
-const cli = spawn(join(root, "node_modules", ".bin", "tauri"), args, {
+const cli = spawn(join(root, "node_modules", ".bin", "tauri"), withUniversalTarget(args), {
   stdio: "inherit",
 });
 cli.on("exit", (code, signal) => {

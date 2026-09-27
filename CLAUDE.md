@@ -35,11 +35,17 @@ yarn tauri ios build --target aarch64 --debug       # device .ipa
 ```
 
 - **Run `yarn tauri build` after every change** (owner's explicit request). It
-  compiles Rust too and takes ~30s. Two warnings are expected: `unused import:
-  std::time::Instant` and `method hop_frames is never used`.
-- `yarn tauri` runs `scripts/tauri.mjs`: forwards args, frees/refuses a mounted
-  `/Volumes/Microtime` before building, sweeps stale `.dmg`s (by time)
-  after a successful build, notarizes + staples the DMG, writes `latest.json`.
+  compiles Rust **twice** (it is a universal build: arm64 + x86_64, ~17s
+  each warm) and then waits on two notarizations -- ~2 min in all. The two
+  expected warnings (`unused import: std::time::Instant`, `method hop_frames
+  is never used`) therefore appear twice each.
+- `yarn tauri` runs `scripts/tauri.mjs`: forwards args (adding `--target
+  universal-apple-darwin` to a `build` that names no target), frees/refuses a
+  mounted `/Volumes/Microtime` before building, sweeps stale `.dmg`s and
+  updater tarballs/`.sig`s (by time) after a successful build, notarizes +
+  staples the DMG, writes `latest.json` with both `darwin-aarch64` and
+  `darwin-x86_64` pointing at the one universal tarball. Artifacts are under
+  `src-tauri/target/universal-apple-darwin/release/bundle/`.
 - **If it fails with `error running bundle_dmg.sh`, don't re-run.** Run
   `node_modules/.bin/tauri build --verbose` for the real error. Two causes: a
   mounted volume of the same name (`lsof +D /Volumes/...` names the holder), or
@@ -457,7 +463,8 @@ Each has a full section in `docs/design-notes.md`.
   team
   `9KMDH5UH9Z` in `bundle.iOS.developmentTeam`, signed by Xcode automatic
   signing with the *Apple Development* certificate (not the Developer ID).
-- **Identify an artifact with `codesign -dvvv`** -- expect `arm64`,
+- **Identify an artifact with `codesign -dvvv`** -- expect `Mach-O universal
+  (x86_64 arm64)` (`lipo -archs` on the binary says the same),
   `TeamIdentifier=9KMDH5UH9Z`. Not file size. Stale TCC:
   `tccutil reset Microphone com.vogler.dev`.
 - Updater: minisign key at `~/.tauri/punching-bag.key` (back it up; losing it
