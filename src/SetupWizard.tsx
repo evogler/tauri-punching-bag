@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { BleedMeter } from "./BleedMeter";
 import { Calibration } from "./Calibration";
-import { exprNumber, numExpr } from "./config";
+import { channelLabel, exprNumber, numExpr } from "./config";
 import {
   ActiveDevices,
   AudioDeviceInfo,
@@ -157,7 +157,6 @@ export const SetupWizard = ({
   deviceError,
   refreshDevices,
   inputCount,
-  channelLabels,
   get,
   set,
   sampleRate,
@@ -171,7 +170,6 @@ export const SetupWizard = ({
   deviceError: string | null;
   refreshDevices: () => void;
   inputCount: number;
-  channelLabels: string[];
   get: (key: any) => any;
   set: (key: string, value: any) => void;
   sampleRate: number;
@@ -313,7 +311,11 @@ export const SetupWizard = ({
         )}
 
         {name === "microphone" && (
-          <MicCheck labels={channelLabels.slice(0, Math.max(1, inputCount))} />
+          <MicCheck
+            labels={Array.from({ length: Math.max(1, inputCount) }, (_, i) =>
+              channelLabel(i)
+            )}
+          />
         )}
 
         {name === "room" && (

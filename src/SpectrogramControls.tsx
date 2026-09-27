@@ -1,4 +1,4 @@
-import { ViewConfig } from "./config";
+import { ViewConfig, channelLabel } from "./config";
 import { useHelp } from "./help";
 import { Slider, sliderRowStyle as rowStyle } from "./Slider";
 
@@ -6,14 +6,15 @@ import { Slider, sliderRowStyle as rowStyle } from "./Slider";
 // rather than expressions: a slider and a dropdown have nowhere to type one.
 export const SpectrogramControls = ({
   cfg,
-  labels,
   count,
+  inputs,
   set,
 }: {
   cfg: ViewConfig;
-  // Channel names in device order; only the first `count` are analysed.
-  labels: string[];
+  // How many inputs are analysed -- this device's, up to Rust's cap.
   count: number;
+  // How many inputs the device has, to tell "not connected" from "past the cap".
+  inputs: number;
   set: (key: string, val: unknown) => void;
 }) => {
   const help = useHelp();
@@ -27,9 +28,19 @@ export const SpectrogramControls = ({
         >
           {Array.from({ length: Math.max(1, count) }, (_, i) => (
             <option key={i} value={i}>
-              {labels[i] ?? `ch ${i + 1}`}
+              {channelLabel(i)}
             </option>
           ))}
+          {/* An input this device doesn't have (or past the analysis cap) is
+              kept rather than reset, and said to be missing -- otherwise the
+              dropdown would show the first input while the pane drew
+              nothing. */}
+          {cfg.spectrogramChannel >= Math.max(1, count) && (
+            <option value={cfg.spectrogramChannel}>
+              {channelLabel(cfg.spectrogramChannel)} --{" "}
+              {cfg.spectrogramChannel < inputs ? "not analysed" : "not connected"}
+            </option>
+          )}
         </select>
       </div>
       <Slider

@@ -18,7 +18,7 @@ import { ui } from "../theme";
 // latency between them, the inputs, the room on speakers, and updates. Mostly
 // set once, which is why it is not the first tab.
 export const SetupTab = (p: PanelProps) => {
-  const { get, set, params, togglePaused, audioDevices, activeDevices, audioPrefs, chooseDevices, deviceError, refreshDevices, inputChannelCount, channelLabels, sampleRate, openSetup } = p;
+  const { get, set, params, togglePaused, audioDevices, activeDevices, audioPrefs, chooseDevices, deviceError, refreshDevices, inputChannelCount, channelList, sampleRate, openSetup } = p;
   return (
     <>
       {/* First, so someone who skipped setup and is now stuck finds it. */}
@@ -75,14 +75,13 @@ export const SetupTab = (p: PanelProps) => {
       <Section label="Input">
         <Input label="Input gain" _key="audioInGain" params={params} set={set} get={get} />
         <ChannelList
-          labels={channelLabels}
-          inputCount={inputChannelCount}
-          styles={get("channelStyles")}
+          channels={channelList}
+          styles={get("channelStyleById")}
           pans={get("channelPans")}
-          gains={get("channelGains")}
-          setStyles={(next) => set("channelStyles", next)}
+          gains={get("channelGainById")}
+          setStyles={(next) => set("channelStyleById", next)}
           setPans={(next) => set("channelPans", next)}
-          setGains={(next) => set("channelGains", next)}
+          setGains={(next) => set("channelGainById", next)}
         />
       </Section>
       {/* Measure first, then the switches that use the measurement. What it

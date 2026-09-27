@@ -12,8 +12,62 @@ import {
   Rng,
 } from "./expression";
 
-// How a single input channel is drawn.
+// How a single channel is drawn.
 export type ChannelStyle = { color: string; alpha: number };
+
+// A channel's identity, which never depends on the device. Input *k* is `k`
+// (0-based, so `ch 1` is 0) on every device; the synthetic buses sit in a
+// reserved range far above any input count, so plugging in a device with more
+// or fewer inputs renumbers nothing. Numbers rather than tagged strings so a
+// pane's list is still a plain JSON array of numbers and Rust still takes a
+// `Vec<usize>` -- see *Stable channel identities* in the design notes. Must
+// match `BUS_DRUMS` / `BUS_CLICK` / `BUS_FILE` in src-tauri/src/constants.rs.
+export type ChannelId = number;
+export const BUS_DRUMS: ChannelId = 1000;
+export const BUS_CLICK: ChannelId = 1001;
+export const BUS_FILE: ChannelId = 1002;
+// In the order the panel lists them, which is also numeric order.
+export const BUSES: ChannelId[] = [BUS_DRUMS, BUS_CLICK, BUS_FILE];
+const BUS_NAMES: Record<number, string> = {
+  [BUS_DRUMS]: "drums",
+  [BUS_CLICK]: "click",
+  [BUS_FILE]: "file",
+};
+export const isBus = (id: ChannelId) => id in BUS_NAMES;
+export const isInputId = (id: ChannelId) =>
+  Number.isInteger(id) && id >= 0 && id < BUS_DRUMS;
+
+export const channelLabel = (id: ChannelId) =>
+  BUS_NAMES[id] ?? `ch ${id + 1}`;
+
+// Whether the running device can supply this channel. The buses always can; an
+// input only while the device has that many. An absent input is *kept* by
+// whatever asked for it and simply draws nothing -- switching back to the
+// device that had it restores the picture exactly.
+export const channelPresent = (id: ChannelId, inputCount: number) =>
+  isBus(id) || (isInputId(id) && id < inputCount);
+
+export type ChannelInfo = { id: ChannelId; label: string; present: boolean };
+
+// What the panel lists: every input the device has, then the buses, plus any
+// input that is asked for but not connected (named, and marked as such, rather
+// than hidden -- otherwise a pane's choice would be invisible until the
+// interface came back). Numeric order puts inputs first, then the buses.
+export const channelInfos = (
+  inputCount: number,
+  wanted: ChannelId[] = []
+): ChannelInfo[] => {
+  const ids = new Set<ChannelId>(BUSES);
+  for (let i = 0; i < inputCount; i++) ids.add(i);
+  for (const id of wanted) if (isInputId(id) || isBus(id)) ids.add(id);
+  return Array.from(ids)
+    .sort((a, b) => a - b)
+    .map((id) => ({
+      id,
+      label: channelLabel(id),
+      present: channelPresent(id, inputCount),
+    }));
+};
 
 // Channel 0 keeps the old grey so a one-input setup looks exactly as it did.
 export const CHANNEL_COLORS = [
@@ -27,16 +81,32 @@ export const CHANNEL_COLORS = [
   "#aaff33",
 ];
 
-// Styles are stored sparsely -- an untouched channel has no entry and falls back
-// to the palette, so the list doesn't have to be sized to the device up front.
-export const channelStyle = (
-  styles: ChannelStyle[],
-  index: number
-): ChannelStyle =>
-  styles[index] ?? {
-    color: CHANNEL_COLORS[index % CHANNEL_COLORS.length],
-    alpha: 1,
-  };
+// The buses' own defaults, outside the input palette: they used to take the
+// palette colour after the last input, which moved with the input count along
+// with everything else. A session from before keeps the colour it was showing
+// -- see `migrateChannelKeys` in presets.ts.
+const BUS_COLORS: Record<number, string> = {
+  [BUS_DRUMS]: "#ff8c42",
+  [BUS_CLICK]: "#4da6ff",
+  [BUS_FILE]: "#e0a0a0",
+};
+
+export const defaultChannelStyle = (id: ChannelId): ChannelStyle => ({
+  color:
+    BUS_COLORS[id] ??
+    CHANNEL_COLORS[((id % CHANNEL_COLORS.length) + CHANNEL_COLORS.length) % CHANNEL_COLORS.length],
+  alpha: 1,
+});
+
+// Keyed by channel id and sparse: an untouched channel has no entry and falls
+// back to its default, so nothing has to be sized to the device.
+export type ChannelStyles = Partial<Record<ChannelId, ChannelStyle>>;
+export type ChannelGains = Partial<Record<ChannelId, number>>;
+
+export const channelStyle = (styles: ChannelStyles, id: ChannelId): ChannelStyle => {
+  const s = styles?.[id];
+  return s && typeof s.color === "string" ? s : defaultChannelStyle(id);
+};
 
 // A drum sound with its own rhythm. `path` is either a built-in name or the
 // absolute path the file was loaded from -- the same key Rust files it under.
@@ -495,8 +565,12 @@ export const kitSound = (path: string) => kit.find((s) => s.id === path);
 export const channelPan = (pans: number[], index: number) => pans[index] ?? 0;
 
 // A per-channel trim on the pane's `visualGain`, so a quiet mic and a hot line
-// can share a row. Sparse and 1 where unset, like the pans are 0.
-export const channelGain = (gains: number[], index: number) => gains[index] ?? 1;
+// can share a row. Sparse and 1 where unset, like the pans are 0. Keyed by
+// channel id, since it applies to the buses too.
+export const channelGain = (gains: ChannelGains, id: ChannelId) => {
+  const g = gains?.[id];
+  return typeof g === "number" && Number.isFinite(g) ? g : 1;
+};
 
 export const drumLabel = (path: string) =>
   kitSound(path)?.name ?? (path.split("/").pop() || path);
@@ -681,10 +755,13 @@ export const defaultRustConfig = {
   // doing the measuring. See CLAUDE.md, *The late bias*.
   onsetOffset: numExpr(-4),
   paused: false,
-  // Which channels the callback packs into the sample stream, by device channel
-  // index. Derived from the panes rather than set directly -- see
-  // `unionChannels`; a pane picks its own channels and this follows.
-  visibleChannels: [0] as number[],
+  // Which channels the callback packs into the sample stream, as channel ids
+  // (inputs, then the buses at 1000+), in stream order. Derived from the panes
+  // rather than set directly -- see `packedChannelIds`; a pane picks its own
+  // channels and this follows. Renamed from `visibleChannels`, whose numbers
+  // put the buses after the inputs and so meant something different on every
+  // device.
+  packedChannels: [0] as ChannelId[],
   // Stereo position per input channel, -1 hard left to 1 hard right. Sparse:
   // a channel with no entry sits centred.
   channelPans: [] as number[],
@@ -845,15 +922,18 @@ export type ViewConfig = {
   // What the y axis of the pane means: amplitude, or frequency. Everything
   // else -- rows, margins, grids, the sweep -- is shared between the two.
   kind: ViewKind;
-  // Which channels this pane draws, as *device* channel indices (inputs first,
-  // then the synthetic drum and click buses). Per-pane, so one pane can watch
-  // the drums while another watches what you played. The union of every pane's
-  // list is what Rust is asked to pack into the sample stream, which is the
-  // only part of this that reaches the audio thread.
-  channels: number[];
-  // Which *device* input channel the spectrogram shows. The analysis stream
-  // carries the input channels in device order (up to Rust's cap), not the
-  // `visibleChannels` subset, so this indexes it directly.
+  // Which channels this pane draws, as channel ids -- input k is k, the buses
+  // are `BUS_DRUMS` and on -- sorted, which is the order the split assigns
+  // from. Per-pane, so one pane can watch the drums while another watches what
+  // you played. An input the device doesn't have stays in the list and draws
+  // nothing. The union of every pane's present channels is what Rust is asked
+  // to pack, which is the only part of this that reaches the audio thread.
+  // Renamed from `channels`, whose numbers depended on the input count.
+  channelIds: ChannelId[];
+  // Which *device* input channel the spectrogram shows -- an input index,
+  // which is also its channel id. The analysis stream carries the input
+  // channels in device order (up to Rust's cap), not the packed subset, so
+  // this indexes it directly.
   spectrogramChannel: number;
   // Multiplies the normalised u8 magnitude, after the floor is subtracted.
   spectrogramGain: number;
@@ -939,11 +1019,54 @@ export const rowColorFor = (
   return rowColors[i];
 };
 
-// What Rust is asked to send: every channel some pane wants, in device order.
+// Every channel some pane asks for, sorted: inputs, then the buses.
+export const unionChannels = (views: ViewConfig[]): ChannelId[] =>
+  Array.from(new Set(views.flatMap((v) => v.channelIds ?? []))).sort(
+    (a, b) => a - b
+  );
+
+// What Rust is asked to pack: the union, less any input the device doesn't
+// have. Rust would zero-fill one anyway (it can't misread a neighbour -- the
+// ids are fixed), but a column of nothing is a column of JSON for nothing.
 // Derived rather than set, so the panes are the only place channel visibility
-// is chosen -- `visibleChannels` is left as a transport detail.
-export const unionChannels = (views: ViewConfig[]): number[] =>
-  Array.from(new Set(views.flatMap((v) => v.channels))).sort((a, b) => a - b);
+// is chosen -- `packedChannels` is a transport detail.
+export const packedChannelIds = (
+  views: ViewConfig[],
+  inputCount: number
+): ChannelId[] =>
+  unionChannels(views).filter((id) => channelPresent(id, inputCount));
+
+// The input count old channel numbers are read against. Before channels had
+// fixed ids, `inputs + 0/1/2` were the drums, click and file, and the count
+// they were saved under was never recorded -- so a legacy session or preset is
+// read against the device running when it is first migrated, exactly the
+// assumption the old code made on every launch. Module level like the sample
+// rate: the migrations run in `readSession` during the first render and in
+// the preset parser, neither of which has a way to reach App's state. Set
+// before the first render (index.tsx) and whenever the device changes.
+let legacyInputCount = 1;
+export const getLegacyInputCount = () => legacyInputCount;
+export const setLegacyInputCount = (n: number) => {
+  if (Number.isInteger(n) && n > 0) legacyInputCount = n;
+};
+
+// An old device-index channel number, read against `inputs`. Anything past the
+// file bus was never drawn by the old code (it had no label and no style), so
+// it has nothing to become and is dropped.
+export const legacyChannelId = (
+  index: unknown,
+  inputs: number
+): ChannelId | null => {
+  if (typeof index !== "number" || !Number.isInteger(index) || index < 0)
+    return null;
+  if (index < inputs) return index;
+  return BUSES[index - inputs] ?? null;
+};
+
+// The colour the old code drew a legacy index in when no style was set: the
+// palette entry at its position, buses included.
+export const legacyDefaultColor = (index: number) =>
+  CHANNEL_COLORS[index % CHANNEL_COLORS.length];
 
 // A pane with no rows would divide by zero on the way to a row height.
 // `parseNumberList` rejects an empty list, so this only catches a hand-edited
@@ -993,7 +1116,7 @@ export const defaultViewConfig = (): ViewConfig => ({
   rowSpan: 1,
   name: "",
   kind: "waveform",
-  channels: [0],
+  channelIds: [0],
   spectrogramChannel: 0,
   spectrogramGain: 1,
   spectrogramFloor: 0.15,
@@ -1038,7 +1161,9 @@ export const copyView = (view: ViewConfig): ViewConfig =>
   JSON.parse(JSON.stringify(view));
 
 export const defaultJsConfig = {
-  channelStyles: [] as ChannelStyle[],
+  // Per-channel colour, keyed by channel id. Renamed from `channelStyles`, an
+  // array indexed by the old device-order numbers.
+  channelStyleById: {} as ChannelStyles,
   // Global rather than per-view: one set of names every pane's expressions can
   // reach, so `n` means the same thing wherever it's written.
   parameters: [] as Parameter[],
@@ -1061,8 +1186,9 @@ export const defaultJsConfig = {
   // Per-channel display trim, multiplied into the pane's own `visualGain`.
   // Display only, so unlike the pans it never reaches the audio thread, and it
   // applies to every channel including the synthetic buses. Sparse: a channel
-  // with no entry draws at 1.
-  channelGains: [] as number[],
+  // with no entry draws at 1. Keyed by channel id; renamed from `channelGains`
+  // for the same reason as `channelStyleById`.
+  channelGainById: {} as ChannelGains,
   viewCols: 1,
   viewRows: 1,
   // Chained rather than simultaneous panes: instead of every pane drawing the

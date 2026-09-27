@@ -1,5 +1,5 @@
 import { ActiveDevices, AudioDeviceInfo, AudioPrefs } from "../DevicePicker";
-import { Config, ConfigKey, Parameter, RustConfig, ViewConfig } from "../config";
+import { ChannelInfo, Config, ConfigKey, Parameter, RustConfig, ViewConfig } from "../config";
 import { SampleStatus } from "../DrumList";
 import { Params } from "../expression";
 import { Rect } from "../paneLayout";
@@ -72,7 +72,9 @@ export type PanelProps = {
   deviceError: string | null;
   refreshDevices: () => void;
   inputChannelCount: number;
-  channelLabels: string[];
+  /** Every channel the panel can name, by id: the device's inputs, the buses,
+   *  and any input a pane asks for that isn't connected. */
+  channelList: ChannelInfo[];
   sampleRate: number;
 
   gridWidth: number;

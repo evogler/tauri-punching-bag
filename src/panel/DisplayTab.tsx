@@ -69,7 +69,7 @@ const overlaySummary = (v?: ViewConfig) => {
 };
 
 export const DisplayTab = (p: PanelProps) => {
-  const { get, set, params, viewCols, viewRows, setArrangement, paneCount, activeView, setSelectedView, channelLabels, inputChannelCount, activeCfg, viewIO, patchView, views, paneOps } = p;
+  const { get, set, params, viewCols, viewRows, setArrangement, paneCount, activeView, setSelectedView, channelList, inputChannelCount, activeCfg, viewIO, patchView, views, paneOps } = p;
   return (
     <>
       <Section label="Panes">
@@ -126,10 +126,10 @@ export const DisplayTab = (p: PanelProps) => {
         <Help id="channels" style={{ ...rowStyle, alignItems: "center" }}>
           <label style={labelStyle}>Channels</label>
           <ChannelPicker
-            labels={channelLabels}
-            styles={get("channelStyles")}
-            channels={activeCfg?.channels ?? []}
-            setChannels={(next) => viewIO.set("channels", next)}
+            channels={channelList}
+            styles={get("channelStyleById")}
+            selected={activeCfg?.channelIds ?? []}
+            setSelected={(next) => viewIO.set("channelIds", next)}
           />
         </Help>
         <Help id="kind" style={rowStyle}>
@@ -148,10 +148,10 @@ export const DisplayTab = (p: PanelProps) => {
         {activeCfg?.kind === "spectrogram" && (
           <SpectrogramControls
             cfg={activeCfg}
-            labels={channelLabels}
             // Only the real inputs are analysed, and only the first few of
             // them -- the buses aren't captured and have no spectrum.
             count={Math.min(inputChannelCount, MAX_ANALYSIS_CHANNELS)}
+            inputs={inputChannelCount}
             set={viewIO.set}
           />
         )}

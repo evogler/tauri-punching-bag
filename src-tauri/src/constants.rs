@@ -16,6 +16,14 @@ use crate::structs::{Config, DrumVoice, Note, ParserRhythm};
 /// it before audio setup has learned it: there is nothing to read.
 pub const DEFAULT_SAMPLE_RATE: f64 = 44100.0;
 
+/// The synthetic buses' channel ids. Fixed, in a range far above any input
+/// count, so the drums are the drums whatever device is open -- they used to
+/// sit at `inputs + 0/1/2` and so moved whenever the input count did. Must
+/// match `BUS_DRUMS` / `BUS_CLICK` / `BUS_FILE` in src/config.ts.
+pub const BUS_DRUMS: usize = 1000;
+pub const BUS_CLICK: usize = 1001;
+pub const BUS_FILE: usize = 1002;
+
 /// Frames of *display* backlog the callback will hold before it stops pushing.
 /// Only reachable if the frontend stops draining -- a wedged UI shouldn't be
 /// able to grow the buffer without bound, and with it the capacity the next
@@ -102,7 +110,7 @@ pub fn default_config() -> Config {
         onset_threshold: 0.4,
         onset_min_gap: 40.0,
         onset_offset: -4.0,
-        visible_channels: vec![0],
+        packed_channels: vec![0],
         channel_pans: vec![],
         audio_subdivisions: ParserRhythm {
             start: 0.0,

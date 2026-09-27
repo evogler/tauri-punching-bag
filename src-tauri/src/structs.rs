@@ -391,9 +391,14 @@ pub struct Config {
     /// and the flux's precision, is always a quarter of it. Anything not in
     /// that list snaps to the nearest that is.
     pub analysis_window: usize,
-    /// Which input channels get sent to the display. Only these are pushed, so
-    /// a 16-input interface doesn't cost 16 channels of JSON to watch two.
-    pub visible_channels: Vec<usize>,
+    /// Which channels get sent to the display, as channel ids, in stream
+    /// order: input k is `k`, and the synthetic buses are `BUS_DRUMS`,
+    /// `BUS_CLICK` and `BUS_FILE` -- fixed, so a device with another input count
+    /// renumbers nothing. Only these are pushed, so a 16-input interface doesn't
+    /// cost 16 channels of JSON to watch two. An input this device doesn't have
+    /// packs as silence rather than being skipped, so the stream's width is
+    /// always this list's length and the frontend's slots can't slide.
+    pub packed_channels: Vec<usize>,
     /// Stereo position per input channel, -1 hard left to 1 hard right. Sparse:
     /// a channel with no entry sits centred.
     pub channel_pans: Vec<f64>,

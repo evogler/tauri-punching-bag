@@ -23,7 +23,7 @@
 use crate::analysis::{Analyzer, OnsetParams, BINS, MAX_ANALYSIS_CHANNELS};
 use crate::bleed::{BleedCanceller, BleedTraining, LEAD as BLEED_LEAD, TAPS as BLEED_TAPS, TRAIN_LEVEL};
 use crate::calibration::Calibration;
-use crate::constants::max_visual_backlog;
+use crate::constants::{max_visual_backlog, BUS_CLICK, BUS_DRUMS, BUS_FILE};
 use crate::filter::HighPass;
 use crate::get_loop_buffer_size::{get_loop_spacing, loop_echo_count};
 use crate::loop_guard::LoopGuard;
@@ -725,8 +725,8 @@ impl Engine {
             // Changing which channels are shown changes the row width of the
             // flattened stream, so anything collected under the old width has to
             // go rather than be misread as the new one.
-            if state_vec.channels != config.visible_channels.len() {
-                state_vec.channels = config.visible_channels.len();
+            if state_vec.channels != config.packed_channels.len() {
+                state_vec.channels = config.packed_channels.len();
                 state_vec.beats.clear();
                 state_vec.values.clear();
             }
@@ -1270,29 +1270,50 @@ impl Engine {
                 // from in one poll, which beats stalling the audio thread.
                 if drawn && state_vec.beats.len() < visual_backlog_cap {
                     state_vec.beats.push(stamp);
-                    for &ch in config.visible_channels.iter() {
-                        // Channels past the input count are the synthetic buses,
-                        // in the order the frontend labels them: drums, click,
-                        // then file.
-                        let value = if ch < input_frame.len() {
-                            let mut v = loop_visual[ch];
-                            if config.visual_monitor_on {
-                                v += input_frame[ch];
-                            }
-                            v
-                        } else if ch == input_frame.len() {
-                            drum_visual
-                        } else if ch == input_frame.len() + 1 {
-                            click_visual
-                        } else {
-                            file_visual
-                        };
+                    for &ch in config.packed_channels.iter() {
+                        let value = packed_value(
+                            ch,
+                            &input_frame,
+                            &loop_visual,
+                            config.visual_monitor_on,
+                            [drum_visual, click_visual, file_visual],
+                        );
                         state_vec.values.push(value.abs());
                     }
                 }
 
                 *beat += beats_per_sample;
             }
+        }
+    }
+}
+
+/// One channel id's value in the packed sample stream. Ids, not positions: an
+/// input is its own index and the buses sit at fixed ids above any input count,
+/// so a device with another input count renumbers nothing. Anything this device
+/// can't supply -- an input it doesn't have, which the frontend asked for
+/// before it heard about a restart -- packs as silence, so every other slot
+/// stays where the frontend expects it.
+#[inline]
+fn packed_value(
+    ch: usize,
+    input_frame: &[f32],
+    loop_visual: &[f32],
+    monitor: bool,
+    [drums, click, file]: [S; 3],
+) -> S {
+    if ch < input_frame.len() {
+        let mut v = loop_visual[ch] as S;
+        if monitor {
+            v += input_frame[ch] as S;
+        }
+        v
+    } else {
+        match ch {
+            BUS_DRUMS => drums,
+            BUS_CLICK => click,
+            BUS_FILE => file,
+            _ => 0.0,
         }
     }
 }

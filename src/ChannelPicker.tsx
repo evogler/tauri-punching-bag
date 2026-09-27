@@ -1,48 +1,58 @@
-import { ChannelStyle, channelStyle } from "./config";
+import { ChannelId, ChannelInfo, ChannelStyles, channelStyle } from "./config";
+import { ui } from "./theme";
 
 // Which channels one pane draws. Deliberately thinner than `ChannelList`: the
 // colour and the pan belong to the channel itself and stay global, so all a
 // pane chooses is the subset.
 export const ChannelPicker = ({
-  labels,
-  styles,
   channels,
-  setChannels,
+  styles,
+  selected,
+  setSelected,
 }: {
-  // One per selectable channel, in device order: the inputs, then the
-  // synthetic drum and click buses.
-  labels: string[];
-  styles: ChannelStyle[];
-  channels: number[];
-  setChannels: (next: number[]) => void;
+  // Every channel the panel can name, by id: this device's inputs, the buses,
+  // and any input some pane asks for that isn't connected.
+  channels: ChannelInfo[];
+  styles: ChannelStyles;
+  selected: ChannelId[];
+  setSelected: (next: ChannelId[]) => void;
 }) => {
-  const toggle = (index: number) =>
-    setChannels(
-      channels.includes(index)
-        ? channels.filter((i) => i !== index)
-        : // Device order, which is the order they're drawn in and the order the
-          // up/down split assigns from.
-          [...channels, index].sort((a, b) => a - b)
+  const toggle = (id: ChannelId) =>
+    setSelected(
+      selected.includes(id)
+        ? selected.filter((i) => i !== id)
+        : // Id order -- inputs, then the buses -- which is the order they're
+          // drawn in and the order the up/down split assigns from.
+          [...selected, id].sort((a, b) => a - b)
     );
+
+  // An input this device doesn't have is shown only to the pane that asks for
+  // it: kept, named, and said to be missing, so the choice is visible and can
+  // be undone, rather than hidden until the interface comes back.
+  const shownHere = channels.filter((c) => c.present || selected.includes(c.id));
 
   return (
     <div style={{ display: "flex", flexDirection: "row", flexWrap: "wrap", gap: "8px" }}>
-      {labels.map((label, index) => {
-        const shown = channels.includes(index);
-        const style = channelStyle(styles, index);
+      {shownHere.map(({ id, label, present }) => {
+        const shown = selected.includes(id);
+        const style = channelStyle(styles, id);
         return (
           <label
-            key={index}
+            key={id}
             style={{
               display: "flex",
               flexDirection: "row",
               alignItems: "center",
               gap: "3px",
-              opacity: shown ? 1 : 0.45,
+              opacity: shown && present ? 1 : 0.45,
             }}
-            title={`${shown ? "Hide" : "Show"} ${label} in this pane`}
+            title={
+              present
+                ? `${shown ? "Hide" : "Show"} ${label} in this pane`
+                : `${label} isn't on this device. The pane keeps it and draws it again when a device with that input is chosen.`
+            }
           >
-            <input type="checkbox" checked={shown} onChange={() => toggle(index)} />
+            <input type="checkbox" checked={shown} onChange={() => toggle(id)} />
             {/* The channel's own colour, so the pane's list reads the way the
                 pane does. Not editable here -- colour is global. */}
             <span
@@ -55,6 +65,9 @@ export const ChannelPicker = ({
               }}
             />
             {label}
+            {!present && (
+              <span style={{ color: ui.text.muted }}> -- not connected</span>
+            )}
           </label>
         );
       })}

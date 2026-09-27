@@ -1,4 +1,14 @@
-import { ChannelStyle, channelGain, channelPan, channelStyle } from "./config";
+import {
+  ChannelGains,
+  ChannelId,
+  ChannelInfo,
+  ChannelStyle,
+  ChannelStyles,
+  channelGain,
+  channelPan,
+  channelStyle,
+  isInputId,
+} from "./config";
 import { useHelp } from "./help";
 import { ui } from "./theme";
 
@@ -9,18 +19,13 @@ const rowStyle: React.CSSProperties = {
   alignItems: "center",
 };
 
-// Styles are sparse, so setting one has to pad the gaps before it rather than
-// leave holes an index lookup would trip over.
-const withStyleAt = (
-  styles: ChannelStyle[],
-  index: number,
-  next: ChannelStyle
-) => {
-  const out = styles.slice();
-  while (out.length <= index) out.push(channelStyle(styles, out.length));
-  out[index] = next;
-  return out;
-};
+// Styles and display levels are maps keyed by channel id, so setting one is
+// one entry -- nothing to pad. Pans are still an array: they are inputs only,
+// and an input's id is its index.
+const withStyleAt = (styles: ChannelStyles, id: ChannelId, next: ChannelStyle) => ({
+  ...styles,
+  [id]: next,
+});
 
 const panLabel = (pan: number) =>
   pan === 0 ? "centre" : `${Math.round(Math.abs(pan) * 100)}% ${pan < 0 ? "left" : "right"}`;
@@ -34,14 +39,10 @@ const withPanAt = (pans: number[], index: number, next: number) => {
   return out;
 };
 
-// The same again for the display trim, padded with 1 rather than 0 -- the
-// neutral value here is "unchanged", not "silent".
-const withGainAt = (gains: number[], index: number, next: number) => {
-  const out = gains.slice();
-  while (out.length <= index) out.push(1);
-  out[index] = next;
-  return out;
-};
+const withGainAt = (gains: ChannelGains, id: ChannelId, next: number) => ({
+  ...gains,
+  [id]: next,
+});
 
 // Wide enough to lift a quiet mic into the same row as a hot line, and to pull
 // a loud one back. 1 is neutral, and double-clicking returns to it.
@@ -49,6 +50,7 @@ const MAX_CHANNEL_GAIN = 4;
 
 const ChannelRow = ({
   label,
+  present,
   style,
   pan,
   gain,
@@ -57,6 +59,9 @@ const ChannelRow = ({
   onGain,
 }: {
   label: string;
+  // False for an input a pane asks for that this device doesn't have. Still
+  // editable -- the settings wait for it -- but dimmed.
+  present: boolean;
   style: ChannelStyle;
   // Absent for anything that isn't a real input -- the drum bus isn't routed.
   pan?: number;
@@ -68,7 +73,10 @@ const ChannelRow = ({
 }) => {
   const help = useHelp();
   return (
-  <div style={rowStyle}>
+  <div
+    style={{ ...rowStyle, opacity: present ? 1 : 0.45 }}
+    title={present ? undefined : `${label} is not connected`}
+  >
     <label style={{ width: "3.5em" }}>{label}</label>
     <input
       type="color"
@@ -136,8 +144,7 @@ const ChannelRow = ({
 const heading: React.CSSProperties = { fontSize: "10px", whiteSpace: "nowrap" };
 
 export const ChannelList = ({
-  labels,
-  inputCount,
+  channels,
   styles,
   pans,
   gains,
@@ -145,19 +152,18 @@ export const ChannelList = ({
   setPans,
   setGains,
 }: {
-  // How many of `labels` are real inputs. Only those can be panned.
-  inputCount: number;
   pans: number[];
   setPans: (next: number[]) => void;
-  gains: number[];
-  setGains: (next: number[]) => void;
-  // One per selectable channel, in device order. Anything past the device's
-  // input channels is a synthetic bus -- the drums, then the click.
-  labels: string[];
-  styles: ChannelStyle[];
-  setStyles: (next: ChannelStyle[]) => void;
+  gains: ChannelGains;
+  setGains: (next: ChannelGains) => void;
+  // Every channel the panel can name, by id: the inputs, the synthetic buses,
+  // and any input a pane asks for that isn't connected. Only inputs pan.
+  channels: ChannelInfo[];
+  styles: ChannelStyles;
+  setStyles: (next: ChannelStyles) => void;
 }) => {
   const help = useHelp();
+  const missing = channels.filter((c) => !c.present).map((c) => c.label);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
       {/* The widths are the rows' own, in the rows' ems: the headings'
@@ -186,18 +192,25 @@ export const ChannelList = ({
           <span style={heading}>pan</span>
         </span>
       </div>
-      {labels.map((label, index) => (
+      {channels.map(({ id, label, present }) => (
         <ChannelRow
-          key={index}
+          key={id}
           label={label}
-          style={channelStyle(styles, index)}
-          pan={index < inputCount ? channelPan(pans, index) : undefined}
-          gain={channelGain(gains, index)}
-          onStyle={(next) => setStyles(withStyleAt(styles, index, next))}
-          onPan={(next) => setPans(withPanAt(pans, index, next))}
-          onGain={(next) => setGains(withGainAt(gains, index, next))}
+          present={present}
+          style={channelStyle(styles, id)}
+          pan={isInputId(id) ? channelPan(pans, id) : undefined}
+          gain={channelGain(gains, id)}
+          onStyle={(next) => setStyles(withStyleAt(styles, id, next))}
+          onPan={(next) => setPans(withPanAt(pans, id, next))}
+          onGain={(next) => setGains(withGainAt(gains, id, next))}
         />
       ))}
+      {missing.length > 0 && (
+        <div style={{ color: ui.text.muted, fontSize: "0.8em" }}>
+          {missing.join(", ")}: not connected -- kept for the panes that show{" "}
+          {missing.length > 1 ? "them" : "it"}.
+        </div>
+      )}
 
     </div>
   );

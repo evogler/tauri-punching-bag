@@ -20,7 +20,11 @@ import {
   ChannelStyle,
   channelStyle,
   channelGain,
+  channelInfos,
   unionChannels,
+  packedChannelIds,
+  setLegacyInputCount,
+  ChannelId,
   setKit,
   KitSound,
   rowColorFor,
@@ -506,9 +510,10 @@ const App = () => {
   type ViewCtx = {
     index: number;
     cfg: ViewConfig;
-    // Device channel indices this pane draws. Looked up in `streamSlots` for
-    // the sample stream and used directly for the analysis stream.
-    channels: number[];
+    // Channel ids this pane draws. Looked up in `streamSlots` for the sample
+    // stream; an input's id is its device index, so the analysis stream is
+    // indexed by it directly.
+    channels: ChannelId[];
     layout: Layout;
     visualGain: number;
     rowHeight: number;
@@ -686,7 +691,7 @@ const App = () => {
     return {
       index,
       cfg,
-      channels: cfg.channels,
+      channels: cfg.channelIds ?? [],
       layout: {
         beatsPerRow,
         rowStarts,
@@ -902,7 +907,7 @@ const App = () => {
   // Fake data for the browser-only path; no Rust, so a nominal rate is fine.
   const beatsPerSample = 91 / 60 / 44100;
   const mockGetArray = async () => {
-    const channels = Math.max(1, get("visibleChannels").length);
+    const channels = Math.max(1, get("packedChannels").length);
     const batch: VisualSamples = { cycle: 0, channels, beats: [], values: [] };
     const noise = () =>
       Math.abs(
@@ -1118,9 +1123,10 @@ const App = () => {
   // which devices actually opened. The same event covers a device chosen here
   // and one macOS changed underneath us -- "System default" following a new
   // default output, an interface unplugged. A pane naming an input that no
-  // longer exists is left alone: its config is not rewritten, and the index
-  // now names whatever `channelLabels` says it does (see *Restarting the audio
-  // in-process* in the design notes).
+  // longer exists is left alone: its config is not rewritten, the input is
+  // listed as not connected and draws nothing, and the buses keep their fixed
+  // ids -- so switching back restores the picture exactly (see *Stable channel
+  // identities* in the design notes).
   const [deviceError, setDeviceError] = useState<string | null>(null);
   const [audioSuspended, setAudioSuspended] = useState<string | null>(null);
   useEffect(() => {
@@ -1258,15 +1264,16 @@ const App = () => {
     );
   }, [activeCompensation, activeDevices, audioPrefs]);
 
-  // The synthetic buses ride along after the real inputs, so each can be shown,
-  // coloured and split against them like any other channel. Order has to match
-  // how Rust fills them.
-  const channelLabels = [
-    ...Array.from({ length: inputChannelCount }, (_, i) => `ch ${i + 1}`),
-    "drums",
-    "click",
-    "file",
-  ];
+  // Every channel the panel can name: this device's inputs, the synthetic
+  // buses (fixed ids, so they are themselves on every device), and any input a
+  // pane asks for that this device doesn't have -- listed as not connected
+  // rather than hidden, since the pane keeps it and it comes back with the
+  // device that has it.
+  const channelList = channelInfos(inputChannelCount, unionChannels(jsConfig.views));
+
+  // Old channel numbers in a preset imported from here on are read against the
+  // device running now -- see `legacyChannelId`.
+  useEffect(() => setLegacyInputCount(inputChannelCount), [inputChannelCount]);
 
   // Set when the audio thread has refused the config, i.e. when what you see in
   // the panel is not what is playing.
@@ -1335,12 +1342,14 @@ const App = () => {
   // restored session -- and a missed one would leave Rust packing the wrong
   // set. It can't loop: the union is a pure function of `views`, and the
   // equality guard makes the push a fixed point.
-  const wantedKey = unionChannels(jsConfig.views).join(",");
-  const packedKey = rustConfig.visibleChannels.join(",");
+  // The input count is in it too: an input the device doesn't have is left out
+  // rather than packed as silence, and comes back when the device does.
+  const wantedKey = packedChannelIds(jsConfig.views, inputChannelCount).join(",");
+  const packedKey = rustConfig.packedChannels.join(",");
   useEffect(() => {
     if (wantedKey === packedKey) return;
     updateRustConfig({
-      visibleChannels: wantedKey ? wantedKey.split(",").map(Number) : [],
+      packedChannels: wantedKey ? wantedKey.split(",").map(Number) : [],
     });
   }, [wantedKey, packedKey]);
 
@@ -1514,31 +1523,35 @@ const App = () => {
     ctx.globalAlpha = 1;
   };
 
-  // Where each *device* channel sits in the sample stream. Rust packs the union
-  // of what the panes ask for, in device order, so a pane finds its own
-  // channels by looking them up here rather than by assuming stream order is
-  // its own. A channel a pane wants but the stream hasn't caught up with yet
-  // reads `undefined` and is skipped for a frame.
-  const streamSlots: number[] = [];
-  get("visibleChannels").forEach((channel, slot) => {
+  // Where each channel id sits in the sample stream. Rust packs the ids it was
+  // pushed, in that order, so a pane finds its own channels by looking them up
+  // here rather than by assuming stream order is its own. A channel a pane
+  // wants but the stream hasn't caught up with yet -- or an input this device
+  // doesn't have, which is never pushed -- reads `undefined` and is skipped.
+  const streamSlots: Record<ChannelId, number> = {};
+  get("packedChannels").forEach((channel, slot) => {
     streamSlots[channel] = slot;
   });
 
-  // Styles are global and indexed by device channel, so a channel keeps its
-  // colour in every pane. Resolved once per render rather than per column.
-  const styleFor = (channel: number) =>
-    channelStyle(get("channelStyles"), channel);
-  const channelStyles = channelLabels.map((_, channel) => styleFor(channel));
-
+  // Styles are global and keyed by channel id, so a channel keeps its colour
+  // in every pane. Resolved once per render rather than per column; only a
+  // present channel gets one, which is what makes an absent input draw
+  // nothing even from a stream that still carries it.
+  const channelStyles: Record<ChannelId, ChannelStyle> = {};
   // The per-channel display trim, multiplied into the pane's own visual gain.
   // Waveform only: the flux and the spectrogram have their own gains, and the
   // flux is a normalised dB measure that a level trim would say nothing about.
-  const channelGains = channelLabels.map((_, channel) =>
-    channelGain(get("channelGains"), channel)
-  );
+  const channelGains: Record<ChannelId, number> = {};
+  for (const { id, present } of channelList) {
+    if (!present) continue;
+    channelStyles[id] = channelStyle(get("channelStyleById"), id);
+    channelGains[id] = channelGain(get("channelGainById"), id);
+  }
 
   // The pane's own channels, so the split is by position *within this pane*.
-  // Two panes showing different channels each split their own pair.
+  // Two panes showing different channels each split their own pair. An input
+  // that isn't connected keeps its position, so every channel stays in its
+  // half whatever device is open -- the half it would have drawn in is empty.
   const halfFor = (v: ViewCtx, index: number): "both" | "up" | "down" =>
     !v.cfg.splitChannels ? "both" : index % 2 === 0 ? "up" : "down";
 
@@ -1978,7 +1991,7 @@ const App = () => {
     // the cap. Nothing to show rather than a misread of another channel.
     const channel = v.cfg.spectrogramChannel;
     if (channel < 0 || channel >= channels) return;
-    const style = channelStyle(get("channelStyles"), channel);
+    const style = channelStyle(get("channelStyleById"), channel);
     const peaks = v.state.binPeaks;
     if (peaks.length !== bins) peaks.length = 0;
     for (let i = 0; i < beats.length; i++) {
@@ -2459,7 +2472,7 @@ const App = () => {
       deviceError={deviceError}
       refreshDevices={refreshDevices}
       inputChannelCount={inputChannelCount}
-      channelLabels={channelLabels}
+      channelList={channelList}
       sampleRate={sampleRate}
       gridWidth={gridWidth}
       paneScale={paneScale}
@@ -2568,7 +2581,7 @@ const App = () => {
           <span style={{ opacity: 0.6 }}>
             {"  ·  "}
             {paneCount} in {viewCols}x{viewRows} {"·"}{" "}
-            {get("visibleChannels").length} ch
+            {get("packedChannels").length} ch
           </span>
         </div>
       )}
@@ -2624,7 +2637,6 @@ const App = () => {
             deviceError={deviceError}
             refreshDevices={refreshDevices}
             inputCount={inputChannelCount}
-            channelLabels={channelLabels}
             get={get}
             set={set}
             sampleRate={sampleRate}

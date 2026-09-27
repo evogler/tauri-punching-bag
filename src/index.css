@@ -10,7 +10,7 @@
    Named by *role*, never by value -- `--surface-panel`, not `--grey-444` --
    or the rename is only a second spelling of the hex it replaced.
 
-   The data colours are deliberately absent. `channelStyles`, `rowColors`, the
+   The data colours are deliberately absent. `channelStyleById`, `rowColors`, the
    grid colours and `waveformBackground` are config: chosen per pane and
    carried in presets. Folding them in here would make somebody's palette a
    build-time constant. */
