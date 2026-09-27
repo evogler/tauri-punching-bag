@@ -320,7 +320,7 @@ settings are what Display is really for.
 | | apply / discard | Apply / Discard | — |
 | | bufferCompensation | Latency (frames), with "≈ 98 ms" beside it | `bufferCompensation` |
 | **Input** (merged: gain plus input channels) | input gain | Input gain | `audioInGain` |
-| | columns: col · opacity · gain · pan | Color · Opacity · Display level · Pan | `channelStyles`, `channelGains`, `channelPans` |
+| | columns: col · opacity · gain · pan | Color · Opacity · Display level · Pan | `channelStyleById`, `channelGainById`, `channelPans` |
 | **Playing on speakers** (was speaker bleed) | measure bleed, *moves to the top of the section* | Measure speaker bleed | — |
 | | hide own output | Hide the app's sound from the picture | `bleedCancelOn` |
 | | keep tracking | Keep adapting | `bleedTrackOn` |

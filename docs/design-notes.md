@@ -2239,13 +2239,10 @@ play; the silent part is the stop, the swap and the start.
   (`setSampleRateHz` -- `analysisNyquist()`, the fft ms label, the latency in
   ms) and the active devices, which triggers the per-pair latency above.
 - **Panes naming inputs that no longer exist keep their config.** Nothing is
-  rewritten, and the draw path already skips a channel with no style or no
-  stream slot. What the owner may not like: channels are *indices*, and the
-  synthetic buses follow the inputs, so a pane showing `ch 2` on a 2-input
-  interface shows the **drums bus** after switching to the 1-input built-in
-  mic (and goes back when switched back). Honest to the labels, which move in
-  step, but a different thing on screen. Fixing it means naming the buses
-  independently of the input count, which is a config migration.
+  rewritten; the input is listed as not connected and draws nothing. Until
+  2026-09-27 the buses followed the inputs, so a pane's `ch 2` became the
+  drums after a switch to the 1-input mic -- fixed by giving channels fixed
+  ids (*Stable channel identities*).
 - **The menu's Restart still relaunches**, as does the updater. It is no longer
   how a device change is applied.
 
@@ -3285,27 +3282,30 @@ to `drum_last_beats.resize`. Audio is untouched by this; it is display-only.
 
 ### Channels
 
-Channels are named by *device channel index*, and indices past the input count
-are **synthetic buses**, in the order the frontend labels them:
+Channels are named by a **fixed id**: input *k* is `k`, and the **synthetic
+buses** have ids of their own far above any input count (see *Stable channel
+identities*, below, for why and for what they replaced):
 
 ```
-[ ch 1 … ch N ]  [ drums ]  [ click ]  [ file ]
-     inputs        bus N      bus N+1    bus N+2
+[ ch 1 … ch N ]            [ drums ]  [ click ]  [ file ]
+  inputs: id 0 … N-1         1000       1001       1002
 ```
 
-The frontend's `channelLabels` order **must** match how `engine.rs` fills them.
-Only real inputs are pannable — the buses aren't routed.
+`BUS_DRUMS` / `BUS_CLICK` / `BUS_FILE` exist in both `config.ts` and
+`constants.rs` and must agree. Only real inputs are pannable — the buses
+aren't routed.
 
 The sample stream is flattened — `{channels, beats, values}`, one beat per frame
 and `channels` values after it, read as `values[i * channels + c]`. Flattened
 rather than a Vec-of-Vecs so the audio callback never allocates per frame.
 
-**Which channels a pane draws is per-pane** (`views[i].channels`), and
-`visibleChannels` is no longer a setting: it is the *union* of what the panes
-ask for, and exists only to tell the callback what to pack.
+**Which channels a pane draws is per-pane** (`views[i].channelIds`, once
+`channels`), and `packedChannels` (once `visibleChannels`) is not a setting: it
+is the *union* of what the panes ask for, less inputs the device lacks, and
+exists only to tell the callback what to pack.
 
-- **Everything user-facing is indexed by device channel.** The pane's list, the
-  colours (`channelStyles`, global, so a channel looks the same everywhere), the
+- **Everything user-facing is indexed by channel id.** The pane's list, the
+  colours (`channelStyleById`, global, so a channel looks the same everywhere), the
   pans, `spectrogramChannel`, and the flux and onset streams all agree. Only the
   sample stream is in packed order, and `streamSlots[channel]` is the one place
   that translates. Before this there were two conventions and `drawFluxAt` was
@@ -3330,6 +3330,107 @@ ask for, and exists only to tell the callback what to pack.
   seeds every pane from the old global `visibleChannels` — including the
   pre-views path, where `defaultViewConfig()`'s own `channels: [0]` would
   otherwise win and quietly reset what was on screen.
+
+#### Stable channel identities
+
+Done 2026-09-27, after the owner deferred it to get iOS running. Until then
+the buses sat at `inputs + 0/1/2`, so the number a pane stored meant a
+different channel on every device with a different input count: switch from a
+4-input interface to the 1-input built-in mic and a pane showing `ch 2` drew
+the drums. Rare while a device change needed a relaunch; with the in-process
+restart it is one click, and on iOS a headset plug.
+
+- **Numbers in a reserved range, not tagged ids.** The other design was
+  `{kind: "input", index}` / `"drums"`. It reads better in a JSON file and
+  makes the two kinds impossible to confuse, but everything downstream wanted
+  numbers: a pane's list is a sorted array, the union is a set of numbers, and
+  Rust packs from a `Vec<usize>` once per frame per channel, where a string
+  compare -- or a lookup table rebuilt outside the callback on every push and
+  every restart -- is machinery for nothing. With the buses at 1000+ numeric
+  order is still "inputs, then drums, click, file", so sorting, the split and
+  the panel's order all came along unchanged. Nothing takes 1000 inputs; iOS
+  caps at 8.
+- **The engine needs no packing map.** `packed_value` answers per id: below
+  the input count an input, else a `match` on the bus ids, else silence. The
+  restart path does not touch it -- the new engine has a new input count and
+  the ids mean what they meant. No allocation or lock was added to the
+  callback.
+- **An input the device lacks is kept, and shown.** Nothing rewrites a pane's
+  list on a device change; `channelInfos` lists the input dimmed as "ch 3 --
+  not connected" in that pane's picker and in the setup tab's channel list,
+  where its colour and level stay editable. Switching back restores the
+  picture exactly, because nothing was changed to get there.
+- **It is not pushed, and Rust zero-fills it anyway.** `packedChannelIds`
+  leaves absent inputs out of the push, so the stream carries no column of
+  nothing. But the push lags a restart by an event round trip, and in that
+  window Rust has the new device and the old list -- so an id it can't supply
+  packs as 0 rather than being skipped. Skipping would shrink the row and slide
+  every later slot onto its neighbour for those frames; a fixed width cannot
+  misread. The draw path also gives an absent input no style, so a stale
+  column is never drawn. The old "not packed yet reads `undefined`" safety is
+  unchanged.
+- **An absent input keeps its place in the split.** `splitChannels` is
+  positional within the pane's list; counting the absent one means every
+  channel stays in the half it was drawn in whatever device is open, and the
+  half it would have used is simply empty. The other answer moves the drums
+  from the bottom half to the top when an interface is unplugged, which reads
+  as the setting changing.
+- **The analysis side needed nothing.** Flux, onsets and `spectrogramChannel`
+  were always input indices, which are also the ids. The spectrogram's
+  dropdown now keeps a channel the device lacks as "ch 3 -- not connected" (or
+  "not analysed" past the cap) instead of silently showing the first input.
+  Pans are inputs only and stay an array by index; they never meant a bus.
+- **Buses got default colours of their own**, outside the input palette. They
+  used to take the palette entry after the last input, which moved with the
+  count like everything else. A migrated session keeps the colour it was
+  showing (below), so the upgrade repaints nothing.
+- **Renamed, not reinterpreted** -- the `loopFeedback` rule. `views[i].channels`
+  became `channelIds`, `channelStyles` / `channelGains` (arrays by the old
+  number) became `channelStyleById` / `channelGainById` (sparse maps by id),
+  and rust `visibleChannels` became `packedChannels`. An older build reading a
+  new session finds none of its keys and falls back to `ch 1` in every pane --
+  a loss of choices, never the drums read as an input. The renames are also the
+  version marker: a view with `channelIds` is new, one with only `channels` is
+  old, and nothing else needs a flag.
+- **Old numbers are read against the input count running when they are first
+  migrated**, which is what the old code assumed at every launch -- the count
+  a session was saved under was never recorded. `getLegacyInputCount` is set
+  from `get_input_channel_count` in `index.tsx` before the first render
+  (`readSession` runs inside it) and from `App` whenever the device changes, so
+  an imported preset reads against the device open at the import. Anything
+  past the old file bus was never drawn (it had no label and no style) and is
+  dropped. A bus with no stored style is written down in the colour it was
+  drawn in.
+- **The one case it gets wrong** is a session or preset saved under a
+  different input count from the one open at the upgrade: saved on the
+  4-input interface with a pane on `ch 3`, first launched on the 1-input mic,
+  that pane becomes the click. The old code showed exactly that on that
+  device, so it is what was on screen; after this the ids are fixed and it
+  cannot happen again. Re-choosing the channel fixes it.
+- **Migrated once, not at every launch.** The session is rewritten in the new
+  shape on the first render (the write-session effect runs on mount).
+  `presets.json` is written back straight after a load that migrated anything
+  -- otherwise each launch would re-read the old numbers against whichever
+  device happened to be open -- except when an entry was skipped, because the
+  rewrite would drop it from the only copy. Examples were converted in
+  `examples.json` itself: both carried only channel 0, which is the same
+  channel under every reading, so the edit is exact rather than hand-written
+  data.
+
+Temp-tested (run, then deleted): a two-pane pre-fix session with styles and
+gains migrated against 1, 2 and 4 inputs; the migrated session restored again
+under other counts is unchanged; a pre-views global list migrates; a
+new-format absent input survives restore; a preset round trip hashes equal
+under any count; a legacy store is rewritten once and reads the same
+afterwards under another device, and a store with a bad entry is not
+rewritten; ch 3 on a 1-input device is kept, unpushed and listed as not
+connected, and packs again on 4; the buses keep id, label and colour at 1, 2,
+4 and 8 inputs; the frontend's slot lookup reads the right values out of a
+row packed by a mirror of `packed_value`, which a Rust test checked against
+the real function; the examples load; the picker and the list render "not
+connected". **Not seen in the app**: the Mac run would have migrated the
+owner's real session and presets against whatever device was open, which is
+exactly the failure case, so it was left for the owner.
 
 ### Drums
 

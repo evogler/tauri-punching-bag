@@ -275,15 +275,13 @@ Touch UI (panel as a drawer, help without hover, tap targets, drum-grid drag),
 the sandbox (security-scoped bookmarks for `filePath` and drum samples, stores
 in the container), TestFlight, and the updater coming out on iOS.
 
-**Owed: stable channel identities (deferred by the owner, 2026-09-26, to do
-after iOS runs).** Panes, colours, pans, `spectrogramChannel` and the streams
-name channels by index, and the synthetic buses sit *after* the inputs -- so a
-change in input count renumbers the drums, click and file. Switching from a
-4-input interface to the 1-input mic makes a pane showing `ch 2` draw the drums
-bus. Rare while a device change needed a relaunch; with step 3 it is one click,
-and on iOS a headset plug. The fix is naming the buses (and probably inputs)
-by identity rather than position, with a migration for saved sessions and
-presets (`normalizeView`, the `loopFeedback` rule).
+**Done 2026-09-27: stable channel identities** (deferred by the owner on
+2026-09-26; see *Stable channel identities* in `design-notes.md`). The
+synthetic buses sat *after* the inputs, so a change in input count -- one click
+in the picker since step 3, a headset plug on iOS -- renumbered the drums, click
+and file under every pane. Buses now have fixed ids (1000+), input k is always
+`k`, an input the device lacks is kept and shown as not connected, and old
+sessions and presets are migrated against the device open at the upgrade.
 
 ## Progress
 

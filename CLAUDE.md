@@ -151,7 +151,7 @@ f64** (f32 causes ghost trails after ~20 min).
   `eslint-disable-next-line react-hooks/exhaustive-deps` comment is a build
   error. Don't add one.
 - **Never write config from an effect unless it is a guarded fixed point**
-  (`visibleChannels` union, `applyDrumGrids` returning the same array).
+  (`packedChannels` union, `applyDrumGrids` returning the same array).
 
 ## Parameters and expressions
 
@@ -197,7 +197,7 @@ value (red field, still playing).
 ## UI conventions
 
 - **Colours are tokens on `:root` in `src/index.css` only**, accessed via `ui`
-  in `theme.ts`. Named by role, not value. Data colours (`channelStyles`,
+  in `theme.ts`. Named by role, not value. Data colours (`channelStyleById`,
   `rowColors`, grid colours, `waveformBackground`, `paneGapColor`) are config,
   not tokens. Contrast bar 4.5:1.
 - Controls are styled in `index.css`; text fields are `input:not([type])`,
@@ -314,9 +314,9 @@ any block up to `MAX_BLOCK_FRAMES` (4096) and is block-size invariant.
 - `pairCompensations: {inUid: {outUid: frames}}` in the same file; applied once
   **per pair** (stored value, else the default -- never the last pair's),
   written back on change only after the applied figure has landed.
-- Channels are indices and the buses follow the inputs, so after a switch to
-  fewer inputs a pane's `ch 2` may now be the drums bus. Config is never
-  rewritten; out-of-range channels are skipped by the draw path.
+- Channels have fixed ids (see *Channels and streams*), so a device switch
+  renumbers nothing. An input the new device lacks stays in every pane's
+  config, draws nothing, and is listed as "not connected".
 - Frontend never sees frames: streams are stamped in beats.
 - **iOS** (*The iOS backend*): no picker -- the session's route is the device.
   Swift sets `playAndRecord` / `measurement` / `defaultToSpeaker` +
@@ -337,15 +337,31 @@ any block up to `MAX_BLOCK_FRAMES` (4096) and is block-size invariant.
 ## Channels and streams
 
 ```
-[ ch 1 … ch N ]  [ drums ]  [ click ]  [ file ]
-     inputs        bus N      bus N+1    bus N+2
+[ ch 1 … ch N ]            [ drums ]  [ click ]  [ file ]
+  inputs: id 0 … N-1         1000       1001       1002
 ```
 
-- `channelLabels` order must match `engine.rs`. Only inputs are pannable.
-- Sample stream is flattened `{channels, beats, values}` in *packed*
-  (`visibleChannels`) order; `streamSlots[channel]` translates. Everything
-  user-facing is indexed by device channel. `visibleChannels` is the union of
-  the panes' `channels`, pushed from a guarded effect.
+- **Channel ids are fixed** (*Stable channel identities*): input k is `k` on
+  every device, the buses are `BUS_DRUMS`/`BUS_CLICK`/`BUS_FILE` in both
+  `config.ts` and `constants.rs` (keep them equal). Only inputs pan
+  (`channelPans`, an array by input index); `spectrogramChannel` is an input
+  index too.
+- Keys holding ids: `views[i].channelIds`, `channelStyleById` /
+  `channelGainById` (sparse maps by id), rust `packedChannels`. They were
+  **renamed** from `channels` / `channelStyles` / `channelGains` /
+  `visibleChannels`, whose numbers put the buses after the inputs; the old
+  keys are migrated in `presets.ts` (`migrateChannelKeys`, `normalizeView`)
+  against `getLegacyInputCount()` -- the device running when first read, set
+  in `index.tsx` before the first render. A preset store with old keys is
+  rewritten once after loading (not if an entry was skipped).
+- An input the device lacks is **kept** in config, never pushed
+  (`packedChannelIds` filters it), has no style in the draw path, and shows
+  as "not connected" (`channelInfos`). It keeps its place in `splitChannels`.
+  Rust packs any id it can't supply as 0, so a push racing a restart can't
+  shift a slot.
+- Sample stream is flattened `{channels, beats, values}` in `packedChannels`
+  order; `streamSlots[id]` translates. `packedChannels` is derived from the
+  panes and the input count, pushed from a guarded effect.
 - Samples are stamped `visual_beat = beat - buffer_compensation *
   beats_per_sample`; `BusDelay` delays the synthetic buses to match.
 - The analysis stream (spectrogram bytes, flux, onsets) is separate, device
@@ -452,9 +468,6 @@ silently doing nothing, everywhere.
 
 ## Known issues
 
-- **Channels are indices, and the buses follow the inputs**, so a device with
-  a different input count renumbers drums/click/file under every pane. Fix
-  owed after the iOS port -- see `docs/ios-port.md`.
 - `sections[].drums` isn't re-indexed when a drum voice is deleted.
 - Device picker `describe()` shows input channel count in the output list.
 - Output channel count `2` is a magic literal; untangle before channel work.
