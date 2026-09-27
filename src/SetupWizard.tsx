@@ -135,7 +135,7 @@ const MicCheck = ({ labels }: { labels: string[] }) => {
           <ol style={{ margin: 0, paddingLeft: "1.3em" }}>
             <li>
               The app isn't allowed to use the microphone. Open System Settings →
-              Privacy &amp; Security → Microphone, switch on Tauri Punching Bag,
+              Privacy &amp; Security → Microphone, switch on Microtime,
               then restart the app.
             </li>
             <li>The wrong input is chosen -- go back a step and pick the one you're playing into.</li>
@@ -215,7 +215,7 @@ export const SetupWizard = ({
     name === "welcome" ? "Start" : name === "done" ? "Start playing" : "Next";
 
   const title: Record<(typeof STEPS)[number], string> = {
-    welcome: "Welcome to Punching Bag",
+    welcome: "Welcome to Microtime",
     devices: "Your audio devices",
     microphone: "Can it hear you?",
     room: "Headphones or speakers?",
@@ -263,7 +263,7 @@ export const SetupWizard = ({
         {name === "welcome" && (
           <>
             <p style={text}>
-              Punching Bag is a metronome you play against: it draws what you
+              Microtime is a metronome you play against: it draws what you
               play on a grid, so you can see exactly where each note lands.
             </p>
             <p style={text}>

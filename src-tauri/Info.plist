@@ -7,6 +7,6 @@
          the bundled app captured nothing while the bare binary run from a
          terminal worked: that one inherits Terminal's own grant. -->
     <key>NSMicrophoneUsageDescription</key>
-    <string>Tauri Punching Bag records your playing so it can draw the waveform you play against, and loop it back.</string>
+    <string>Microtime records your playing so it can draw the waveform you play against, and loop it back.</string>
 </dict>
 </plist>

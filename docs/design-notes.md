@@ -1232,6 +1232,49 @@ surviving a restart is exactly what a sandbox forbids. That is the same work the
 AU port needs, so it would be done once for both. Different certificates and a
 second build target on top.
 
+### The rename to Microtime
+
+**Renamed on 2026-09-27**, before handing the app to a friend. Everything a
+person sees says Microtime: `productName` (so the `.app`, the disk image, its
+volume and the tarball), `mainBinaryName`, the window title, the About and
+Quit items (they read the package name), the iOS `PRODUCT_NAME` and
+`CFBundleDisplayName`, both microphone usage strings and the setup wizard.
+Older sections of this file quote the old paths (`/Volumes/tauri-punching-bag`,
+`tauri-punching-bag.app`); read them with the new name.
+
+**Deliberately not renamed**, each because something already written depends
+on it -- the rename-rather-than-redefine rule cutting the other way:
+
+- **The bundle id, `com.vogler.dev`.** The config dir, the TCC microphone
+  grant, WebKit's data store (`~/Library/WebKit/com.vogler.dev`, which holds
+  the session and the `punching-bag.*` keys) and the updater's notion of
+  "this app" all hang off it. The binary name is not in any of those -- the
+  bundled app's store is keyed by the id, which is why changing
+  `mainBinaryName` was safe. (`yarn dev` runs the Cargo binary `app` and has
+  its own store, `~/Library/WebKit/app`, untouched either way.)
+- **The `punching-bag.*` localStorage keys.** Renaming a key is how every
+  setting behind it is lost.
+- **`PRESET_FORMAT`, `"tauri-punching-bag presets"`.** It names a file format,
+  not a product, and every store and export already carries it.
+- **The GitHub repo and so the updater endpoint**, the minisign key's path, and
+  the Cargo package `app` / lib `app_lib` (the iOS project links `libapp.a`).
+
+**An old install updates into place and keeps its old folder name.** Both
+updaters -- v1's `copy_files_and_run` (the one a v0.4.0 install runs) and the
+v2 plugin's `install_inner` -- unpack the tarball *skipping its first path
+component* and move the result onto the running bundle's own path. So
+`/Applications/tauri-punching-bag.app` stays called that in Finder, with
+Microtime's contents inside: the Dock, the menu bar, ⌘-Tab and the
+microphone list read `CFBundleName` and say Microtime. The relaunch survives
+the new executable name because both versions' `restart` re-read
+`Contents/Info.plist` for `CFBundleExecutable` ("on macOS on updates the
+binary name might have changed"), and `STARTING_BINARY` was captured at
+launch so the old path's disappearance does not matter. Same signature, same
+id, so the grant holds as it did for 0.2.0 -> 0.2.1. Renaming the folder by
+hand afterwards is harmless. A fresh install from the disk image is
+`Microtime.app`, and one machine can end up with both if someone drags the new
+image over an old install -- same id, so they share settings; delete the old.
+
 ### Installing on a second Mac
 
 **The build now sweeps stale disk images, so there should only ever be one.**
@@ -1268,7 +1311,7 @@ the `hdiutil` line that actually failed. Two causes, and the second is the one
 that costs a day.
 
 **A mounted volume of the same name.** The script creates
-`/Volumes/tauri-punching-bag` and cannot when that name is taken. Its `rw.*.dmg`
+`/Volumes/<productName>` -- `/Volumes/Microtime` since the rename -- and cannot when that name is taken. Its `rw.*.dmg`
 scratch image stays attached after a failed run, so one failure makes every
 later one fail for a *different* reason than the first -- which is why this
 reads as transient and is not. The way it gets genuinely stuck is the app

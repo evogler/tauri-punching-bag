@@ -99,6 +99,8 @@ export type PresetFile = {
   presets: StoredPreset[];
 };
 
+// The app's old name, kept on purpose: it identifies a file format, not the
+// product, and every store and export already written carries it.
 export const PRESET_FORMAT = "tauri-punching-bag presets";
 export const PRESET_VERSION = 1;
 

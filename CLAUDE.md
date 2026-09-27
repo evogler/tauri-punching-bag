@@ -1,4 +1,7 @@
-# tauri-punching-bag
+# Microtime
+
+(The repo, and the internal names listed under *macOS packaging*, are still
+`tauri-punching-bag` -- see *The rename to Microtime*.)
 
 A practice tool for drummers/musicians: a metronome with programmable rhythms, a
 looper, and a real-time waveform display you play *against*. Tauri v2 app —
@@ -35,12 +38,12 @@ yarn tauri ios build --target aarch64 --debug       # device .ipa
   compiles Rust too and takes ~30s. Two warnings are expected: `unused import:
   std::time::Instant` and `method hop_frames is never used`.
 - `yarn tauri` runs `scripts/tauri.mjs`: forwards args, frees/refuses a mounted
-  `/Volumes/tauri-punching-bag` before building, sweeps stale `.dmg`s (by time)
+  `/Volumes/Microtime` before building, sweeps stale `.dmg`s (by time)
   after a successful build, notarizes + staples the DMG, writes `latest.json`.
 - **If it fails with `error running bundle_dmg.sh`, don't re-run.** Run
   `node_modules/.bin/tauri build --verbose` for the real error. Two causes: a
   mounted volume of the same name (`lsof +D /Volumes/...` names the holder), or
-  `could not access /Volumes/.../tauri-punching-bag.app - Operation not
+  `could not access /Volumes/.../Microtime.app - Operation not
   permitted`, which is TCC -- grant **App Management** to the terminal in System
   Settings. Don't chase LaunchServices. See *The disk image step*.
 - **iOS builds**: `yarn tauri ios build` fails at the end with `failed to rename
@@ -48,7 +51,7 @@ yarn tauri ios build --target aarch64 --debug       # device .ipa
   last one -- `rm -rf src-tauri/gen/apple/build` first (the fresh app is in
   `build/app_iOS.xcarchive` anyway). Rust's `println!` shows in the unified
   log, not the console: `xcrun simctl spawn booted log show --last 2m
-  --predicate 'process == "tauri-punching-bag" AND eventMessage CONTAINS
+  --predicate 'process == "Microtime" AND eventMessage CONTAINS
   "[stdout]"'`. `gen/apple` is committed (Tauri's convention); `build/`,
   `Externals/` and `assets/` inside it are not. `scripts/tauri.mjs` only
   sweeps/notarizes after `build`, never `ios ...`.
@@ -429,6 +432,15 @@ Each has a full section in `docs/design-notes.md`.
   `desktop.json` (global shortcut, updater; `platforms` excludes iOS, where
   those plugins aren't compiled): only what the frontend calls.
   Our own commands need none. A new plugin call from JS needs a line there.
+- **Named Microtime** (`productName`, `mainBinaryName`, window title, iOS
+  `PRODUCT_NAME` + `CFBundleDisplayName`, usage strings, wizard). **Not
+  renamed, on purpose**: bundle id `com.vogler.dev` (config dir, TCC grant,
+  WebKit data store, updater continuity), the `punching-bag.*` localStorage
+  keys, `PRESET_FORMAT` (`"tauri-punching-bag presets"` -- a file format id),
+  the GitHub repo / updater endpoint, `~/.tauri/punching-bag.key`, the Cargo
+  package `app`. An updated old install keeps its folder name
+  (`tauri-punching-bag.app`) with Microtime inside -- the updater swaps the
+  bundle's contents in place.
 - App config dir is `~/Library/Application Support/com.vogler.dev`
   (`audio-prefs.json`, `presets.json`) -- same as under v1; don't move it.
 - `src-tauri/Info.plist` (Mac) and `Info.ios.plist` (merged into

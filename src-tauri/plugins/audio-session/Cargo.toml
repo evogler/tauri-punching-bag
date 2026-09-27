@@ -1,7 +1,7 @@
 [package]
 name = "tauri-plugin-audio-session"
 version = "0.1.0"
-description = "The iOS audio session for tauri-punching-bag: AVAudioSession set up in Swift, its notifications forwarded to Rust."
+description = "The iOS audio session for Microtime: AVAudioSession set up in Swift, its notifications forwarded to Rust."
 edition = "2021"
 # Tauri's build helpers find the Swift package through the `links` name.
 links = "tauri-plugin-audio-session"

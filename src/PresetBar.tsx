@@ -267,7 +267,7 @@ export const PresetBar = ({
         defaultPath:
           chosen.length === 1
             ? `${chosen[0].name.replace(/[/\\:]/g, "-")}.json`
-            : `punching-bag-presets-${stamp().slice(0, 10)}.json`,
+            : `microtime-presets-${stamp().slice(0, 10)}.json`,
         filters: [{ name: "presets", extensions: ["json"] }],
       });
       if (typeof path !== "string") return;

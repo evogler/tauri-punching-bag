@@ -5,8 +5,13 @@
     <!-- Merged by the Tauri CLI into gen/apple/app_iOS/Info.plist on every iOS
          build. Without the usage string iOS never asks for the microphone and
          the app would be killed the moment RemoteIO's input is enabled. -->
+    <!-- The home-screen name. It would default to PRODUCT_NAME, which is the
+         same today; stated so the name is not at the mercy of a regenerated
+         Xcode project. -->
+    <key>CFBundleDisplayName</key>
+    <string>Microtime</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Tauri Punching Bag records your playing so it can draw the waveform you play against, and loop it back.</string>
+    <string>Microtime records your playing so it can draw the waveform you play against, and loop it back.</string>
     <!-- Keeps the click, the drums and the looper going with the screen locked
          or another app in front, like any metronome. The picture stops -- the
          webview is not drawing -- and the sample stream is capped, so nothing

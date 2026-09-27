@@ -136,7 +136,7 @@ in.
 - **You export saved presets, not what is on screen.** Save first. One concept.
 
 Export filenames default to `<name>.json` for one and
-`punching-bag-presets-<date>.json` for several.
+`microtime-presets-<date>.json` for several.
 
 ## What a preset cannot carry
 

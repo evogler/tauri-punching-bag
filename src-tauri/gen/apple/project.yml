@@ -10,7 +10,7 @@ configs:
 settingGroups:
   app:
     base:
-      PRODUCT_NAME: tauri-punching-bag
+      PRODUCT_NAME: Microtime
       PRODUCT_BUNDLE_IDENTIFIER: com.vogler.dev
       DEVELOPMENT_TEAM: 9KMDH5UH9Z
 targetTemplates:
