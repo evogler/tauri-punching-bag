@@ -77,7 +77,7 @@ const GridRow = ({
   const help = useHelp();
 
   return (
-    <div style={{ ...rowStyle, opacity: dragging ? 0.4 : 1 }}>
+    <div style={{ ...rowStyle, opacity: dragging ? 0.4 : 1 }} className="lane">
       <span
         onPointerDown={onDragStart}
         onPointerMove={onDragMove}
@@ -111,6 +111,7 @@ const GridRow = ({
       <RhythmField
         rhythm={grid.subdivisions.val}
         invalid={invalid}
+        className="lane-field"
         style={{ flex: 1, minWidth: 0 }}
         inputProps={{
           ...props,
@@ -154,6 +155,7 @@ const GridRow = ({
         }
         title={`Opacity ${Math.round(alpha * 100)}%`}
         {...help("grids.opacity")}
+        className="lane-fill"
         style={{ width: "5em" }}
       />
       <button onClick={onRemove} title={`Remove grid ${index + 1}`}>

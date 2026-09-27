@@ -88,14 +88,10 @@ export const Panel = (
         onMouseLeave={p.clearHelp}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          width: "600px",
-          flexShrink: 0,
-          height: "100%",
-          boxSizing: "border-box",
-        }}
+        // Its width is `.panel-shell` in index.css, not an inline style: 600px
+        // beside the panes on a wide window, and the whole window, over them,
+        // on a narrow one. A media query decides, so nothing here measures.
+        className="panel-shell"
       >
         {/* The rail is a sibling of the scrolling settings, not inside them,
             which is the whole point of the column: the list of sections stays

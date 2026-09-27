@@ -2597,6 +2597,11 @@ const App = () => {
             togglePanel={() => setHideConfig(!hideConfig)}
           />
         )}
+        {/* Positioned so that on a narrow window the panel can lie over the
+            panes instead of beside them (`.panel-shell` in index.css). The
+            panes keep their whole box underneath it rather than being hidden,
+            so the ResizeObserver never measures them at zero and nothing has
+            to be re-measured when the panel goes away. */}
         <div
           style={{
             display: "flex",
@@ -2604,6 +2609,7 @@ const App = () => {
             flex: 1,
             minHeight: 0,
             overflow: "hidden",
+            position: "relative",
           }}
         >
           {config}

@@ -300,3 +300,136 @@ label {
   width: 100%;
   box-sizing: border-box;
 }
+
+/* The settings panel's width, and what gives on a small screen.
+
+   Wide -- a Mac, an iPad in either orientation -- the panel sits beside the
+   panes at 600px, the width every section was laid out at. Between 700 and
+   1000px it is 60% of the window instead, so an iPad in portrait (744-834pt)
+   still has a third of the screen of picture beside the settings rather than a
+   sliver; the rows it holds narrow their label column to match.
+
+   Under 700px there is not room for both at any width worth having: a panel
+   squeezed to the ~440px its rows need at their narrowest would leave a phone
+   in landscape a 220px strip of pane. So the panel takes the whole window and
+   lies *over* the panes. They keep their box underneath rather than being
+   hidden -- `display: none` would hand the ResizeObserver a zero size and
+   every backing store would have to be rebuilt when the panel went away --
+   and putting the panel away (the sidebar button, or a swipe) shows them as
+   they were. 700 is the line because it is the narrowest window where a
+   narrowed panel and a usable pane both fit, and it puts every phone, either
+   way up, on the overlay side and every iPad on the side-by-side one. */
+.panel-shell {
+  display: flex;
+  flex-direction: column;
+  width: 600px;
+  flex-shrink: 0;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.topbar-pause {
+  min-width: 6.5em;
+}
+
+/* Labels and controls that only one width has room for. */
+.narrow-only {
+  display: none;
+}
+
+@media (max-width: 999px) {
+  .panel-shell {
+    width: 60vw;
+  }
+  :root {
+    --label-col: 9em;
+  }
+  /* A lane -- a drum voice, a grid, a scene -- is one row of small controls
+     around one field. Six of them leave the field ~30px on a phone and ~70px
+     in an iPad mini's 60% panel, so below 1000px the row wraps and the field
+     takes a line of its own under the rest; `.lane-fill` takes up the slack
+     on the line it leaves. */
+  .lane {
+    flex-wrap: wrap;
+  }
+  .lane > .lane-fill {
+    flex: 1;
+    min-width: 0;
+  }
+  .lane > .lane-field {
+    order: 1;
+    flex: 1 1 100% !important;
+  }
+  /* ... or above it, where the field is what the buttons act on. */
+  .lane > .lane-lead {
+    order: -1;
+  }
+  /* Column headings over a lane only mean anything while it is one row. */
+  .lane-headings {
+    display: none !important;
+  }
+}
+
+@media (max-width: 699px) {
+  .panel-shell {
+    position: absolute;
+    inset: 0;
+    width: auto;
+    z-index: 2;
+    background-color: var(--surface-app);
+  }
+  /* The rows' shared axis, narrowed rather than dropped: a label that wraps
+     onto a second line inside a 7.5em column still leaves the control on the
+     axis, which is what the column is for. */
+  :root {
+    --label-col: 7.5em;
+  }
+  .wide-only {
+    display: none !important;
+  }
+  .topbar-pause {
+    min-width: 2.4em;
+  }
+  /* The bar is a row of fixed things plus one field, and the field is what
+     can give: 5em still shows a three-digit tempo or `bar*20`. */
+  .topbar input {
+    width: 5em !important;
+  }
+  .narrow-only {
+    display: inline;
+  }
+  /* A channel's three sliders share what is left rather than two of them
+     keeping 5em each and starving the third to nothing. */
+  .ch-slider {
+    flex: 1 1 0 !important;
+    width: auto !important;
+    min-width: 0;
+  }
+  /* No keyboard shortcut is reachable from a phone, so neither the rail nor
+     the scene list spends width on the digits, and the rail spends less on
+     padding. */
+  .key-hint {
+    display: none;
+  }
+  .rail-button {
+    padding-left: 7px !important;
+    padding-right: 5px !important;
+  }
+}
+
+/* The top bar on a phone in portrait: the beat readout is the one thing in it
+   that the canvas also shows, so it is what goes. */
+@media (max-width: 479px) {
+  .topbar-status {
+    display: none;
+  }
+}
+
+/* A finger needs a little more than a pointer. Only the rail, which is the
+   one list of small targets tapped constantly; a full touch pass is not this. */
+@media (pointer: coarse) {
+  .rail-button {
+    padding-top: 7px !important;
+    padding-bottom: 7px !important;
+  }
+}

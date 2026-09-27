@@ -473,6 +473,67 @@ Rules that will bite you:
   session is written to local storage on every config change, so settings
   survive the relaunch; `paused` doesn't, being transient.
 
+### Fitting a phone
+
+Built 2026-09-26 on the owner's report from an iPhone SE (375pt): *the UI is
+fixed at too wide a width for the screen.* The panel was a fixed 600px beside
+the panes, so on a phone it ran off the edge and the top bar was cut off at
+the looper. **This supersedes "the panel is a fixed 600px"** wherever the notes
+above lean on it (the 14px type size, the rail's cost in width); on a Mac at
+any ordinary window size nothing has changed.
+
+- **Three widths, decided in CSS** (`.panel-shell` and the media queries at the
+  end of `index.css`), so nothing in React measures the window.
+  - **1000px and up**: 600px beside the panes, exactly as before.
+  - **700-999px**: 60% of the window, still beside the panes, with
+    `--label-col` at 9em. That is iPad portrait (744-834pt): a panel capped at
+    600 would leave a mini a 144px sliver of picture, and 60% leaves a third of
+    the screen. A Mac window dragged this narrow gets the same, which is an
+    improvement rather than a regression.
+  - **Under 700px the panel covers the window** and lies *over* the panes. There
+    is no width at which both are worth having: the rows need ~440px at their
+    narrowest, which would leave a phone in landscape a 220px strip of pane.
+    700 puts every phone, either orientation, on the overlay side and every iPad
+    on the side-by-side one.
+- **Over, not instead.** The panes keep their whole box under the panel rather
+  than being `display: none`d. Hiding them would hand the `ResizeObserver` a
+  zero size, and every backing store would be rebuilt -- and the picture lost --
+  each time the panel went away. The row the two share is `position: relative`
+  for exactly this. The panes go on drawing underneath, which costs the draw
+  loop nothing it was not already paying.
+- **On a phone, `--label-col` is 7.5em**: narrowed rather than dropped, so the
+  controls still share one axis and a long label wraps inside its column.
+- **The rail stays, narrower**: no digits (no keyboard reaches them on a phone;
+  the tooltip still names the key) and less padding, which gives back ~30px.
+  Moving it to a row across the top was considered and not done -- that is the
+  row of tabs the column replaced, and it would need horizontal scrolling to
+  hold ten sections. `TAB_GROUPS` and the ⌘⌥digit numbering are untouched.
+  The scene list drops its ⌘digit column on the same grounds (`.key-hint`).
+- **A lane wraps** (`.lane`, `.lane-field`, `.lane-fill`, `.lane-lead`). A drum
+  voice, a grid and a scene are one row of small controls around one field,
+  and six controls in 290px left the rhythm ~30px -- not a field -- and
+  ~70px in an iPad mini's 60% panel. Below 1000px the row wraps and the field
+  takes a line of its own, under the controls or
+  (for the preset list and the preset name, which the buttons act on) above
+  them. The drum lane's column headings are dropped whenever it wraps
+  (`.lane-headings`), since they only mean anything while it is one row.
+- **The top bar keeps everything and shortens it**: the transport becomes its
+  glyphs (⏸/▶, ↺), the looper reads *Loop* without its ⌘L, the tempo field
+  gives up to 5em, and under 480px the beat readout goes -- the one thing in the
+  bar the canvas also shows. The tempo is still an expression field.
+- **Small fixes that were wrong everywhere and only showed here**: the channel
+  list's column headings were sized in the heading's own 10px ems while the
+  columns were in 14px ones, so every heading sat left of its column; the
+  pane map's four grow buttons wrap rather than run off; the preset dialog and
+  the drum grid matrix are capped at 96% of the window instead of a fixed
+  minimum wider than a phone.
+- **Touch targets** grow only on the rail (`pointer: coarse`), which is the one
+  list of small targets tapped constantly. A full touch pass is separate work.
+- Checked at 375x667, 667x375, 820x1180 and 1400x900 in a browser with a script
+  that lists every element whose right edge passes the settings column's, for
+  every section and the three dialogs: none at any width. Then by eye in the
+  iOS simulator.
+
 ### The global shortcut
 
 `src/GlobalShortcut.tsx`, a switch and one accelerator field in the setup tab,

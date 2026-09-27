@@ -139,6 +139,7 @@ export const RhythmField = ({
   invalid,
   readOnly,
   style,
+  className,
 }: {
   /** Everything to spread on the input: the focused value, onChange, help. */
   inputProps: React.InputHTMLAttributes<HTMLInputElement>;
@@ -150,8 +151,10 @@ export const RhythmField = ({
   readOnly?: boolean;
   /** Sizing from the caller -- a width, or flex in a lane. */
   style?: React.CSSProperties;
+  className?: string;
 }) => (
   <div
+    className={className}
     style={{
       backgroundColor: readOnly ? ui.surface.inset : ui.surface.field,
       border: `1px solid ${invalid ? ui.error : ui.line.field}`,

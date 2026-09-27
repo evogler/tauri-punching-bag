@@ -289,13 +289,16 @@ export const PresetBar = ({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-      <div style={rowStyle}>
+      {/* On a phone the list and the name each take a line above their
+          buttons (`.lane` in index.css) -- beside them they were 60px. */}
+      <div style={rowStyle} className="lane">
         <select
           value={selectedId}
           onChange={(e) => {
             setSelectedId(e.target.value);
             setName(presets.find((p) => p.id === e.target.value)?.name ?? "");
           }}
+          className="lane-field lane-lead"
           style={{ flex: 1, minWidth: 0 }}
           {...help("presets.list")}
         >
@@ -336,7 +339,7 @@ export const PresetBar = ({
           Delete
         </button>
       </div>
-      <div style={rowStyle}>
+      <div style={rowStyle} className="lane">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -344,6 +347,7 @@ export const PresetBar = ({
             if (e.key === "Enter") save();
           }}
           placeholder={nextDefaultName()}
+          className="lane-field lane-lead"
           style={{ flex: 1, minWidth: 0 }}
           {...help("presets.name")}
         />

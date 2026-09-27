@@ -50,8 +50,10 @@ export const SceneList = ({
         const key = sceneAccelerator(i);
         const active = sceneInEffect(parameters, scene);
         return (
-          <div key={i} style={rowStyle} {...help("parameters.scene")}>
+          // Wraps on a phone, the summary taking the line below (`.lane`).
+          <div key={i} style={rowStyle} className="lane" {...help("parameters.scene")}>
             <span
+              className="key-hint"
               style={{
                 width: "2em",
                 color: ui.text.muted,
@@ -63,6 +65,7 @@ export const SceneList = ({
             <input
               value={scene.name}
               onChange={(e) => replace(i, { ...scene, name: e.target.value })}
+              className="lane-fill"
               style={{
                 width: "7em",
                 // Which scene the parameters currently match, if any. A mark
@@ -94,6 +97,7 @@ export const SceneList = ({
             </button>
             <span
               title={summary(scene)}
+              className="lane-field"
               style={{
                 color: ui.text.muted,
                 fontSize: "0.8em",

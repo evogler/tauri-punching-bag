@@ -93,6 +93,7 @@ const ChannelRow = ({
       onChange={(e) => onStyle({ ...style, alpha: parseFloat(e.target.value) })}
       title={`${label} opacity ${Math.round(style.alpha * 100)}%`}
       {...help("channels.opacity")}
+      className="ch-slider"
       style={{ flex: 1, minWidth: 0 }}
     />
     <input
@@ -105,10 +106,11 @@ const ChannelRow = ({
       onDoubleClick={() => onGain(1)}
       title={`${label} display level: x${gain} (double-click to reset)`}
       {...help("channels.level")}
+      className="ch-slider"
       style={{ width: "5em" }}
     />
     {pan === undefined ? (
-      <span style={{ width: "5em" }} />
+      <span className="ch-slider" style={{ width: "5em" }} />
     ) : (
       <input
         type="range"
@@ -120,6 +122,7 @@ const ChannelRow = ({
         onDoubleClick={() => onPan(0)}
         title={`${label} pan: ${panLabel(pan)} (double-click to centre)`}
         {...help("channels.pan")}
+        className="ch-slider"
         style={{ width: "5em" }}
       />
     )}
@@ -130,6 +133,8 @@ const ChannelRow = ({
 // A channel's identity rather than its visibility: the colour it draws in
 // everywhere and, for a real input, where it sits in the stereo field. Which
 // pane shows it is chosen per pane -- see ChannelPicker.
+const heading: React.CSSProperties = { fontSize: "10px", whiteSpace: "nowrap" };
+
 export const ChannelList = ({
   labels,
   inputCount,
@@ -155,20 +160,31 @@ export const ChannelList = ({
   const help = useHelp();
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+      {/* The widths are the rows' own, in the rows' ems: the headings'
+          smaller type is on the words only, or every column heading sits left
+          of the column it names. */}
       <div
         style={{
           ...rowStyle,
-          fontSize: "10px",
           color: ui.text.dim,
           textTransform: "uppercase",
-          letterSpacing: "0.5px",
+          letterSpacing: "0.3px",
         }}
       >
         <span style={{ width: "3.5em" }} />
-        <span style={{ width: "2em" }} {...help("channels.color")}>color</span>
-        <span style={{ flex: 1, minWidth: 0 }} {...help("channels.opacity")}>opacity</span>
-        <span style={{ width: "5em" }} {...help("channels.level")}>level</span>
-        <span style={{ width: "5em" }} {...help("channels.pan")}>pan</span>
+        <span style={{ width: "2em" }} {...help("channels.color")}>
+          <span style={heading}>color</span>
+        </span>
+        <span className="ch-slider" style={{ flex: 1, minWidth: 0, overflow: "hidden" }} {...help("channels.opacity")}>
+          {/* Nudged clear of "color", which is wider than its 2em swatch. */}
+          <span style={{ ...heading, paddingLeft: "6px" }}>opacity</span>
+        </span>
+        <span className="ch-slider" style={{ width: "5em", overflow: "hidden" }} {...help("channels.level")}>
+          <span style={heading}>level</span>
+        </span>
+        <span className="ch-slider" style={{ width: "5em", overflow: "hidden" }} {...help("channels.pan")}>
+          <span style={heading}>pan</span>
+        </span>
       </div>
       {labels.map((label, index) => (
         <ChannelRow

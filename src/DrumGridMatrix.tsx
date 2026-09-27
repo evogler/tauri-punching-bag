@@ -112,8 +112,12 @@ const panelStyle: React.CSSProperties = {
   border: `1px solid ${ui.line.divider}`,
   borderRadius: "8px",
   padding: "8px",
-  minWidth: "30em",
-  maxWidth: "min(60em, 92vw)",
+  boxSizing: "border-box",
+  // Capped by the window as well, or on a phone the dialog is wider than the
+  // screen and its done button is off the edge. The cells shrink to fit and
+  // the matrix scrolls sideways inside it past its own 20em.
+  minWidth: "min(30em, 96vw)",
+  maxWidth: "min(60em, 96vw)",
   maxHeight: "85vh",
   display: "flex",
   flexDirection: "column",

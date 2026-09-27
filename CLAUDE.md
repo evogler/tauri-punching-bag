@@ -204,6 +204,13 @@ value (red field, still playing).
   monospace, tabular. One type size (14px). Label column is `--label-col`
   (overridden to `auto` in `TopBar`). Booleans that take effect are `Switch`,
   not checkboxes.
+- **Width** (*Fitting a phone*): `.panel-shell` in `index.css`, not inline.
+  ≥1000px the panel is 600px beside the panes; 700-999 it is 60vw with
+  `--label-col` 9em; under 700 it covers the window *over* the panes (kept
+  laid out so the ResizeObserver never sees zero), `--label-col` 7.5em.
+  Helpers: `.wide-only`/`.narrow-only` and `.key-hint` (phone), and `.lane`
+  rows that wrap their `.lane-field` onto its own line below 1000px.
+  A new row of several controls around one field should use `.lane`.
 - **`TAB_GROUPS` is the source of truth** for the ten rail sections; `PanelTab`
   derives from it. Sections are ⌘⌥1..⌘⌥0 (positional) and ⌘[ / ⌘] -- ⌥, not
   ⇧, because macOS takes ⌘⇧3/4/5 for screenshots. Digits are read from

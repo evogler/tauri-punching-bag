@@ -74,7 +74,7 @@ export const TopBar = ({
   const looping = get("loopingOn");
 
   return (
-    <div style={barStyle} onMouseLeave={clearHelp}>
+    <div style={barStyle} className="topbar" onMouseLeave={clearHelp}>
       {/* The panel's own switch. Tapping a pane does the same, but on a phone
           the panel covers nearly all of the window and leaves almost no pane
           to tap. First in the bar and drawn as the sidebar it moves -- the
@@ -99,17 +99,24 @@ export const TopBar = ({
       <button
         onClick={() => set("paused", !paused)}
         {...help("paused")}
+        // Its width is in index.css: a fixed minimum on a wide bar, so
+        // Pause/Resume do not shove the tempo along, and none on a phone.
+        className="topbar-pause"
         style={{
           fontWeight: "bold",
-          minWidth: "6.5em",
           backgroundColor: paused ? ui.danger : undefined,
           color: paused ? ui.text.bright : undefined,
         }}
       >
-        {paused ? "▶ Resume" : "⏸ Pause"}
+        {/* The words go on a phone and the glyphs stay: at 375pt the bar
+            holds the panel switch, the transport, the tempo and the looper
+            only if every one of them is as short as it can be. */}
+        {paused ? "▶" : "⏸"}
+        <span className="wide-only">{paused ? " Resume" : " Pause"}</span>
       </button>
-      <button onClick={resetBeat} {...help("restart")}>
-        Restart
+      <button onClick={resetBeat} aria-label="Restart" {...help("restart")}>
+        <span className="wide-only">Restart</span>
+        <span className="narrow-only">↺</span>
       </button>
 
       {/* The tempo keeps its expression field rather than gaining the +/-
@@ -138,7 +145,11 @@ export const TopBar = ({
           color: looping ? ui.hintText : undefined,
         }}
       >
-        Looper <span style={{ opacity: 0.7, fontSize: "0.85em" }}>⌘L</span>
+        <span className="wide-only">Looper </span>
+        <span className="narrow-only">Loop</span>
+        <span className="wide-only" style={{ opacity: 0.7, fontSize: "0.85em" }}>
+          ⌘L
+        </span>
       </button>
 
       {/* The readout is what gives when the window is too narrow for all of
@@ -148,6 +159,7 @@ export const TopBar = ({
           than as a full one. */}
       <span
         ref={statusRef}
+        className="topbar-status"
         style={{
           fontSize: "0.85em",
           color: ui.text.muted,

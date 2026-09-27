@@ -239,6 +239,7 @@ export const TabRail = ({
               // label and the key that works can never disagree.
               title={key ? `⌘⌥${key}` : undefined}
               {...help(`tabs.${tab}`)}
+              className="rail-button"
               style={railButton(tab === active)}
             >
               <span>{tab[0].toUpperCase() + tab.slice(1)}</span>
@@ -246,7 +247,9 @@ export const TabRail = ({
                   but present, because a shortcut nobody can see is one nobody
                   uses. */}
               {key && (
-                <span style={{ opacity: 0.45, paddingLeft: "6px" }}>{key}</span>
+                <span className="key-hint" style={{ opacity: 0.45, paddingLeft: "6px" }}>
+                  {key}
+                </span>
               )}
             </button>
           );

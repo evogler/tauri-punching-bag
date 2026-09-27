@@ -37,8 +37,10 @@ const panel: React.CSSProperties = {
   border: `1px solid ${ui.line.divider}`,
   borderRadius: "8px",
   padding: "8px",
-  minWidth: "26em",
-  maxWidth: "40em",
+  boxSizing: "border-box",
+  // Capped by the window too, so a phone gets the whole width and no more.
+  minWidth: "min(26em, 96vw)",
+  maxWidth: "min(40em, 96vw)",
   maxHeight: "80vh",
   display: "flex",
   flexDirection: "column",

@@ -30,6 +30,9 @@ const buttonStyle: React.CSSProperties = {
 const rowStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "row",
+  // Four grow buttons in a phone's 290px only just fit; wrapping is what they
+  // do rather than run off the edge if a label ever gets longer.
+  flexWrap: "wrap",
   gap: "4px",
   margin: "4px 0",
 };
@@ -66,7 +69,7 @@ export const PaneMap = ({
 
   const grow = (axis: "col" | "row", delta: 1 | -1, label: string, title: string) => (
     <button
-      style={{ flex: 1 }}
+      style={{ flex: 1, paddingLeft: "4px", paddingRight: "4px" }}
       title={title}
       disabled={!ops.canGrow(activeView, axis, delta)}
       onClick={() => ops.grow(activeView, axis, delta)}
